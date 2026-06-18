@@ -22,9 +22,11 @@
 
 ## ⭐ About
 
-**Bannerlator** lets you play PC games on Android with the best performance possible — bringing your **Steam, Amazon, GOG and Epic Games** libraries with you on the go.
+**Bannerlator** is an Android app that runs Windows PC games and applications natively on your phone or handheld — no streaming, no PC required. Under the hood it pairs **Wine** with **Box64/Box86** (and **FEXCore**) for x86 translation, **DXVK / VKD3D-Proton** for Direct3D-over-Vulkan, and a **Turnip** Vulkan driver, so your games render with the best performance the hardware can give.
 
-It is a **personal continuation** of the Winlator *Star Bionic* line, carried forward with a full Jetpack Compose UI, restored controller support, and a streamlined CI/release pipeline.
+Sign in once and your **Steam, Amazon, GOG and Epic Games** libraries come with you — installed, managed and launched right from the app.
+
+Bannerlator carries the Winlator *Star Bionic* line forward with a modern **Jetpack Compose** interface, restored controller support, an in-game overlay, a full theme system, and a clean **GitHub Actions** build-and-release pipeline. It is a personal, community-driven continuation — see the [Project Notice](#-project-notice) below.
 
 ---
 
