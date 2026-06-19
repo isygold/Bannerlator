@@ -2,6 +2,8 @@
 package com.winlator.star.ui.screens
 
 import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.view.ContextThemeWrapper
@@ -1674,6 +1676,16 @@ internal fun FpsCounterConfigDialog(
 // Inline install helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Compose's LocalContext is often a ContextThemeWrapper, not the Activity itself, so a
+ * bare `context as Activity` cast throws ClassCastException. Walk the wrapper chain instead.
+ */
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
+
 private fun installContentFromUri(activity: Activity, uri: Uri, onSuccess: () -> Unit) {
     val cm = ContentsManager(activity)
     Executors.newSingleThreadExecutor().execute {
@@ -1720,10 +1732,13 @@ private fun ContentInstallGear(
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         result.data?.data?.let { uri ->
-            installing = true
-            installContentFromUri(context as Activity, uri) {
-                installing = false
-                onContentInstalled()
+            val act = context.findActivity()
+            if (act != null) {
+                installing = true
+                installContentFromUri(act, uri) {
+                    installing = false
+                    onContentInstalled()
+                }
             }
         }
     }

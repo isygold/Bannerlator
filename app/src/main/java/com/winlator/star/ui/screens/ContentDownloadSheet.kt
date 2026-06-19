@@ -150,9 +150,15 @@ fun ContentDownloadSheet(
                         Text("No content available.", color = Color(0xFFCCCCCC))
                     }
                 } else {
+                    // Installed items (on disk or just-installed this session) float to the top.
+                    val sortedProfiles = remember(profiles, installedKeys) {
+                        profiles.sortedByDescending { p ->
+                            if (p.remoteUrl == null || ContentsManager.getEntryName(p) in installedKeys) 1 else 0
+                        }
+                    }
                     Box(Modifier.fillMaxWidth().weight(1f)) {
                         LazyColumn(Modifier.fillMaxSize()) {
-                            items(profiles, key = { ContentsManager.getEntryName(it) }) { profile ->
+                            items(sortedProfiles, key = { ContentsManager.getEntryName(it) }) { profile ->
                                 val key = ContentsManager.getEntryName(profile)
                                 val isLocal = profile.remoteUrl == null
                                 val isDownloading = key in downloadingKeys

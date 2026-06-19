@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderOpen
@@ -188,8 +189,12 @@ fun ContentsScreen(vm: ContentsViewModel = viewModel()) {
                 Text("No content available.", color = OnSurfaceVariant)
             }
         } else {
+            // Installed (local) content floats to the top of the list.
+            val sortedProfiles = remember(profiles) {
+                profiles.sortedByDescending { if (it.remoteUrl == null) 1 else 0 }
+            }
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(profiles, key = { ContentsViewModel.profileKey(it) }) { profile ->
+                items(sortedProfiles, key = { ContentsViewModel.profileKey(it) }) { profile ->
                     val key = ContentsViewModel.profileKey(profile)
                     val isDownloading = key in downloadingKeys
 
@@ -531,6 +536,12 @@ private fun ContentItem(
         }
 
         if (isLocal) {
+            Icon(
+                imageVector = Icons.Filled.CheckCircle,
+                contentDescription = "Installed",
+                tint = Color(0xFF4FC3F7),
+                modifier = Modifier.size(24.dp),
+            )
             Box {
                 IconButton(onClick = { menuExpanded = true }) {
                     Icon(Icons.Filled.MoreVert, contentDescription = "Options", tint = OnSurfaceVariant)
@@ -626,6 +637,23 @@ private fun launchInstall(
     }
 
     Executors.newSingleThreadExecutor().execute {
-        vm.manager.extraContentFile(uri, callback)
+        try {
+            vm.manager.extraContentFile(uri, callback)
+        } catch (e: Throwable) {
+            // A malformed / unsupported archive (e.g. a Winlator-format .wcp) can throw
+            // an uncaught exception deep in the decompressor. Surface it as the normal
+            // failure dialog instead of crashing the whole app.
+            e.printStackTrace()
+            activity.runOnUiThread {
+                onDone()
+                onDialog(
+                    InstallDialogState.Alert(
+                        message = "${context.getString(R.string.install_failed)}: " +
+                            context.getString(R.string.file_cannot_be_recognied),
+                        onDismiss = {},
+                    )
+                )
+            }
+        }
     }
 }
