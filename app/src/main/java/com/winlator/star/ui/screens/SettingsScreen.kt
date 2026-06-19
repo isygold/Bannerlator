@@ -87,7 +87,7 @@ import java.io.File
 import java.util.concurrent.Executors
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(onSaved: () -> Unit = {}) {
     val context = LocalContext.current
     val activity = context as? MainActivity
     val prefs = remember { PreferenceManager.getDefaultSharedPreferences(context) }
@@ -719,7 +719,11 @@ fun SettingsScreen() {
     // ── FAB Save ─────────────────────────────────────────────────────────
     Box(Modifier.fillMaxSize()) {
         FloatingActionButton(
-            onClick = { saveSettings() },
+            onClick = {
+                saveSettings()
+                AppUtils.showToast(context, "Settings saved!")
+                onSaved()
+            },
             containerColor = MaterialTheme.colorScheme.primary,
             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)
         ) {

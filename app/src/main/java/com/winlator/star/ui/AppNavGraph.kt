@@ -80,7 +80,15 @@ fun AppNavGraph(
         }
 
         composable(Screen.Settings.route) {
-            SettingsScreen()
+            SettingsScreen(
+                onSaved = {
+                    if (!navController.popBackStack()) {
+                        navController.navigate(Screen.Games.route) {
+                            launchSingleTop = true
+                        }
+                    }
+                }
+            )
         }
 
         composable(Screen.Appearance.route) {
