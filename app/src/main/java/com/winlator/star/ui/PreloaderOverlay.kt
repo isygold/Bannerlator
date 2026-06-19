@@ -1,5 +1,6 @@
 package com.winlator.star.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,6 +41,7 @@ fun PreloaderOverlay() {
         Surface(
             color = MaterialTheme.colorScheme.surface,
             shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(0.5.dp, Color(0xFF2E2E2E)),
             shadowElevation = 8.dp,
         ) {
             Column(
