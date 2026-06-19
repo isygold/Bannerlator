@@ -128,6 +128,23 @@ public class PresentExtension implements Extension {
         long ust = System.nanoTime() / 1000;
         long msc = ust / FAKE_INTERVAL;
 
+        // AHB-backed pixmaps (native Vulkan / DXVK / vkd3d, DRI3 modifier 1255) carry their
+        // pixels in GPU memory; the socket-imported GPUImage is never CPU-locked, so the generic
+        // copyArea path would composite its blank CPU buffer -> black. Route them straight to the
+        // Vulkan renderer's native AHB present (nativeUpdateWindowContentAHB) instead. SHM pixmaps
+        // (texture == null, real CPU data) keep using copyArea below.
+        com.winlator.star.renderer.HostRenderer hr = client.xServer.getRenderer();
+        com.winlator.star.renderer.Texture srcTex = pixmap.drawable.getTexture();
+        if (hr instanceof com.winlator.star.renderer.vulkan.VulkanRenderer
+                && srcTex instanceof GPUImage
+                && ((GPUImage)srcTex).getHardwareBufferPtr() != 0) {
+            ((com.winlator.star.renderer.vulkan.VulkanRenderer)hr)
+                .onUpdateWindowContentDirect(window, pixmap.drawable, xOff, yOff);
+            sendIdleNotify(window, pixmap, serial, idleFence);
+            sendCompleteNotify(window, serial, Kind.PIXMAP, Mode.COPY, ust, msc);
+            return;
+        }
+
         synchronized (content.renderLock) {
             content.copyArea((short)0, (short)0, xOff, yOff, pixmap.drawable.width, pixmap.drawable.height, pixmap.drawable);
             sendIdleNotify(window, pixmap, serial, idleFence);
