@@ -15,6 +15,39 @@ gh workflow run "Any branch compilation." --repo The412Banner/star-compose --ref
 
 ---
 
+## 2026-06-20 — bionic-fg FRAME GEN + FPS LIMITER: merged to main, version → 1.3
+
+**FPS-limiter pacing device-confirmed (Phase 4 complete).** The deferred pacer (built into
+the bionic-fg Vulkan layer, `.so` md5 `c8e4b188`) ran on device with `fps_limit=30`: base
+DXVK frames locked at ~30 while the on-screen overlay stepped 60 → 90 → 122 as the in-game
+FG selector went 2× → 3× → 4× (i.e. on-screen = limit × multiplier). Proven on the OpenGL
+host renderer (log `bionicfg_fpslimit_test.txt` + 5 screenshots). The pacer sits at the top
+of `BionicFG_QueuePresentKHR`, gated `!st.inPresent && fpsLimit>0`, so it throttles only the
+app's real frames; generated frames (presented with `inPresent` true) bypass it. Verified the
+pacer `.so` is bundled in the shipped APK asset (`assets/bionic-fg/libbionic_fg.so` md5
+`c8e4b188`), not hand-staged.
+
+**Merged to main (`ddf46fb`).** Merged `feature/bionic-fg-framegen` (HEAD `f39b96a`) into main.
+One conflict in `.github/workflows/build-bionic-fg.yml` (both branches had it) resolved by
+keeping the feature branch's version (the one with the patch-apply step). Stale
+`BIONIC_FG_UPSTREAM_REPORT.md` working-tree edit reverted (falsely said single-device crashes;
+run6 disproved it). Feature branch kept until the upstream PR is cut.
+
+**CI: artifacts build now produces all 3 flavors (`eb30d1b`).** Previous standard-only build was
+a workaround for an OOM (exit 143) caused by packaging the ~588MB APKs in parallel.
+`build-artifacts.yml` now runs `assembleStandardDebug assembleLudashiDebug assemblePubgDebug
+--no-parallel --max-workers=1` with a larger Gradle heap (serialized packaging) and requires
+all 3 uploads. Run 27877129792 confirmed green with all 3 artifacts.
+
+**Version relabel → 1.3 (`9ee5cb2`, `90ce00b`).** Fresh-install Android "All files access"
+permission screen showed `1.4-marcescene` (the APK `versionName`) under "Bannerlator Bionic".
+Fixed: `app/build.gradle` `versionName "1.4-marcescene"→"1.3"`, `versionCode 20→21`; splash
+`SplashScreen.kt` "V 1.2"→"V 1.3" (color unchanged — stays grey `0xFFAAAAAA`); about/main
+`MainActivity.kt` stray "V 1.0"→"V 1.3". Build run 27877738210 label `1.3` dispatched on main;
+standard APK to be delivered to `/sdcard/Download/Bannerlator-1.3-standard.apk`.
+
+---
+
 ## 2026-06-19 — Vulkan/DXVK/vkd3d BLACK-SCREEN FIX (✅ both renderers device-confirmed)
 
 **Symptom:** native Vulkan + DXVK(d3d8-11) + vkd3d(d3d12) rendered BLACK at full FPS on BOTH
