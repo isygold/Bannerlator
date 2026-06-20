@@ -33,21 +33,31 @@ the fork branch → update the PR; app-side conf-key changes land on a new Banne
   reset on copy-fence success, so generated-frame timeouts could never reach the disable threshold.
   **Done** (fork commit `4c259f8`): split into `copyFenceTimeouts` / `genFenceTimeouts`, each reset
   only on its own fence type.
-- **B — timeout rework** (250 ms is arbitrary / could mis-fire on a legitimately slow frame) **+
-  split the generated-frame deadline from the sync-incompatibility recovery path.** *Next.*
+- **B — timeout rework + split the generated-frame deadline from the sync-incompatibility recovery
+  path.** **Done** (fork commit `345e35e`): frame-budget-scaled sync timeout (4× base interval,
+  clamped 200 ms–1 s, else 500 ms), disable threshold 2→6, and a separate shorter generated-frame
+  cadence deadline (~2× the output interval) that just skips a late frame without counting it as a
+  sync failure. A+B compile-validated via CI.
 - **C — fps_limit ergonomics:** justify/relax the 10–200 clamp + add an `fps_limit_enabled` bool so
-  the value is remembered across toggles. (layer + app)
+  the value is remembered across toggles. (layer + app) — *todo*
 - **D — optional even-pacing** of generated presents to `1s/(base×mult)` behind an opt-in flag,
-  off by default. (layer + app)
-- **E — document** ENABLE+DISABLE precedence in the manifest (disable wins). Trivial.
-- **Pinned:** an opt-in `single_device` flag (default off) to fully de-risk the device-creation
-  change for other consumers (e.g. GameNative) — pitched to Jason, awaiting his decision before
-  implementing.
+  off by default. (layer + app) — *todo*
+- **E — document** ENABLE+DISABLE precedence in the manifest (disable wins). Trivial. — *todo*
 
-**Regression note (his main concern — the device-creation change):** the JNI/native path is
-unchanged (still `Device::create()`, owned + destroyed); only the Vulkan-layer path uses
-`Device::wrap()` of the app's device (not owned). Bannerlator uses the layer path; GameNative's path
-is to be confirmed. Regression test planned on GameNative [PR #1443](https://github.com/utkarshdalal/GameNative/pull/1443).
+**Device-creation regression (his main concern) — direction changed after his reply.** The JNI/native
+path is unchanged (`Device::create()`, owned + destroyed); only the Vulkan-layer path uses
+`Device::wrap()` of the app's device. Jason confirmed **GameNative also uses the layer path**, so our
+change reaches it too. Arch root cause: standalone mode runs a second VkDevice and hands frames across
+it via `VK_QUEUE_FAMILY_EXTERNAL` transfers, which need a shared queue/timeline; a wrapper ICD bridges
+each guest device to Turnip as a separate host context, so that cross-device sync never completes →
+hang. Single-device avoids it by running interpolation on the app's own device (intra-device sync).
+
+**Plan:** likely **no flag** — single-device is probably the correct layer default for both stacks.
+**Critical next step: verify single-device on GameNative [PR #1443](https://github.com/utkarshdalal/GameNative/pull/1443).**
+If it's clean there, make single-device the layer default; only add an init-time `single_device`
+launch arg (it can't hot-reload — device is created at init) if GN regresses. Fork commits A–B are
+held locally and not yet pushed to PR #6; push as one batch after the GN question is settled and our
+stack is re-tested.
 
 ---
 
