@@ -1527,11 +1527,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // post-process pipeline, so their callbacks below are never set. Flag it so the drawer grays
         // those toggles out instead of showing dead switches.
         XServerDialogState.INSTANCE.setEffectsSupported(renderer instanceof GLRenderer);
-        if (!(renderer instanceof GLRenderer)) return;
-        GLRenderer glRenderer = (GLRenderer) renderer;
         XServerDialogState ds = XServerDialogState.INSTANCE;
 
-        // Input Controls state
+        // Input Controls state (renderer-independent: controller profiles + vibration work on
+        // BOTH the GL and Vulkan host renderers, so this must run before the GL-only guard below.
+        // Previously the early return for non-GL renderers left the profile dropdown empty.)
         ArrayList<ControlsProfile> profiles = inputControlsManager.getProfiles(true);
         ArrayList<String> profileNames = new ArrayList<>();
         int selectedPosition = 0;
@@ -1584,6 +1584,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             ds.setVibrationSlots(kSlots);
             ds.onVibrationSlotChanged = (slot, enabled) -> winHandler.setVibrationEnabledForSlot(slot, enabled);
         }
+
+        // Screen Effects / SGSR / HDR are GL EffectComposer features; the Vulkan renderer has no
+        // post-process pipeline, so bail out here — AFTER the renderer-independent setup above.
+        if (!(renderer instanceof GLRenderer)) return;
+        GLRenderer glRenderer = (GLRenderer) renderer;
 
         // Screen Effects state
         ColorEffect ce   = (ColorEffect)        glRenderer.getEffectComposer().getEffect(ColorEffect.class);
