@@ -75,7 +75,7 @@ index b7f3e03..e5fa182 100644
      if (!ctx) { BFG_LOGE("nativeCreateContext: FramegenContext::create failed"); return 0L; }
      return bionic_fg::ctxToHandle(ctx.release());
 diff --git a/src/vk_layer/layer.cpp b/src/vk_layer/layer.cpp
-index 66d1934..1113ffe 100644
+index 66d1934..da4c5ce 100644
 --- a/src/vk_layer/layer.cpp
 +++ b/src/vk_layer/layer.cpp
 @@ -16,6 +16,7 @@
@@ -209,7 +209,7 @@ index 66d1934..1113ffe 100644
      VkExtent2D extent = {};
      VkFormat   format = VK_FORMAT_UNDEFINED;
      std::vector<VkImage> images;
-@@ -415,6 +474,15 @@ struct SwapState {
+@@ -415,6 +474,22 @@ struct SwapState {
  
      uint64_t frameCount = 0;
      bool     inPresent  = false;
@@ -219,13 +219,20 @@ index 66d1934..1113ffe 100644
 +    // disabled once either reaches kMaxFenceTimeouts.
 +    uint32_t copyFenceTimeouts = 0;
 +    uint32_t genFenceTimeouts  = 0;
++    // Sticky, runtime-only kill switch: once the present-path proves sync-
++    // incompatible with this ICD we passthrough for the rest of THIS swapchain's
++    // life. Kept separate from conf.enabled (which the file owns) so a conf.toml
++    // hot-reload — e.g. nudging the flow slider in-game — can't silently re-arm
++    // a path we already gave up on. The clean re-attempt point is a swapchain
++    // recreate, which builds a fresh SwapState with this defaulted back to false.
++    bool     framegenForceDisabled = false;
 +    int64_t  lastPresentNs = 0;       // for the fps_limit base-frame pacer (CLOCK_MONOTONIC)
 +    int64_t  lastRealPresentNs = 0;   // wall-clock of the previous REAL present (cadence EWMA input)
 +    uint64_t baseIntervalEwmaNs = 0;  // EWMA of delivered real-frame intervals; 0 = no sample yet
  
      void cleanup(const DeviceData& dd, VkDevice dev) {
          if (dd.deviceWaitIdle) dd.deviceWaitIdle(dev);
-@@ -455,7 +523,13 @@ static std::unique_ptr<bionic_fg::FramegenContext> createFramegenContext(
+@@ -455,7 +530,13 @@ static std::unique_ptr<bionic_fg::FramegenContext> createFramegenContext(
          const SwapState& st,
          const LayerConf& conf) {
      DisableLayerEnvGuard disableLayerForInternalVulkan;
@@ -239,7 +246,7 @@ index 66d1934..1113ffe 100644
          st.prevAhb,
          st.currAhb,
          st.outAhbs,
-@@ -897,6 +971,15 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_CreateSwapchainKHR(
+@@ -897,6 +978,15 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_CreateSwapchainKHR(
          cpci.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
          dd.createCmdPool(device, &cpci, nullptr, &st.copyPool);
  
@@ -255,7 +262,7 @@ index 66d1934..1113ffe 100644
          VkCommandBufferAllocateInfo cbai{};
          cbai.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
          cbai.commandPool        = st.copyPool;
-@@ -1031,6 +1114,89 @@ static VkResult acquireGeneratedImage(const DeviceData& dd, VkDevice device,
+@@ -1031,6 +1121,91 @@ static VkResult acquireGeneratedImage(const DeviceData& dd, VkDevice device,
  
  // ─── QueuePresentKHR ──────────────────────────────────────────────────────────
  
@@ -334,10 +341,12 @@ index 66d1934..1113ffe 100644
 +// swapchain once it reaches the threshold. Counters are independent so a
 +// healthy copy path can't reset a stuck generated-frame path.
 +static void noteFenceTimeout(SwapState& st, uint32_t& counter, const char* which) {
-+    if (++counter >= kMaxFenceTimeouts && st.conf.enabled) {
++    if (++counter >= kMaxFenceTimeouts && !st.framegenForceDisabled) {
++        st.framegenForceDisabled = true;
 +        st.conf.enabled = false;
 +        BFG_LAYER_E("disabling framegen for this swapchain after %u consecutive %s fence "
-+                    "timeouts (present-path sync incompatible with this ICD); real frames only",
++                    "timeouts (present-path sync incompatible with this ICD); real frames only "
++                    "for the rest of this swapchain (a conf hot-reload will NOT re-enable it)",
 +                    counter, which);
 +    }
 +}
@@ -345,10 +354,11 @@ index 66d1934..1113ffe 100644
  VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
          VkQueue queue,
          const VkPresentInfoKHR* pPresentInfo) {
-@@ -1122,6 +1288,41 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+@@ -1122,7 +1297,42 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
          }
      }
  
+-    if (st.inPresent || !st.conf.enabled || !st.fgCtx)
 +    // Base frame-rate limiter. Paces the REAL game frame here, before any interpolated
 +    // frames are injected below, so with framegen N× the on-screen rate is fps_limit × N
 +    // (GameHub/LSFG semantics: cap the base, let framegen multiply it). Applies in pure
@@ -384,10 +394,11 @@ index 66d1934..1113ffe 100644
 +        st.lastRealPresentNs = nowReal;
 +    }
 +
-     if (st.inPresent || !st.conf.enabled || !st.fgCtx)
++    if (st.inPresent || st.framegenForceDisabled || !st.conf.enabled || !st.fgCtx)
          return callNextPresent(queue, pPresentInfo);
      if (imgIdx >= st.images.size()) {
-@@ -1155,8 +1356,13 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+         BFG_LAYER_E("present image index %u out of range (%zu); passing through", imgIdx, st.images.size());
+@@ -1155,8 +1365,13 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
      // --- Step 1: Copy real swapchain image into current AHB input. The copy
      // waits on the application's original present semaphores, so the final real
      // present must not wait on those same binary semaphores again.
@@ -403,7 +414,7 @@ index 66d1934..1113ffe 100644
          BFG_LAYER_E("copy fence wait/reset failed; passing through");
          return callNextPresent(queue, pPresentInfo);
      }
-@@ -1234,11 +1440,18 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+@@ -1234,11 +1449,18 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
          finalPresent.pWaitSemaphores = nullptr;
      }
  
@@ -424,7 +435,7 @@ index 66d1934..1113ffe 100644
  
      // --- Step 2: Run framegen after we have both previous and current inputs.
      if (st.frameCount > 0) {
-@@ -1267,7 +1480,25 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+@@ -1267,7 +1489,25 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
                  continue;
              }
  
@@ -451,7 +462,7 @@ index 66d1934..1113ffe 100644
              dd.resetFences(device, 1, &st.genFences[k]);
              VkCommandBuffer genCmd = st.genCmds[k];
              dd.resetCmdBuf(genCmd, 0);
-@@ -1338,6 +1569,17 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
+@@ -1338,6 +1578,17 @@ VKAPI_ATTR VkResult VKAPI_CALL BionicFG_QueuePresentKHR(
              genPresent.swapchainCount     = 1;
              genPresent.pSwapchains        = &swapchain;
              genPresent.pImageIndices      = &genIdx;
