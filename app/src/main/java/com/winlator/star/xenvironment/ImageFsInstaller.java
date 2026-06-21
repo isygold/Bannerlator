@@ -60,6 +60,30 @@ public abstract class ImageFsInstaller {
         }
     }
 
+    // Stages the bundled lsfg-vk Vulkan layer (.so + implicit-layer manifest) into imagefs so the
+    // second frame-generation engine is available without manually copying anything. Idempotent.
+    // The manifest's library_path is ../../../lib/liblsfg-vk.so, so it sits in
+    // usr/share/vulkan/implicit_layer.d/ with the .so in usr/lib/. The manifest is opt-in via
+    // enable_environment ENABLE_LSFG=1 — the layer ONLY loads when a container explicitly selects
+    // lsfg-vk at launch, so staging it here can never brick other containers (lsfg-vk hard-exits
+    // if it can't read a Lossless.dll, hence the opt-in gate).
+    public static void installLsfgVkLayer(Context context, ImageFs imageFs) {
+        try {
+            File soDst = new File(imageFs.getLibDir(), "liblsfg-vk.so");
+            long assetSize = FileUtils.getSize(context, "lsfg-vk/liblsfg-vk.so");
+            if (!soDst.isFile() || soDst.length() != assetSize) {
+                FileUtils.copy(context, "lsfg-vk/liblsfg-vk.so", soDst);
+            }
+            File manifestDir = new File(imageFs.getRootDir(), "usr/share/vulkan/implicit_layer.d");
+            manifestDir.mkdirs();
+            File manifestDst = new File(manifestDir, "VkLayer_LS_frame_generation.json");
+            // Always refresh the manifest (it gained enable_environment in newer builds).
+            FileUtils.copy(context, "lsfg-vk/VkLayer_LS_frame_generation.json", manifestDst);
+        } catch (Exception e) {
+            Log.e("ImageFsInstaller", "Failed to stage lsfg-vk layer", e);
+        }
+    }
+
     public static void installWineFromAssets(final MainActivity activity) {
         String[] versions = activity.getResources().getStringArray(R.array.wine_entries);
         File rootDir = ImageFs.find(activity).getRootDir();
@@ -109,6 +133,7 @@ public abstract class ImageFsInstaller {
                 FileUtils.symlink("libSDL2-2.0.so", new File(imageFs.getLibDir(), "libSDL2-2.0.so.0").getAbsolutePath());
                 resetContainerImgVersions(activity);
                 installBionicFgLayer(activity, imageFs);
+                installLsfgVkLayer(activity, imageFs);
             }
             else AppUtils.showToast(activity, R.string.unable_to_install_system_files);
 
@@ -121,7 +146,10 @@ public abstract class ImageFsInstaller {
         if (!imageFs.isValid() || imageFs.getVersion() < LATEST_VERSION) installFromAssets(activity);
         // imagefs already current -> just make sure the bundled bionic-fg layer is present
         // (e.g. upgrading from a build that didn't bundle it, without an imagefs re-extract).
-        else installBionicFgLayer(activity, imageFs);
+        else {
+            installBionicFgLayer(activity, imageFs);
+            installLsfgVkLayer(activity, imageFs);
+        }
     }
 
     public static void installFromAssetsWithCallback(
@@ -159,6 +187,7 @@ public abstract class ImageFsInstaller {
                 FileUtils.symlink("libSDL2-2.0.so", new File(imageFs.getLibDir(), "libSDL2-2.0.so.0").getAbsolutePath());
                 resetContainerImgVersions(activity);
                 installBionicFgLayer(activity, imageFs);
+                installLsfgVkLayer(activity, imageFs);
             } else {
                 AppUtils.showToast(activity, R.string.unable_to_install_system_files);
             }
