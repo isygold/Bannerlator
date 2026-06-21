@@ -111,6 +111,10 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
         if (shortcut != null) {
             wowbox64Version = shortcut.getExtra("box64Version", shortcut.container.getBox64Version());
+            // Cmod-lineage bug: the per-shortcut FEXCore version was saved but never re-read at
+            // launch (only box64 was), so a shortcut's FEXCore choice silently fell back to the
+            // container default. Honour it here, mirroring box64Version above.
+            fexcoreVersion = shortcut.getExtra("fexcoreVersion", shortcut.container.getFEXCoreVersion());
         }
 
         Log.d("GuestProgramLauncherComponent", "box64Version in use: " + wowbox64Version);
