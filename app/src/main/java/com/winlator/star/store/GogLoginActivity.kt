@@ -38,11 +38,17 @@ class GogLoginActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "BH_GOG"
+        // NOTE: do NOT use layout=client2 here. That layout serves the GOG Galaxy
+        // *desktop client* login shell — its form is an iframe that posts host messages
+        // (firstIframeLoad / contentLoaded / registerGamepadSelectableElements) expecting
+        // a NATIVE Galaxy CEF host to acknowledge and position it. In a plain Android
+        // WebView there is no such host, so the form never renders -> white screen.
+        // Omitting layout makes GOG serve the standard self-rendering web login form.
         const val AUTH_URL =
             "https://auth.gog.com/auth" +
             "?client_id=46899977096215655" +
             "&redirect_uri=https%3A%2F%2Fembed.gog.com%2Fon_login_success%3Forigin%3Dclient" +
-            "&response_type=token&layout=client2"
+            "&response_type=token"
 
         @JvmStatic
         fun parseJsonStringField(json: String?, key: String?): String? {
