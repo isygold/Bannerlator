@@ -76,7 +76,6 @@ import com.winlator.star.ui.theme.GlowPurple
 import com.winlator.star.ui.theme.Primary
 import com.winlator.star.ui.theme.PrimaryDim
 import com.winlator.star.ui.theme.WinlatorTheme
-import kotlinx.coroutines.delay
 
 private val PureBlack = Color(0xFF000000)
 private val DarkSurface = Color(0xFF0D0D0D)
@@ -945,11 +944,12 @@ private fun TmContent() {
     val memInfo by XServerDialogState.tmMemInfo.collectAsState()
     val count by XServerDialogState.tmCount.collectAsState()
 
+    // Polling is driven by a render-independent Handler timer in XServerDisplayActivity
+    // (started via onTaskManager). A Compose LaunchedEffect delay() loop here stalls on the
+    // Vulkan host-render path and left the Task Manager empty. onTmRefresh kicks an immediate
+    // first refresh on entry; onTmDismissed stops the Activity timer on exit.
     LaunchedEffect(Unit) {
-        while (true) {
-            XServerDialogState.onTmRefresh?.run()
-            delay(1000L)
-        }
+        XServerDialogState.onTmRefresh?.run()
     }
 
     DisposableEffect(Unit) {

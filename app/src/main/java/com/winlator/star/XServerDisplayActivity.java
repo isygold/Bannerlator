@@ -211,6 +211,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private Handler  timeoutHandler = new Handler(Looper.getMainLooper());
     private Runnable hideControlsRunnable;
 
+    // Task Manager refresh runs on a plain main-thread Handler (render-independent), not a Compose
+    // LaunchedEffect timer. The Compose effect clock stalls on the Vulkan host-render path, so the
+    // old in-drawer delay() loop never fired there (Task Manager stayed empty). This mirrors the
+    // java.util.Timer the pre-Compose TaskManagerDialog used and works on both renderers.
+    private final Handler tmPollHandler = new Handler(Looper.getMainLooper());
+    private final Runnable tmPollRunnable = new Runnable() {
+        @Override
+        public void run() {
+            XServerDialogState ds = XServerDialogState.INSTANCE;
+            if (winHandler != null) winHandler.listProcesses();
+            updateTmCpuMemory(ds);
+            tmPollHandler.postDelayed(this, 1000);
+        }
+    };
+
     private boolean isDarkMode;
 
     private String screenEffectProfile;
@@ -417,7 +432,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         state.onTaskManager            = () -> {
             XServerDrawerState.INSTANCE.selectTab(com.winlator.star.ui.TabType.TASK_MANAGER);
             XServerDialogState.INSTANCE.setTmProcesses(new ArrayList<>());
-            registerTmProcessInfoListener();
+            startTmPolling();
         };
         state.onMagnifier              = () -> showMagnifierOverlay();
         state.onLogs                   = () -> XServerDialogState.INSTANCE.show(XServerDialogState.ActiveDialog.DEBUG);
@@ -2769,6 +2784,18 @@ return true;
         ds.setMagnifierVisible(true);
     }
 
+    private void startTmPolling() {
+        registerTmProcessInfoListener();
+        tmPollHandler.removeCallbacks(tmPollRunnable);
+        tmPollHandler.post(tmPollRunnable);
+    }
+
+    private void stopTmPolling() {
+        tmPollHandler.removeCallbacks(tmPollRunnable);
+        if (winHandler != null) winHandler.setOnGetProcessInfoListener(null);
+        XServerDialogState.INSTANCE.setTmProcesses(new ArrayList<>());
+    }
+
     private void setupTmCallbacks() {
         XServerDialogState ds = XServerDialogState.INSTANCE;
 
@@ -2777,10 +2804,7 @@ return true;
             updateTmCpuMemory(ds);
         };
 
-        ds.onTmDismissed = () -> {
-            if (winHandler != null) winHandler.setOnGetProcessInfoListener(null);
-            ds.setTmProcesses(new ArrayList<>());
-        };
+        ds.onTmDismissed = () -> stopTmPolling();
 
         ds.onTmNewTask = () -> ContentDialog.prompt(this, R.string.new_task, "taskmgr.exe",
             command -> { if (winHandler != null) winHandler.exec(command); });
