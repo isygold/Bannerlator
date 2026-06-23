@@ -27,9 +27,19 @@ This succeeds where the earlier host-side nanosleep pacer (`f8d7598`) failed (th
 dropped frames at the compositor; the guest ran full-speed).
 
 **✅ Confirmed on BOTH host renderers** — all 3 modes (Off / bionic-fg / lsfg-vk) cap fps on
-the OpenGL host renderer AND the Vulkan host renderer. Remaining before merge: wire the last
-refinement (lsfg multiplier ≥2 → force limit 0, so lsfg's own pacing isn't double-capped),
-then merge `feat/standalone-fps-limiter` → main for 1.6.
+the OpenGL host renderer AND the Vulkan host renderer.
+
+**lsfg-mult≥2 guard wired (commit `4909549`, CI `28046025979`).** `lsfgGovernsFps()` returns true
+when engine=lsfg + FG enabled + multiplier≥2; `applyFpsLimit()` clamps to 0 in that case, and
+`reapplyFpsLimit()` runs from the lsfg branch of `onBionicFgConfigChange` so the guard engages the
+moment the multiplier crosses 2. Rationale: lsfg paces itself when multiplying — layering our
+IdleNotify limiter on top double-paces the stream (clamps the panel to the limiter value, kills the
+FG gain, wastes GPU). Unaffected: bionic-fg, Off, and lsfg at 1× still cap.
+> ⚠️ **SUPPORT NOTE:** if users report "the FPS limiter doesn't work / no cap" on **lsfg-vk**, this
+> guard is the intended cause — the limiter is deliberately disabled while lsfg-vk multiplies
+> (mult≥2). Documented in-code at `lsfgGovernsFps()`. Not a bug.
+
+Remaining: guard CI green → merge `feat/standalone-fps-limiter` → main for 1.6.
 
 ---
 
