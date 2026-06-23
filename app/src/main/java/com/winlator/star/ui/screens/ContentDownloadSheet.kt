@@ -312,7 +312,11 @@ private fun DownloadContentItem(
             Icon(Icons.Filled.Memory, contentDescription = null, tint = cs.primary, modifier = Modifier.size(22.dp))
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(profile.verName, style = MaterialTheme.typography.bodyMedium, color = Color.White)
+                Text(
+                    profile.verName,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White,
+                )
                 val sub = when {
                     isInUse -> "In use"
                     isLocal -> "Installed"
@@ -322,7 +326,7 @@ private fun DownloadContentItem(
                 if (sub != null) {
                     Text(
                         sub,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelSmall,
                         color = if (isInUse) installedBlue else Color(0xFF9E9E9E),
                     )
                 }
