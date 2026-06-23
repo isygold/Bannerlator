@@ -287,7 +287,6 @@ fun ContainerDetailScreen(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-@Composable
 // Parse the semicolon-separated Vulkan settings string ("native=..;presentMode=..;..") into a map.
 private fun parseVulkanConfig(s: String): Map<String, String> =
     s.split(";").mapNotNull {
@@ -295,6 +294,7 @@ private fun parseVulkanConfig(s: String): Map<String, String> =
         if (i <= 0) null else it.substring(0, i) to it.substring(i + 1)
     }.toMap()
 
+@Composable
 internal fun VulkanSettingsDialog(
     initialConfig: String,
     onConfirm: (newConfig: String) -> Unit,
