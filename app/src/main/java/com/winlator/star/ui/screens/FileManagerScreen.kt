@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -40,6 +42,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,6 +52,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,7 +66,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -73,6 +81,7 @@ import com.winlator.star.R
 import com.winlator.star.XServerDisplayActivity
 import com.winlator.star.container.Container
 import com.winlator.star.core.FileUtils
+import com.winlator.star.core.PeIconExtractor
 import com.winlator.star.core.StringUtils
 import com.winlator.star.ui.theme.OnSurfaceVariant
 import kotlinx.coroutines.Dispatchers
@@ -92,6 +101,7 @@ private val CardFill = Color(0xFF0A0A0A)
 private val CardStroke = Color(0xFF242424)
 private val DividerColor = Color(0xFF333333)
 private val IconBlue = Color(0xFF1C85FE)
+private val IconWhite = Color(0xFFECECEC)
 
 // True when [child] is [ancestor] itself or lives anywhere inside it.
 private fun isWithin(child: File, ancestor: File): Boolean {
@@ -100,6 +110,7 @@ private fun isWithin(child: File, ancestor: File): Boolean {
     return c == a || c.startsWith(a + File.separator)
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileManagerScreen() {
     val context = LocalContext.current
@@ -126,8 +137,12 @@ fun FileManagerScreen() {
     var operationLabel by remember { mutableStateOf("") }
     var operationDeterminate by remember { mutableStateOf(false) }
     var operationProgress by remember { mutableFloatStateOf(0f) }
+    val listState = rememberLazyListState()
+    val pullState = rememberPullToRefreshState()
 
-    fun loadDirectory(dir: File) {
+    // resetScroll: jump to the top of the list (true for navigation; false for in-place reloads
+    // after delete/paste/rename/refresh so the user keeps their scroll position).
+    fun loadDirectory(dir: File, resetScroll: Boolean = true) {
         currentDir = dir
         scope.launch {
             val list = withContext(Dispatchers.IO) {
@@ -136,6 +151,15 @@ fun FileManagerScreen() {
                 ) ?: emptyList()
             }
             entries = list
+            if (resetScroll) listState.scrollToItem(0)
+        }
+    }
+
+    // Pull-to-refresh: re-list the current directory, keeping scroll position.
+    if (pullState.isRefreshing) {
+        LaunchedEffect(true) {
+            loadDirectory(currentDir, resetScroll = false)
+            pullState.endRefresh()
         }
     }
 
@@ -203,7 +227,7 @@ fun FileManagerScreen() {
             operationLabel = "Deleting..."
             val ok = withContext(Dispatchers.IO) { FileUtils.delete(file) }
             isOperationRunning = false
-            loadDirectory(currentDir)
+            loadDirectory(currentDir, resetScroll = false)
             if (!ok) Toast.makeText(context, "Delete failed", Toast.LENGTH_SHORT).show()
         }
     }
@@ -251,7 +275,7 @@ fun FileManagerScreen() {
             operationDeterminate = false
             clipboardFile = null
             isCutOperation = false
-            loadDirectory(currentDir)
+            loadDirectory(currentDir, resetScroll = false)
             if (!ok) Toast.makeText(context, "Paste failed", Toast.LENGTH_SHORT).show()
         }
     }
@@ -267,7 +291,7 @@ fun FileManagerScreen() {
             operationLabel = "Renaming..."
             val ok = withContext(Dispatchers.IO) { file.renameTo(target) }
             isOperationRunning = false
-            loadDirectory(currentDir)
+            loadDirectory(currentDir, resetScroll = false)
             if (!ok) Toast.makeText(context, "Rename failed", Toast.LENGTH_SHORT).show()
         }
     }
@@ -283,7 +307,7 @@ fun FileManagerScreen() {
             operationLabel = "Creating folder..."
             val ok = withContext(Dispatchers.IO) { target.mkdirs() }
             isOperationRunning = false
-            loadDirectory(currentDir)
+            loadDirectory(currentDir, resetScroll = false)
             if (!ok) Toast.makeText(context, "Could not create folder", Toast.LENGTH_SHORT).show()
         }
     }
@@ -566,34 +590,47 @@ fun FileManagerScreen() {
             }
         }
 
-        // ── File list ──
-        if (entries.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text("Empty directory", color = OnSurfaceVariant)
-            }
-        } else {
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(entries, key = { it.absolutePath }) { file ->
-                    FileItemRow(
-                        file = file,
-                        onTap = {
-                            if (file.isDirectory) loadDirectory(file)
-                            else if (canRun(file)) runFile(file)
-                        },
-                        onMenu = { showMenuFor = file },
-                        menuExpanded = showMenuFor == file,
-                        onDismissMenu = { showMenuFor = null },
-                        onRun = { runFile(file) },
-                        onCopy = { clipboardFile = file; isCutOperation = false; showMenuFor = null },
-                        onCut = { clipboardFile = file; isCutOperation = true; showMenuFor = null },
-                        onDelete = { selectedEntry = file; showMenuFor = null },
-                        onRename = { renameTarget = file; showMenuFor = null },
-                    )
+        // ── File list (pull down to refresh) ──
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .nestedScroll(pullState.nestedScrollConnection),
+        ) {
+            LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                if (entries.isEmpty()) {
+                    item {
+                        Box(
+                            modifier = Modifier.fillParentMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text("Empty directory", color = OnSurfaceVariant)
+                        }
+                    }
+                } else {
+                    items(entries, key = { it.absolutePath }) { file ->
+                        FileItemRow(
+                            file = file,
+                            onTap = {
+                                if (file.isDirectory) loadDirectory(file)
+                                else if (canRun(file)) runFile(file)
+                            },
+                            onMenu = { showMenuFor = file },
+                            menuExpanded = showMenuFor == file,
+                            onDismissMenu = { showMenuFor = null },
+                            onRun = { runFile(file) },
+                            onCopy = { clipboardFile = file; isCutOperation = false; showMenuFor = null },
+                            onCut = { clipboardFile = file; isCutOperation = true; showMenuFor = null },
+                            onDelete = { selectedEntry = file; showMenuFor = null },
+                            onRename = { renameTarget = file; showMenuFor = null },
+                        )
+                    }
                 }
             }
+            PullToRefreshContainer(
+                state = pullState,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
         }
 
         // ── FAB area ──
@@ -634,6 +671,15 @@ private fun FileItemRow(
     val canRun = isDir || file.name.lowercase().let { it.endsWith(".exe") || it.endsWith(".bat") || it.endsWith(".msi") || it.endsWith(".sh") }
     val isExe = !isDir && file.name.lowercase().let { it.endsWith(".exe") || it.endsWith(".bat") || it.endsWith(".msi") || it.endsWith(".sh") }
 
+    // For real PE executables, try to pull out the embedded application icon (async, off the main thread).
+    var exeIcon by remember(file.absolutePath) { mutableStateOf<ImageBitmap?>(null) }
+    if (!isDir && file.name.lowercase().endsWith(".exe")) {
+        LaunchedEffect(file.absolutePath) {
+            val bmp = withContext(Dispatchers.IO) { PeIconExtractor.extract(file) }
+            if (bmp != null) exeIcon = bmp.asImageBitmap()
+        }
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -647,19 +693,29 @@ private fun FileItemRow(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            if (isExe) {
-                Icon(
+            when {
+                // Show the executable's own embedded icon when we managed to extract one.
+                exeIcon != null -> Image(
+                    bitmap = exeIcon!!,
+                    contentDescription = null,
+                    modifier = Modifier.size(36.dp),
+                )
+                isExe -> Icon(
                     painter = painterResource(R.drawable.icon_menu_container),
+                    contentDescription = null,
+                    tint = IconWhite,
+                    modifier = Modifier.size(36.dp),
+                )
+                isDir -> Icon(
+                    imageVector = Icons.Filled.Folder,
                     contentDescription = null,
                     tint = IconBlue,
                     modifier = Modifier.size(36.dp),
                 )
-            }
-            else {
-                Icon(
-                    imageVector = if (isDir) Icons.Filled.Folder else Icons.Filled.InsertDriveFile,
+                else -> Icon(
+                    imageVector = Icons.Filled.InsertDriveFile,
                     contentDescription = null,
-                    tint = IconBlue,
+                    tint = IconWhite,
                     modifier = Modifier.size(36.dp),
                 )
             }
