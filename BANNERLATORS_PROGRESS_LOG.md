@@ -412,3 +412,7 @@ itself → in-game HUD reflects the cap + GPU drops. Live, all host renderers, a
   container/per-game value. Kept the bionic-fg decoupling + always-available UI from the prior commit.
 - TODO (refinement, not blocking): when lsfg multiplier ≥ 2, force limit 0 (lsfg paces its own output)
   like GameNative — not yet wired (first cut targets the FG-off + bionic cases the user tested).
+
+**Build:** commit `bd990b2`, CI run `28043133606` ✅ GREEN (PresentExtension IdleNotify pacer + wiring
+compile, full APK builds). ⏳ NEXT device-test: FG-off + Limit FPS 30 → DXVK HUD should drop to ~30 +
+GPU load drop (was pegged 98%); confirm live slider + bionic-fg case.
