@@ -229,11 +229,14 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
             try {
                 effectComposer.render();
             } catch (Exception e) {
-                drawFrame(); 
+                drawFrame();
             }
         } else {
             drawFrame();
         }
+        // Host-side FPS cap: sleep before the implicit eglSwapBuffers so the present rate is held
+        // at the target. No-op when the limiter is off.
+        paceFrame();
     }
 
     public void drawFrame() {
@@ -456,8 +459,29 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     @Override public void setFilterMode(int mode) {}
     @Override public void setFpsWindowId(int id) {}
     @Override public void setFrameRating(Object fr) {}
-    @Override public int getFpsLimit() { return 0; }
-    @Override public void setFpsLimit(int limit) {}
+    // Standalone host-side FPS limiter (output-cap, engine-agnostic). 0 = off. GL presents
+    // (eglSwapBuffers) right after onDrawFrame returns, so pacing at the end of the frame holds
+    // the present rate at the target — same effect as the Vulkan native pacer.
+    private volatile int fpsLimit = 0;
+    private long glLastPresentNs = 0L;
+    @Override public int getFpsLimit() { return fpsLimit; }
+    @Override public void setFpsLimit(int limit) { this.fpsLimit = limit; glLastPresentNs = 0L; }
+
+    private void paceFrame() {
+        int limit = fpsLimit;
+        if (limit <= 0) { glLastPresentNs = 0L; return; }
+        long interval = 1_000_000_000L / limit;
+        long now = System.nanoTime();
+        if (glLastPresentNs == 0L || now >= glLastPresentNs + interval) {
+            glLastPresentNs = now; // first frame or behind schedule -> present now
+            return;
+        }
+        long target = glLastPresentNs + interval;
+        glLastPresentNs = target;
+        long sleepNs = target - now;
+        try { Thread.sleep(sleepNs / 1_000_000L, (int)(sleepNs % 1_000_000L)); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+    }
 
     private static class RenderableWindow {
         public final Drawable content;

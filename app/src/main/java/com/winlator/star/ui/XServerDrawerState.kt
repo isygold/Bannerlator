@@ -98,6 +98,9 @@ object XServerDrawerState {
     // Fired after any bionic-fg control changes; the handler reads the StateFlows above and
     // rewrites conf.toml (hot-reload) + persists. Runnable avoids Java void-lambda mismatch.
     @JvmField var onBionicFgConfigChange: Runnable? = null
+    // FPS limiter is a standalone host-side present pacer, independent of frame gen. Fired when the
+    // in-game Limit FPS toggle/slider changes; the activity applies it to the host renderer live.
+    @JvmField var onFpsLimitChange: Runnable? = null
 
     var onCursorExpandedChanged: ((Boolean) -> Unit)? = null
 
@@ -157,7 +160,7 @@ object XServerDrawerState {
         onLogs = null; onExit = null; onMoveCursorToTouchpoint = null
         onRelativeMouseMovement = null; onDisableMouse = null
         onNativeRenderingToggle = null; onFpsConfigApply = null
-        onBionicFgConfigChange = null
+        onBionicFgConfigChange = null; onFpsLimitChange = null
         onCursorExpandedChanged = null
     }
 }

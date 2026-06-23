@@ -405,11 +405,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 container.saveData();
                 return;
             }
-            boolean limOn  = s.getFpsLimiterEnabled().getValue();
-            int   limitVal = s.getFpsLimit().getValue();   // remembered slider value, kept across on/off
-            writeBionicFgConfig(mult, flow, limOn, limitVal);
+            // FPS limiter is no longer part of frame gen — it's a standalone host pacer
+            // (onFpsLimitChange). bionic-fg conf carries frame gen only; pass the limiter off.
+            writeBionicFgConfig(mult, flow, false, 0);
             if (fgOn) container.setFrameGenMultiplier(mult);
             container.setFrameGenFlowScale(flow);
+            container.saveData();
+        };
+        // Standalone FPS limiter: applies live to whichever host renderer is active, regardless of
+        // the frame-gen engine (or none). Output-cap = caps on-screen fps. Persists to the container.
+        state.onFpsLimitChange = () -> {
+            XServerDrawerState s = XServerDrawerState.INSTANCE;
+            boolean limOn  = s.getFpsLimiterEnabled().getValue();
+            int   limitVal = s.getFpsLimit().getValue();   // remembered slider value, kept across on/off
+            HostRenderer r = xServerView.getRenderer();
+            if (r != null) r.setFpsLimit(limOn && limitVal > 0 ? limitVal : 0);
             container.setFpsLimiterEnabled(limOn);
             if (limitVal > 0) container.setFpsLimiterValue(limitVal);
             container.saveData();
@@ -553,16 +563,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
             shortcut = new Shortcut(container, new File(shortcutPath));
         }
 
-        // Sync the in-game frame-generation + fps-limiter controls. bionicFgActive = is the layer
-        // actually loaded this session (FG or limiter on at launch)? Live tuning only works when it is;
-        // the drawer uses this to gate/hint the UI. The engine/limiter honor per-game overrides
-        // (resolvedFrameGenEngine/resolvedFpsLimiterEnabled), else the container's value. multiplier/flow
-        // are NOT per-game — they're live-tuned in-game and persisted on the container.
+        // Sync the in-game frame-generation controls. bionicFgActive = is a frame-gen layer actually
+        // loaded this session? Live FG tuning only works when it is; the drawer uses this to gate the
+        // FG multiplier row. The engine honors per-game overrides (resolvedFrameGenEngine), else the
+        // container's value. multiplier/flow are NOT per-game — live-tuned in-game, persisted on the
+        // container. The FPS limiter is independent (host pacer) and is always available regardless.
         String fgEngine = resolvedFrameGenEngine();
         boolean fgEnabled = fgEngine.equals("bionic");
         boolean lsfgOn = fgEngine.equals("lsfg");
         boolean fpsLimOn = resolvedFpsLimiterEnabled();
-        boolean bionicFgActive = fgEnabled || fpsLimOn || lsfgOn;
+        boolean bionicFgActive = fgEnabled || lsfgOn;
         XServerDrawerState.INSTANCE.setBionicFgActive(bionicFgActive);
         XServerDrawerState.INSTANCE.setFrameGenEnabled(fgEnabled || lsfgOn);
         // Frame gen ALWAYS starts OFF in-game (multiplier 0) regardless of the container setting.
@@ -1343,7 +1353,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             // Frame-gen engine: lsfg-vk or bionic-fg (mutually exclusive), or off. Honors per-game
             // overrides (else the container's value), matching the drawer sync above.
-            boolean limiterOn = resolvedFpsLimiterEnabled();
+            // NOTE: the FPS limiter is no longer wired here — it's a standalone host-side pacer
+            // applied to the renderer (see renderer.setFpsLimit below), independent of frame gen.
             if (resolvedFrameGenEngine().equals("lsfg")) {
                 // lsfg-vk engine (mutually exclusive with bionic-fg). Opt-in via ENABLE_LSFG so the
                 // staged layer stays inert elsewhere. Driven by conf.toml (NOT the LSFG_LEGACY env):
@@ -1366,20 +1377,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     Log.w("XServerDisplayActivity", "lsfg-vk selected but no Lossless.dll imported (Settings) — leaving frame gen off");
                 }
             } else {
-                // bionic-fg layer: load it if frame generation OR the fps limiter is enabled (both
-                // implemented by the layer + hot-reloaded via conf.toml). multiplier=0 -> frame gen
-                // Off (layer loaded, paces only); fps_limit=0 -> no cap.
+                // bionic-fg layer: load it only when frame generation is the selected engine. The
+                // FPS limiter is handled separately (host pacer), so it no longer forces this layer
+                // to load. multiplier=0 -> frame gen starts Off in-game (layer loaded, enable live).
                 boolean fgOn = resolvedFrameGenEngine().equals("bionic");
-                if (fgOn || limiterOn) {
+                if (fgOn) {
                     envVars.put("BIONIC_FG_ENABLE", "1");
-                    // Frame gen starts OFF in-game: write multiplier 0 even when the container has it
-                    // enabled. The layer still loads (so the FG drawer can turn it on live), and the
-                    // fps limiter is unaffected — only the startup frame-gen multiplier is forced off.
                     writeBionicFgConfig(
                             0,
                             container.getFrameGenFlowScale(),
-                            limiterOn,
-                            container.getFpsLimiterValue());
+                            false,
+                            0);
                 }
             }
 
@@ -1488,6 +1496,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         xServerView.initRenderer(useVulkan);
         final HostRenderer renderer = xServerView.getRenderer();
         renderer.setCursorVisible(false);
+
+        // Standalone FPS limiter (host-side present pacer): apply the resolved per-game/container
+        // value to the renderer up front, independent of the frame-gen engine. The in-game toggle
+        // (onFpsLimitChange) updates it live afterwards.
+        renderer.setFpsLimit(resolvedFpsLimiterEnabled() ? container.getFpsLimiterValue() : 0);
 
         // Apply the container's Vulkan renderer settings (native rendering, present mode, filter,
         // swap R/B). These were previously parsed by the UI but never applied to the renderer.

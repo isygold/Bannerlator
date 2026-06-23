@@ -357,3 +357,33 @@ and paces (no "fps" string literals in the `.so` — raw offset read). Live = po
 all-API = enforced at the present/swap layer ALL renderers funnel through. This is the same category
 as our bionic-fg pacer — confirming option 2 (keep a present-level pacer loaded regardless of FG
 engine) is the right shape, and DXVK_FRAME_RATE is a strictly worse imitation.
+
+## 2026-06-23 — Standalone FPS limiter (host-side pacer) — branch `feat/standalone-fps-limiter`
+Make the FPS limiter independent of frame gen so the in-game toggle caps fps with bionic-fg,
+lsfg-vk, or Off — all guest APIs, both host renderers. GameHub-model: a host-side present pacer,
+NOT a Vulkan layer (so no two layers stacked). User OK'd OUTPUT-cap semantics (on-screen fps),
+replacing the old bionic-internal BASE-cap (which gave on-screen = limit × multiplier).
+
+Completed the pre-existing-but-unwired `HostRenderer.setFpsLimit(int)` scaffold:
+- **VulkanRenderer (native):** `VulkanRendererContext` gains `targetFrameIntervalNs` (atomic) +
+  `paceFrame()` (absolute-time `clock_nanosleep` on CLOCK_MONOTONIC, no render locks held, rebases
+  when behind). Called in `renderLoop()` before `renderFrame()` gated on `needsRender` (composite
+  present), and in `scanoutSetBuffer()` before `ST_APPLY` (Native-Rendering/scanout present). New
+  `nativeSetFpsLimit` JNI; `VulkanRenderer.setFpsLimit()` calls it live + re-applies on surface
+  (re)create.
+- **GLRenderer:** implemented the empty `setFpsLimit()` + `paceFrame()` (nanoTime/Thread.sleep) at
+  the end of `onDrawFrame()` (before the implicit eglSwapBuffers).
+- **Wiring:** new `XServerDrawerState.onFpsLimitChange`; the in-game Limit-FPS toggle/slider routes
+  to it (was `onBionicFgConfigChange`); the activity handler calls `renderer.setFpsLimit(on?val:0)`
+  + persists to the container. Applied once at launch (`setupUI`, after renderer created).
+- **Decoupled from bionic-fg:** `onBionicFgConfigChange` no longer writes the limiter (passes
+  false/0); the bionic-fg launch layer loads only when FG engine = bionic (dropped the
+  `|| limiterOn` and the off-loads-bionic-as-pacer hack); drawer `bionicFgActive` no longer
+  includes the limiter.
+- **UI:** FPS Limiter section always available (removed the `bionicFgActive` gate + relaunch hint);
+  text now "Caps on-screen FPS. Works with any frame-gen engine or none."
+
+OPEN device-test unknown: does host pacing THROTTLE the guest (saves GPU/battery via backpressure)
+or just DROP frames (cap visual only)? Needs a device check. Files: VulkanRendererContext.{h,cpp},
+VulkanRendererScanout.cpp, vulkan_jni.cpp, VulkanRenderer.java, GLRenderer.java,
+XServerDrawerState.kt, XServerDrawer.kt, XServerDisplayActivity.java.

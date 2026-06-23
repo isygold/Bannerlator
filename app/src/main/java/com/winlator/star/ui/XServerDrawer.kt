@@ -695,10 +695,9 @@ private fun HudContent(state: XServerDrawerState) {
 
     SectionHeader("HUD")
 
-    // ── FPS Limiter (bionic-fg base-frame cap; with frame gen on, on-screen = limit × multiplier) ──
+    // ── FPS Limiter (standalone host-side cap; output-cap = on-screen fps, independent of frame gen) ──
     val fpsLimiterEnabled by state.fpsLimiterEnabled.collectAsState()
     val initFpsLimit by state.fpsLimit.collectAsState()
-    val bionicFgActive by state.bionicFgActive.collectAsState()
 
     Text("FPS Limiter", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
     Spacer(Modifier.height(4.dp))
@@ -708,20 +707,19 @@ private fun HudContent(state: XServerDrawerState) {
     fun applyLimiter() {
         state.setFpsLimiterEnabled(limiterOn)
         state.setFpsLimit(limitVal)
-        state.onBionicFgConfigChange?.run()
+        // Standalone limiter: applies live to the host renderer regardless of frame-gen engine.
+        state.onFpsLimitChange?.run()
     }
 
-    ToggleRow("Limit FPS", limiterOn, enabled = bionicFgActive) { limiterOn = it; applyLimiter() }
-    if (limiterOn && bionicFgActive) {
+    ToggleRow("Limit FPS", limiterOn) { limiterOn = it; applyLimiter() }
+    if (limiterOn) {
         LabeledSlider(
             "Max FPS", limitVal.toFloat(), 10f..200f,
             { limitVal = it.roundToInt() }, { applyLimiter() },
             format = { "${it.roundToInt()}" }
         )
-    }
-    if (!bionicFgActive) {
         Text(
-            "Enable Frame Generation or the FPS limiter in this container's settings (then relaunch) to use this.",
+            "Caps on-screen FPS. Works with any frame-gen engine or none.",
             color = DimWhite.copy(alpha = 0.5f),
             fontSize = 11.sp,
             modifier = Modifier.padding(start = 4.dp, top = 2.dp)
