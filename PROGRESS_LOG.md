@@ -57,8 +57,13 @@ first, then implemented):
   overload; the sheet feeds it monotonically (ignoring the brief XZ-probe before the ZSTD pass).
 
 VEGAS and the adrenotools GPU-driver downloader are left untouched. Kept as a centered `Dialog` for now
-(bottom-sheet vs centered to be decided on device). First impl device-tested ("looks good"); restyle +
-byte-accurate install in the build that follows.
+(bottom-sheet vs centered to be decided on device). First impl device-tested ("looks good").
+
+**Build status (2026-06-23):** UI restyle + cloud-direct + file-in-sheet + in-use = `f4e551e` (CI
+`28056314348` ✅). Byte-accurate install bar = `f9485ef` (CI **`28057297317`** — final combined build).
+**⏸️ Resume:** verify `28057297317` green → download standard APK → device-test (cloud opens sheet
+directly, adrenotools cards, Wine/Proton chips, install-from-file, in-use marker, real install bar) →
+decide bottom-sheet vs centered + whether to add author/size → merge to main → cut 1.6.
 
 ---
 
