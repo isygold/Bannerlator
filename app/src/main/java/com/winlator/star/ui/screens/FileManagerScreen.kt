@@ -103,9 +103,9 @@ fun FileManagerScreen() {
     val containers = remember { containerManager?.getContainers()?.toList() ?: emptyList<Container>() }
 
     val rootDir = File("/storage/emulated/0")
-    val winlatorDir = File("/storage/emulated/0/Winlator")
 
     var currentDir by remember { mutableStateOf(rootDir) }
+    var currentRoot by remember { mutableStateOf(rootDir) }
     var entries by remember { mutableStateOf(listOf<File>()) }
     var selectedEntry by remember { mutableStateOf<File?>(null) }
     var showMenuFor by remember { mutableStateOf<File?>(null) }
@@ -113,30 +113,36 @@ fun FileManagerScreen() {
     var isCutOperation by remember { mutableStateOf(false) }
     var showNewFolderDialog by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<File?>(null) }
+    var pendingRun by remember { mutableStateOf<File?>(null) }
     var isOperationRunning by remember { mutableStateOf(false) }
     var operationLabel by remember { mutableStateOf("") }
 
     fun loadDirectory(dir: File) {
-        val list = dir.listFiles()?.toList()?.sortedWith(
-            compareBy<File> { if (it.isDirectory) 0 else 1 }.thenBy { it.name.lowercase() }
-        ) ?: emptyList()
         currentDir = dir
-        entries = list
+        scope.launch {
+            val list = withContext(Dispatchers.IO) {
+                dir.listFiles()?.toList()?.sortedWith(
+                    compareBy<File> { if (it.isDirectory) 0 else 1 }.thenBy { it.name.lowercase() }
+                ) ?: emptyList()
+            }
+            entries = list
+        }
     }
 
-    LaunchedEffect(Unit) { loadDirectory(rootDir) }
+    // Jump to a drive's root; pins the Back boundary so we don't climb above it.
+    fun openDrive(dir: File) {
+        currentRoot = dir
+        loadDirectory(dir)
+    }
+
+    LaunchedEffect(Unit) { openDrive(rootDir) }
 
     fun canRun(file: File): Boolean {
         val name = file.name.lowercase()
         return name.endsWith(".exe") || name.endsWith(".bat") || name.endsWith(".msi") || name.endsWith(".sh")
     }
 
-    fun runFile(file: File) {
-        val container = containerManager?.let { mgr ->
-            if (containers.size == 1) containers.first()
-            else return
-        } ?: return
-
+    fun runFileInContainer(file: File, container: Container) {
         val desktopDir = File(context.filesDir, "desktops")
         desktopDir.mkdirs()
         val desktopFile = File(desktopDir, "opencode_file_${file.name}.desktop")
@@ -145,7 +151,7 @@ fun FileManagerScreen() {
             pw.println("Name=${file.nameWithoutExtension}")
             pw.println("Exec=${file.absolutePath}")
             pw.println("Icon=wine")
-            pw.println("Path=")
+            pw.println("Path=${file.parent ?: ""}")
             pw.println("Terminal=false")
             pw.println("Type=Application")
             pw.println("StartupNotify=true")
@@ -156,61 +162,100 @@ fun FileManagerScreen() {
         context.startActivity(intent)
     }
 
+    fun runFile(file: File) {
+        containerManager ?: return
+        when {
+            containers.isEmpty() ->
+                Toast.makeText(context, "No container available — create one first", Toast.LENGTH_SHORT).show()
+            containers.size == 1 -> runFileInContainer(file, containers.first())
+            else -> pendingRun = file   // ask which container
+        }
+    }
+
+    // Resolve a non-colliding destination in [dir] for [name] (foo.txt -> "foo (1).txt").
+    fun uniqueDestination(dir: File, name: String): File {
+        var candidate = File(dir, name)
+        if (!candidate.exists()) return candidate
+        val dot = name.lastIndexOf('.')
+        val base = if (dot > 0) name.substring(0, dot) else name
+        val ext = if (dot > 0) name.substring(dot) else ""
+        var i = 1
+        do {
+            candidate = File(dir, "$base ($i)$ext")
+            i++
+        } while (candidate.exists())
+        return candidate
+    }
+
     fun performDelete(file: File) {
         scope.launch {
             isOperationRunning = true
             operationLabel = "Deleting..."
-            withContext(Dispatchers.IO) { FileUtils.delete(file) }
+            val ok = withContext(Dispatchers.IO) { FileUtils.delete(file) }
             isOperationRunning = false
             loadDirectory(currentDir)
-        }
-    }
-
-    fun performCopy(src: File, dstDir: File) {
-        scope.launch {
-            isOperationRunning = true
-            operationLabel = "Copying..."
-            withContext(Dispatchers.IO) { FileUtils.copy(src, File(dstDir, src.name)) }
-            isOperationRunning = false
-            loadDirectory(currentDir)
-            Toast.makeText(context, "Copied ${src.name}", Toast.LENGTH_SHORT).show()
+            if (!ok) Toast.makeText(context, "Delete failed", Toast.LENGTH_SHORT).show()
         }
     }
 
     fun performPaste() {
         val src = clipboardFile ?: return
         val dstDir = currentDir
+        val cut = isCutOperation
+        val sameFolder = src.parentFile?.absolutePath == dstDir.absolutePath
+        // Moving into the same folder is a no-op; never copy a file onto itself.
+        if (sameFolder && cut) {
+            clipboardFile = null
+            isCutOperation = false
+            return
+        }
+        // Don't overwrite an existing entry (or self when copying in-place) — pick a free name.
+        val dst = uniqueDestination(dstDir, src.name)
         scope.launch {
             isOperationRunning = true
-            operationLabel = if (isCutOperation) "Moving..." else "Copying..."
-            withContext(Dispatchers.IO) {
-                FileUtils.copy(src, File(dstDir, src.name))
-                if (isCutOperation) FileUtils.delete(src)
+            operationLabel = if (cut) "Moving..." else "Copying..."
+            val ok = withContext(Dispatchers.IO) {
+                val copied = FileUtils.copy(src, dst)
+                if (copied && cut) FileUtils.delete(src)
+                copied
             }
             isOperationRunning = false
             clipboardFile = null
             isCutOperation = false
             loadDirectory(currentDir)
+            if (!ok) Toast.makeText(context, "Paste failed", Toast.LENGTH_SHORT).show()
         }
     }
 
     fun performRename(file: File, newName: String) {
+        val target = File(file.parentFile, newName)
+        if (target.exists()) {
+            Toast.makeText(context, "\"$newName\" already exists", Toast.LENGTH_SHORT).show()
+            return
+        }
         scope.launch {
             isOperationRunning = true
             operationLabel = "Renaming..."
-            withContext(Dispatchers.IO) { file.renameTo(File(file.parentFile, newName)) }
+            val ok = withContext(Dispatchers.IO) { file.renameTo(target) }
             isOperationRunning = false
             loadDirectory(currentDir)
+            if (!ok) Toast.makeText(context, "Rename failed", Toast.LENGTH_SHORT).show()
         }
     }
 
     fun createFolder(parent: File, name: String) {
+        val target = File(parent, name)
+        if (target.exists()) {
+            Toast.makeText(context, "\"$name\" already exists", Toast.LENGTH_SHORT).show()
+            return
+        }
         scope.launch {
             isOperationRunning = true
             operationLabel = "Creating folder..."
-            withContext(Dispatchers.IO) { File(parent, name).mkdirs() }
+            val ok = withContext(Dispatchers.IO) { target.mkdirs() }
             isOperationRunning = false
             loadDirectory(currentDir)
+            if (!ok) Toast.makeText(context, "Could not create folder", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -310,7 +355,7 @@ fun FileManagerScreen() {
                                 .fillMaxWidth()
                                 .clickable {
                                     showContainerPicker = false
-                                    loadDirectory(File(container.rootDir, ".wine/drive_c"))
+                                    openDrive(File(container.rootDir, ".wine/drive_c"))
                                 }
                                 .padding(vertical = 10.dp),
                         )
@@ -318,6 +363,34 @@ fun FileManagerScreen() {
                 }
             },
             confirmButton = {},
+        )
+    }
+
+    if (pendingRun != null) {
+        val file = pendingRun
+        AlertDialog(
+            onDismissRequest = { pendingRun = null },
+            title = { Text("Run in which container?") },
+            text = {
+                Column {
+                    containers.forEach { container ->
+                        Text(
+                            text = container.name,
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    pendingRun = null
+                                    if (file != null) runFileInContainer(file, container)
+                                }
+                                .padding(vertical = 10.dp),
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { pendingRun = null }) { Text("Cancel") } },
         )
     }
 
@@ -332,8 +405,9 @@ fun FileManagerScreen() {
         ) {
             IconButton(onClick = {
                 val parent = currentDir.parentFile
-                if (parent != null && parent.exists()) loadDirectory(parent)
-            }, enabled = currentDir != rootDir) {
+                // Don't climb above the current drive's root.
+                if (currentDir != currentRoot && parent != null && parent.exists()) loadDirectory(parent)
+            }, enabled = currentDir != currentRoot) {
                 Icon(Icons.Filled.ArrowBack, "Back", tint = IconBlue)
             }
 
@@ -367,7 +441,7 @@ fun FileManagerScreen() {
                         onClick = {
                             showDriveMenu = false
                             if (containers.size == 1) {
-                                loadDirectory(File(containers.first().rootDir, ".wine/drive_c"))
+                                openDrive(File(containers.first().rootDir, ".wine/drive_c"))
                             }
                             else if (containers.size > 1) {
                                 showContainerPicker = true
@@ -381,7 +455,7 @@ fun FileManagerScreen() {
                         },
                         onClick = {
                             showDriveMenu = false
-                            loadDirectory(imagefsDir)
+                            openDrive(imagefsDir)
                         },
                     )
                     drives.forEach { (label, dir) ->
@@ -392,7 +466,7 @@ fun FileManagerScreen() {
                             },
                             onClick = {
                                 showDriveMenu = false
-                                loadDirectory(dir)
+                                openDrive(dir)
                             },
                         )
                     }
