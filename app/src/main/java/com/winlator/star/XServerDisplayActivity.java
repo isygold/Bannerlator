@@ -390,8 +390,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             boolean fgOn   = s.getFrameGenEnabled().getValue();
             int   mult     = fgOn ? s.getFrameGenMultiplier().getValue() : 0;
             float flow     = s.getFrameGenFlowScale().getValue();
-            // Route the single in-game multiplier/flow control to whichever engine this container runs.
-            if (container.isLsfgEngine()) {
+            // Route the single in-game multiplier/flow control to whichever engine is running this
+            // session (honors a per-game engine override, else the container's engine).
+            if (resolvedFrameGenEngine().equals("lsfg")) {
                 // lsfg-vk: rewrite its conf.toml — the fork layer watches the file mtime and reloads
                 // live (swapchain recreate). Passthrough = multiplier 1 (layer treats <=1 as off).
                 File dll = new File(getFilesDir(), "lsfg-vk/Lossless.dll");
@@ -546,27 +547,32 @@ public class XServerDisplayActivity extends AppCompatActivity {
             return;
         }
 
-        // Sync the in-game frame-generation + fps-limiter controls with this container's saved
-        // values. bionicFgActive = is the layer actually loaded this session (FG or limiter on at
-        // launch)? Live tuning only works when it is; the drawer uses this to gate/hint the UI.
-        // "FG layer active this session" = bionic-fg (FG or limiter) OR lsfg-vk selected. The in-game
-        // multiplier/flow controls live-tune whichever engine is running (routed in onBionicFgConfigChange).
-        boolean lsfgOn = container.isLsfgEngine();
-        boolean bionicFgActive = container.isFrameGenEnabled() || container.isFpsLimiterEnabled() || lsfgOn;
-        XServerDrawerState.INSTANCE.setBionicFgActive(bionicFgActive);
-        XServerDrawerState.INSTANCE.setFrameGenEnabled(container.isFrameGenEnabled() || lsfgOn);
-        XServerDrawerState.INSTANCE.setFrameGenMultiplier(
-                lsfgOn ? Math.max(2, container.getFrameGenMultiplier()) : container.getFrameGenMultiplier());
-        XServerDrawerState.INSTANCE.setFrameGenFlowScale(container.getFrameGenFlowScale());
-        XServerDrawerState.INSTANCE.setFrameGenEngine(container.getFrameGenEngine());
-        XServerDrawerState.INSTANCE.setFpsLimiterEnabled(container.isFpsLimiterEnabled());
-        XServerDrawerState.INSTANCE.setFpsLimit(container.getFpsLimiterValue());
-
-        containerManager.activateContainer(container);
-
+        // Construct the shortcut (if any) up front so per-game overrides (frame-gen engine, fps
+        // limiter, renderer) can be resolved against it below; each falls back to the container value.
         if (shortcutPath != null && !shortcutPath.isEmpty()) {
             shortcut = new Shortcut(container, new File(shortcutPath));
         }
+
+        // Sync the in-game frame-generation + fps-limiter controls. bionicFgActive = is the layer
+        // actually loaded this session (FG or limiter on at launch)? Live tuning only works when it is;
+        // the drawer uses this to gate/hint the UI. The engine/limiter honor per-game overrides
+        // (resolvedFrameGenEngine/resolvedFpsLimiterEnabled), else the container's value. multiplier/flow
+        // are NOT per-game — they're live-tuned in-game and persisted on the container.
+        String fgEngine = resolvedFrameGenEngine();
+        boolean fgEnabled = fgEngine.equals("bionic");
+        boolean lsfgOn = fgEngine.equals("lsfg");
+        boolean fpsLimOn = resolvedFpsLimiterEnabled();
+        boolean bionicFgActive = fgEnabled || fpsLimOn || lsfgOn;
+        XServerDrawerState.INSTANCE.setBionicFgActive(bionicFgActive);
+        XServerDrawerState.INSTANCE.setFrameGenEnabled(fgEnabled || lsfgOn);
+        XServerDrawerState.INSTANCE.setFrameGenMultiplier(
+                lsfgOn ? Math.max(2, container.getFrameGenMultiplier()) : container.getFrameGenMultiplier());
+        XServerDrawerState.INSTANCE.setFrameGenFlowScale(container.getFrameGenFlowScale());
+        XServerDrawerState.INSTANCE.setFrameGenEngine(fgEngine);
+        XServerDrawerState.INSTANCE.setFpsLimiterEnabled(fpsLimOn);
+        XServerDrawerState.INSTANCE.setFpsLimit(container.getFpsLimiterValue());
+
+        containerManager.activateContainer(container);
 
         // Pre-create all 4 event files so Wine registers every slot at startup.
         // Wine scans /dev/input/ once on boot — slots that don't exist then are never seen,
@@ -1333,9 +1339,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             envVars.putAll(container.getEnvVars());
 
-            // Frame-gen engine: lsfg-vk or bionic-fg (mutually exclusive), or off.
-            boolean limiterOn = container.isFpsLimiterEnabled();
-            if (container.isLsfgEngine()) {
+            // Frame-gen engine: lsfg-vk or bionic-fg (mutually exclusive), or off. Honors per-game
+            // overrides (else the container's value), matching the drawer sync above.
+            boolean limiterOn = resolvedFpsLimiterEnabled();
+            if (resolvedFrameGenEngine().equals("lsfg")) {
                 // lsfg-vk engine (mutually exclusive with bionic-fg). Opt-in via ENABLE_LSFG so the
                 // staged layer stays inert elsewhere. Driven by conf.toml (NOT the LSFG_LEGACY env):
                 // the GameNative-fork layer watches the conf.toml mtime in its present hook and forces
@@ -1359,7 +1366,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 // bionic-fg layer: load it if frame generation OR the fps limiter is enabled (both
                 // implemented by the layer + hot-reloaded via conf.toml). multiplier=0 -> frame gen
                 // Off (layer loaded, paces only); fps_limit=0 -> no cap.
-                boolean fgOn = container.isFrameGenEnabled();
+                boolean fgOn = resolvedFrameGenEngine().equals("bionic");
                 if (fgOn || limiterOn) {
                     envVars.put("BIONIC_FG_ENABLE", "1");
                     writeBionicFgConfig(
@@ -1471,7 +1478,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private void setupUI() {
         FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
         xServerView = new XServerView(this, xServer);
-        boolean useVulkan = container != null && "vulkan".equals(container.getRenderer());
+        boolean useVulkan = container != null && "vulkan".equals(resolvedRenderer());
         xServerView.initRenderer(useVulkan);
         final HostRenderer renderer = xServerView.getRenderer();
         renderer.setCursorVisible(false);
@@ -1562,7 +1569,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 rootView.addView(frameRating);
             }
 
-            String rendererMode = container != null && "vulkan".equals(container.getRenderer()) ? "Vulkan" : "OpenGL";
+            String rendererMode = container != null && "vulkan".equals(resolvedRenderer()) ? "Vulkan" : "OpenGL";
             String dxName = dxwrapper.contains("dxvk") ? "DXVK" : dxwrapper.contains("vegas") ? "VEGAS" : "WineD3D";
             String hudRenderer = rendererMode + " | " + dxName;
             if (frameRatingHorizontal != null) frameRatingHorizontal.setRenderer(hudRenderer);
@@ -2442,6 +2449,25 @@ return true;
         else
             filename = "wfm.exe";
         return filename;
+    }
+
+    // Per-game overrides for renderer / frame-gen engine / fps limiter: use the shortcut's value if it
+    // has one, otherwise follow the container. Read-only — never written back to the container, so a
+    // per-game choice can't leak into the container's saved settings (the in-game toggle calls saveData).
+    private String resolvedRenderer() {
+        if (container == null) return "vulkan";
+        return shortcut != null ? shortcut.getExtra("renderer", container.getRenderer()) : container.getRenderer();
+    }
+
+    private String resolvedFrameGenEngine() {
+        return shortcut != null ? shortcut.getExtra("frameGenEngine", container.getFrameGenEngine()) : container.getFrameGenEngine();
+    }
+
+    private boolean resolvedFpsLimiterEnabled() {
+        if (shortcut != null) {
+            return shortcut.getExtra("fpsLimiterEnabled", container.isFpsLimiterEnabled() ? "1" : "0").equals("1");
+        }
+        return container.isFpsLimiterEnabled();
     }
 
 

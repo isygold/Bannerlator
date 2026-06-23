@@ -847,6 +847,26 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
         mutableStateOf(shortcut.getExtra("dxwrapperConfig", shortcut.container.getDXWrapperConfig()))
     }
 
+    // Renderer (host: OpenGL / Vulkan) — per-game override, defaults to the container's value.
+    var selectedRenderer by remember {
+        val id = shortcut.getExtra("renderer", shortcut.container.renderer)
+        mutableStateOf(if (id.equals("vulkan", ignoreCase = true)) "Vulkan" else "OpenGL")
+    }
+
+    // Frame Generation engine (off / bionic / lsfg) — per-game override.
+    val fgEngines = remember { listOf("off", "bionic", "lsfg") }
+    var frameGenEngine by remember {
+        mutableStateOf(shortcut.getExtra("frameGenEngine", shortcut.container.frameGenEngine))
+    }
+    val lsfgDllAvailable = remember { File(context.filesDir, "lsfg-vk/Lossless.dll").isFile }
+
+    // FPS limiter — per-game override.
+    var fpsLimiterEnabled by remember {
+        mutableStateOf(
+            shortcut.getExtra("fpsLimiterEnabled", if (shortcut.container.isFpsLimiterEnabled) "1" else "0") == "1"
+        )
+    }
+
     // Audio driver
     val audioDriverEntries = remember { res.getStringArray(R.array.audio_driver_entries).toList() }
     var selectedAudioDriver by remember {
@@ -1074,6 +1094,9 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
             putExtra("screenSize", screenSize)
             putExtra("graphicsDriver", StringUtils.parseIdentifier(selectedGfxDriver))
             putExtra("graphicsDriverConfig", graphicsDriverConfig)
+            putExtra("renderer", StringUtils.parseIdentifier(selectedRenderer))
+            putExtra("frameGenEngine", frameGenEngine)
+            putExtra("fpsLimiterEnabled", if (fpsLimiterEnabled) "1" else "0")
             putExtra("dxwrapper", StringUtils.parseIdentifier(selectedDxWrapper))
             putExtra("dxwrapperConfig", dxWrapperConfig)
             putExtra("audioDriver", StringUtils.parseIdentifier(selectedAudioDriver))
@@ -1213,6 +1236,45 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("DX Wrapper Config") }
+
+                    // Renderer (host) — per-game override of the container's OpenGL/Vulkan choice.
+                    LabeledDropdown(
+                        label = stringResource(R.string.renderer),
+                        options = listOf("OpenGL", "Vulkan"),
+                        selectedOption = selectedRenderer,
+                        onSelect = { selectedRenderer = it }
+                    )
+
+                    // Frame Generation engine — per-game override (lsfg grayed without Lossless.dll).
+                    run {
+                        val fgLabels = listOf(
+                            stringResource(R.string.frame_generation_off),
+                            stringResource(R.string.frame_generation_bionic),
+                            stringResource(R.string.frame_generation_lsfg)
+                        )
+                        val fgIdx = fgEngines.indexOf(frameGenEngine).coerceAtLeast(0)
+                        LabeledDropdown(
+                            label = stringResource(R.string.frame_generation),
+                            options = fgLabels,
+                            selectedOption = fgLabels[fgIdx],
+                            onSelect = { frameGenEngine = fgEngines[fgLabels.indexOf(it)] },
+                            disabledOptions = if (lsfgDllAvailable) emptySet() else setOf(fgLabels[2])
+                        )
+                        if (!lsfgDllAvailable) {
+                            Text(
+                                text = stringResource(R.string.frame_generation_lsfg_needs_dll),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    // FPS limiter — per-game override.
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Switch(checked = fpsLimiterEnabled, onCheckedChange = { fpsLimiterEnabled = it })
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.fps_limiter), modifier = Modifier.weight(1f))
+                    }
 
                     // Audio driver
                     LabeledDropdown(
