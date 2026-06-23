@@ -158,6 +158,12 @@ public abstract class FileUtils {
         if (isSymlink(srcFile)) return true;
         // Never copy a file onto itself — opening the destination truncates it to 0 first.
         if (sameFile(srcFile, dstFile)) return true;
+        // Copying a directory into itself or its own subtree recurses forever (it keeps
+        // re-finding the destination it just created) — refuse it.
+        if (srcFile.isDirectory() && isWithin(dstFile, srcFile)) {
+            Log.e(TAG, "Refusing to copy directory into itself: " + srcFile.getAbsolutePath() + " -> " + dstFile.getAbsolutePath());
+            return false;
+        }
         if (srcFile.isDirectory()) {
             if (!dstFile.exists() && !dstFile.mkdirs()) return false;
             if (callback != null) callback.call(dstFile);
@@ -214,6 +220,20 @@ public abstract class FileUtils {
         }
     }
 
+    // True when 'child' is 'ancestor' itself or lives anywhere inside it.
+    private static boolean isWithin(File child, File ancestor) {
+        if (child == null || ancestor == null) return false;
+        String c, a;
+        try {
+            c = child.getCanonicalPath();
+            a = ancestor.getCanonicalPath();
+        } catch (IOException e) {
+            c = child.getAbsolutePath();
+            a = ancestor.getAbsolutePath();
+        }
+        return c.equals(a) || c.startsWith(a + File.separator);
+    }
+
 
 
     public static boolean copy(Context context, Object src, File dstFile, Callback<File> callback) {
@@ -222,6 +242,10 @@ public abstract class FileUtils {
             File sourceFile = (File) src;
             if (isSymlink(sourceFile)) return true;
             if (sameFile(sourceFile, dstFile)) return true;
+            if (sourceFile.isDirectory() && isWithin(dstFile, sourceFile)) {
+                Log.e(TAG, "Refusing to copy directory into itself: " + sourceFile.getAbsolutePath() + " -> " + dstFile.getAbsolutePath());
+                return false;
+            }
             if (sourceFile.isDirectory()) {
                 if (!dstFile.exists() && !dstFile.mkdirs()) return false;
                 if (callback != null) callback.call(dstFile);

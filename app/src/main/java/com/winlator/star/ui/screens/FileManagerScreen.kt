@@ -92,6 +92,13 @@ private val CardStroke = Color(0xFF242424)
 private val DividerColor = Color(0xFF333333)
 private val IconBlue = Color(0xFF1C85FE)
 
+// True when [child] is [ancestor] itself or lives anywhere inside it.
+private fun isWithin(child: File, ancestor: File): Boolean {
+    val c = runCatching { child.canonicalPath }.getOrDefault(child.absolutePath)
+    val a = runCatching { ancestor.canonicalPath }.getOrDefault(ancestor.absolutePath)
+    return c == a || c.startsWith(a + File.separator)
+}
+
 @Composable
 fun FileManagerScreen() {
     val context = LocalContext.current
@@ -202,6 +209,13 @@ fun FileManagerScreen() {
         val src = clipboardFile ?: return
         val dstDir = currentDir
         val cut = isCutOperation
+        // Pasting a folder into itself or its own subtree would recurse forever — reject it.
+        if (src.isDirectory && isWithin(dstDir, src)) {
+            Toast.makeText(context, "Can't paste a folder into itself", Toast.LENGTH_SHORT).show()
+            clipboardFile = null
+            isCutOperation = false
+            return
+        }
         val sameFolder = src.parentFile?.absolutePath == dstDir.absolutePath
         // Moving into the same folder is a no-op; never copy a file onto itself.
         if (sameFolder && cut) {
