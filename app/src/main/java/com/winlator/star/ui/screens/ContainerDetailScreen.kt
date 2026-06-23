@@ -245,7 +245,8 @@ fun ContainerDetailScreen(
                 com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_PROTON,
             ),
             onDismiss = { showWineDownloadSheet = false },
-            onContentChanged = { viewModel.refreshWineVersions() }
+            onContentChanged = { viewModel.refreshWineVersions() },
+            inUseKey = viewModel.selectedWineVersion,
         )
     }
     if (showBox64DownloadSheet) {
@@ -255,14 +256,16 @@ fun ContainerDetailScreen(
             else
                 com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_BOX64,
             onDismiss = { showBox64DownloadSheet = false },
-            onContentChanged = { viewModel.refreshBox64Versions() }
+            onContentChanged = { viewModel.refreshBox64Versions() },
+            inUseKey = viewModel.selectedBox64Version,
         )
     }
     if (showFexCoreDownloadSheet) {
         ContentDownloadSheet(
             contentType = com.winlator.star.contents.ContentProfile.ContentType.CONTENT_TYPE_FEXCORE,
             onDismiss = { showFexCoreDownloadSheet = false },
-            onContentChanged = { viewModel.refreshFEXCoreVersions() }
+            onContentChanged = { viewModel.refreshFEXCoreVersions() },
+            inUseKey = viewModel.selectedFEXCoreVersion,
         )
     }
     if (showDxvkDownloadSheet) {
@@ -441,10 +444,7 @@ private fun TopLevelFields(
                 onSelect = { viewModel.onWineVersionChanged(it) },
                 modifier = Modifier.weight(1f)
             )
-            ContentInstallGear(
-                onDownloadFile = onShowWineDownloadSheet,
-                onContentInstalled = { viewModel.refreshWineVersions() }
-            )
+            ContentInstallGear(onDownloadFile = onShowWineDownloadSheet)
         }
         Spacer(Modifier.height(8.dp))
 
@@ -917,10 +917,7 @@ private fun AdvancedTab(
                     onSelect = { viewModel.selectedBox64Version = it },
                     modifier = Modifier.weight(1f)
                 )
-                ContentInstallGear(
-                    onDownloadFile = onShowBox64DownloadSheet,
-                    onContentInstalled = { viewModel.refreshBox64Versions() }
-                )
+                ContentInstallGear(onDownloadFile = onShowBox64DownloadSheet)
             }
             Spacer(Modifier.height(8.dp))
             LabeledDropdown(
@@ -942,10 +939,7 @@ private fun AdvancedTab(
                         onSelect = { viewModel.selectedFEXCoreVersion = it },
                         modifier = Modifier.weight(1f)
                     )
-                    ContentInstallGear(
-                        onDownloadFile = onShowFexCoreDownloadSheet,
-                        onContentInstalled = { viewModel.refreshFEXCoreVersions() }
-                    )
+                    ContentInstallGear(onDownloadFile = onShowFexCoreDownloadSheet)
                 }
                 Spacer(Modifier.height(8.dp))
                 LabeledDropdown(
@@ -1542,17 +1536,7 @@ internal fun DxvkConfigDialog(
                         stringResource(R.string.vkd3d_version), vkd3dVersions.value, selectedVkd3d, { selectedVkd3d = it },
                         modifier = Modifier.weight(1f)
                     )
-                    ContentInstallGear(
-                        onDownloadFile = onDownloadVkd3d,
-                        onContentInstalled = {
-                            scope.launch(Dispatchers.IO) {
-                                val cm2 = ContentsManager(context)
-                                cm2.syncContents()
-                                val vkd3d = DXVKConfigDialog.loadVkd3dVersionList(context, cm2)
-                                withContext(Dispatchers.Main) { vkd3dVersions.value = vkd3d }
-                            }
-                        }
-                    )
+                    ContentInstallGear(onDownloadFile = onDownloadVkd3d)
                 }
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1562,15 +1546,7 @@ internal fun DxvkConfigDialog(
                         modifier = Modifier.weight(1f)
                     )
                     ContentInstallGear(
-                        onDownloadFile = onDownloadDxvk,
-                        onContentInstalled = {
-                            scope.launch(Dispatchers.IO) {
-                                val cm2 = ContentsManager(context)
-                                cm2.syncContents()
-                                val versions = DXVKConfigDialog.loadDxvkVersionList(context, cm2, isArm64EC)
-                                withContext(Dispatchers.Main) { allDxvkVersions.value = versions }
-                            }
-                        }
+                        onDownloadFile = onDownloadDxvk
                     )
                 }
                 Spacer(Modifier.height(8.dp))
@@ -1813,73 +1789,13 @@ private fun installContentFromUri(activity: Activity, uri: Uri, onResult: (Boole
 @Composable
 private fun ContentInstallGear(
     onDownloadFile: () -> Unit,
-    onContentInstalled: () -> Unit,
 ) {
-    val context = LocalContext.current
-    var showDropdown by remember { mutableStateOf(false) }
-    var installing by remember { mutableStateOf(false) }
-
-    val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        result.data?.data?.let { uri ->
-            val act = context.findActivity()
-            if (act != null) {
-                installing = true
-                installContentFromUri(act, uri) { ok ->
-                    installing = false
-                    if (ok) onContentInstalled()
-                }
-            }
-        }
-    }
-
-    Box {
-        OutlinedButton(
-            onClick = { showDropdown = true },
-            modifier = Modifier.size(40.dp),
-            border = androidx.compose.foundation.BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
-            contentPadding = PaddingValues(0.dp),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Icon(Icons.Default.CloudDownload, contentDescription = "Download / install", tint = MaterialTheme.colorScheme.primary)
-        }
-
-        DropdownMenu(
-            expanded = showDropdown,
-            onDismissRequest = { showDropdown = false }
-        ) {
-            DropdownMenuItem(
-                text = { Text("Open File") },
-                onClick = {
-                    showDropdown = false
-                    filePicker.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = "*/*"
-                    })
-                }
-            )
-            DropdownMenuItem(
-                text = { Text("Download File") },
-                onClick = {
-                    showDropdown = false
-                    onDownloadFile()
-                }
-            )
-        }
-    }
-
-    if (installing) {
-        AlertDialog(
-            onDismissRequest = {},
-            containerColor = Color(0xFF2A2A2A),
-            title = { Text("Installing", color = Color.White) },
-            text = { Text("Please wait\u2026", color = Color(0xFFCCCCCC)) },
-            confirmButton = {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(24.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            },
+    // Cloud opens the download menu directly. Browse/download + "install from file" both live in the sheet.
+    IconButton(onClick = onDownloadFile, modifier = Modifier.size(40.dp)) {
+        Icon(
+            Icons.Default.CloudDownload,
+            contentDescription = "Download / install",
+            tint = MaterialTheme.colorScheme.primary,
         )
     }
 }
