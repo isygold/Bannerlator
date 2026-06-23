@@ -156,37 +156,62 @@ public abstract class FileUtils {
 
     public static boolean copy(File srcFile, File dstFile, Callback<File> callback) {
         if (isSymlink(srcFile)) return true;
+        // Never copy a file onto itself — opening the destination truncates it to 0 first.
+        if (sameFile(srcFile, dstFile)) return true;
         if (srcFile.isDirectory()) {
             if (!dstFile.exists() && !dstFile.mkdirs()) return false;
             if (callback != null) callback.call(dstFile);
 
+            boolean allOk = true;
             String[] filenames = srcFile.list();
             if (filenames != null) {
                 for (String filename : filenames) {
                     if (!copy(new File(srcFile, filename), new File(dstFile, filename), callback)) {
-                        Log.e(TAG, "Failed to copy directory: " + srcFile.getAbsolutePath());
-                        // Continue copying other files even if one fails
+                        Log.e(TAG, "Failed to copy: " + new File(srcFile, filename).getAbsolutePath());
+                        allOk = false;
+                        // Keep copying the rest, but report the overall failure.
                     }
                 }
             }
+            return allOk;
         } else {
             File parent = dstFile.getParentFile();
             if (!srcFile.exists() || (parent != null && !parent.exists() && !parent.mkdirs())) return false;
 
             try (FileChannel inChannel = (new FileInputStream(srcFile)).getChannel();
                  FileChannel outChannel = (new FileOutputStream(dstFile)).getChannel()) {
-                inChannel.transferTo(0, inChannel.size(), outChannel);
+                // transferTo may move fewer bytes than requested — loop until done.
+                long size = inChannel.size();
+                long position = 0;
+                while (position < size) {
+                    long transferred = inChannel.transferTo(position, size - position, outChannel);
+                    if (transferred <= 0) break;
+                    position += transferred;
+                }
+                if (position < size)
+                    throw new IOException("Incomplete copy: " + position + "/" + size + " bytes");
 
                 if (callback != null) callback.call(dstFile);
-                return dstFile.exists();
+                return true;
             } catch (IOException e) {
                 e.printStackTrace();
                 Log.e(TAG, "Failed to copy file: " + srcFile.getAbsolutePath() + " to " + dstFile.getAbsolutePath(), e);
-                // Log error but don't return false, so we skip this file and continue with others
-                return true;
+                // Remove the partial/truncated destination so a caller's move never
+                // deletes the source after an incomplete copy.
+                dstFile.delete();
+                return false;
             }
         }
-        return true;
+    }
+
+    // True when both paths resolve to the same file on disk.
+    private static boolean sameFile(File a, File b) {
+        if (a == null || b == null) return false;
+        try {
+            return a.getCanonicalPath().equals(b.getCanonicalPath());
+        } catch (IOException e) {
+            return a.getAbsolutePath().equals(b.getAbsolutePath());
+        }
     }
 
 
@@ -196,6 +221,7 @@ public abstract class FileUtils {
             // Handle File to File copying
             File sourceFile = (File) src;
             if (isSymlink(sourceFile)) return true;
+            if (sameFile(sourceFile, dstFile)) return true;
             if (sourceFile.isDirectory()) {
                 if (!dstFile.exists() && !dstFile.mkdirs()) return false;
                 if (callback != null) callback.call(dstFile);
@@ -214,12 +240,22 @@ public abstract class FileUtils {
 
                 try (FileChannel inChannel = (new FileInputStream(sourceFile)).getChannel();
                      FileChannel outChannel = (new FileOutputStream(dstFile)).getChannel()) {
-                    inChannel.transferTo(0, inChannel.size(), outChannel);
+                    // transferTo may move fewer bytes than requested — loop until done.
+                    long size = inChannel.size();
+                    long position = 0;
+                    while (position < size) {
+                        long transferred = inChannel.transferTo(position, size - position, outChannel);
+                        if (transferred <= 0) break;
+                        position += transferred;
+                    }
+                    if (position < size)
+                        throw new IOException("Incomplete copy: " + position + "/" + size + " bytes");
 
                     if (callback != null) callback.call(dstFile);
-                    return dstFile.exists();
+                    return true;
                 } catch (IOException e) {
                     e.printStackTrace();
+                    dstFile.delete();
                     return false;
                 }
             }
