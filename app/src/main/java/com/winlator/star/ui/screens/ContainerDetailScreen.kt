@@ -711,8 +711,25 @@ private fun WinComponentsTab(viewModel: ContainerDetailViewModel) {
     val generalItems by remember {
         derivedStateOf { viewModel.winComponents.filterNot { it.key.startsWith("direct") } }
     }
+    var showComponentsSheet by remember { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Components installer (only for an existing container with a Wine prefix).
+        if (viewModel.container != null) {
+            SectionBox(title = "Components") {
+                Text(
+                    "Install Wine dependencies — mono, gecko, .NET, VC++ runtimes, DirectX libraries, fonts and more.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = { showComponentsSheet = true }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.CloudDownload, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Browse & install components")
+                }
+            }
+        }
         if (directxItems.isNotEmpty()) {
             SectionBox(title = "DirectX") {
                 directxItems.forEach { comp ->
@@ -732,6 +749,12 @@ private fun WinComponentsTab(viewModel: ContainerDetailViewModel) {
                     }
                 }
             }
+        }
+    }
+
+    if (showComponentsSheet) {
+        viewModel.container?.let { container ->
+            ComponentsSheet(container = container, onDismiss = { showComponentsSheet = false })
         }
     }
 }
