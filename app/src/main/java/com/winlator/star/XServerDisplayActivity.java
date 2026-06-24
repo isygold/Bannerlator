@@ -451,6 +451,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         state.onScreenEffects          = () -> showScreenEffectsDialog();
         state.onGraphicEngine          = () -> { XServerDrawerState.INSTANCE.selectTab(com.winlator.star.ui.TabType.GRAPHICS); runOnUiThread(() -> drawerLayout.openDrawer(GravityCompat.START)); };
         state.onVibration              = () -> showVibrationDialog();
+        state.onOverlayOpacityChange   = () -> {
+            float v = XServerDrawerState.INSTANCE.getOverlayOpacityValue();
+            if (inputControlsView != null) inputControlsView.setOverlayOpacity(v); // setter invalidates → live redraw
+            preferences.edit().putFloat("overlay_opacity", v).apply();
+        };
         state.onNativeRenderingToggle   = () -> {
             boolean next = !XServerDrawerState.INSTANCE.getNativeRenderingEnabled();
             XServerDrawerState.INSTANCE.setNativeRenderingEnabled(next);
@@ -1641,7 +1646,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         rootView.addView(touchpadView);
 
         inputControlsView = new InputControlsView(this, timeoutHandler, hideControlsRunnable);
-        inputControlsView.setOverlayOpacity(preferences.getFloat("overlay_opacity", InputControlsView.DEFAULT_OVERLAY_OPACITY));
+        float savedOverlayOpacity = preferences.getFloat("overlay_opacity", InputControlsView.DEFAULT_OVERLAY_OPACITY);
+        inputControlsView.setOverlayOpacity(savedOverlayOpacity);
+        XServerDrawerState.INSTANCE.setOverlayOpacity(savedOverlayOpacity); // seed the Controls-tab slider
         inputControlsView.setTouchpadView(touchpadView);
         inputControlsView.setXServer(xServer);
         inputControlsView.setVisibility(View.GONE);

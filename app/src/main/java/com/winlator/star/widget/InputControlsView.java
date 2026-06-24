@@ -49,7 +49,9 @@ import java.util.Timer;
 import java.util.TimerTask;
 
 public class InputControlsView extends View {
-    public static final float DEFAULT_OVERLAY_OPACITY = 0.4f;
+    // 0.75 under the linear opacity mapping (ControlElement.drawGameHub) matches the visible
+    // dimness the old 0.4 produced under the previous 0.5+0.7*opacity curve.
+    public static final float DEFAULT_OVERLAY_OPACITY = 0.75f;
     private static final byte MOUSE_WHEEL_DELTA = 120;
     private boolean editMode = false;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -136,6 +138,7 @@ public class InputControlsView extends View {
 
     public void setOverlayOpacity(float overlayOpacity) {
         this.overlayOpacity = overlayOpacity;
+        invalidate();
     }
 
     public float getOverlayOpacity() {

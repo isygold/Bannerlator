@@ -793,6 +793,7 @@ private fun ControlsContent(state: XServerDrawerState) {
     val moveCursorToTouch by state.moveCursorToTouchpoint.collectAsState()
     val isRelativeMouse by state.isRelativeMouseMovement.collectAsState()
     val isMouseDisabled by state.isMouseDisabled.collectAsState()
+    val initOverlayOpacity by state.overlayOpacity.collectAsState()
 
     SectionHeader("Controls")
 
@@ -841,6 +842,20 @@ private fun ControlsContent(state: XServerDrawerState) {
         hapticsEnabled = it
         XServerDialogState.onInputControlsConfirm?.invoke(selectedIdx, showTouchscreen, timeoutEnabled, hapticsEnabled)
     }
+
+    // On-screen controls opacity — live, applied to the visible overlay as you drag.
+    var overlayOpacity by remember(initOverlayOpacity) { mutableFloatStateOf(initOverlayOpacity) }
+    LabeledSlider(
+        label = "Overlay Opacity",
+        value = overlayOpacity,
+        valueRange = 0f..1f,
+        onValueChange = {
+            overlayOpacity = it
+            state.setOverlayOpacity(it)
+            state.onOverlayOpacityChange?.run()
+        },
+        format = { "${(it * 100).toInt()}%" },
+    )
 
     Spacer(Modifier.height(8.dp))
 

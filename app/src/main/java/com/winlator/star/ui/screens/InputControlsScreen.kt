@@ -43,13 +43,11 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -60,7 +58,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.preference.PreferenceManager
 import com.winlator.star.R
 import com.winlator.star.ControlsEditorActivity
 import com.winlator.star.ExternalControllerBindingsActivity
@@ -72,8 +69,6 @@ import com.winlator.star.core.HttpUtils
 import com.winlator.star.inputcontrols.ControlsProfile
 import com.winlator.star.inputcontrols.ExternalController
 import com.winlator.star.inputcontrols.InputControlsManager
-import com.winlator.star.math.Mathf
-import com.winlator.star.widget.InputControlsView
 import org.json.JSONObject
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -81,13 +76,11 @@ import java.util.concurrent.atomic.AtomicInteger
 fun InputControlsScreen() {
     val context = LocalContext.current
     val activity = context as? MainActivity
-    val prefs = remember { PreferenceManager.getDefaultSharedPreferences(context) }
     val manager = remember { InputControlsManager(context) }
 
     var profiles by remember { mutableStateOf(listOf<ControlsProfile>()) }
     var currentProfile by remember { mutableStateOf<ControlsProfile?>(null) }
     var selectedProfileIdx by remember { mutableStateOf(0) }
-    var overlayOpacity by remember { mutableFloatStateOf(prefs.getFloat("overlay_opacity", InputControlsView.DEFAULT_OVERLAY_OPACITY)) }
     var controllers by remember { mutableStateOf(listOf<ExternalController>()) }
 
     var showProfileDropdown by remember { mutableStateOf(false) }
@@ -332,23 +325,8 @@ fun InputControlsScreen() {
             }
         }
 
-        // ── Overlay Opacity ─────────────────────────────────────────
-        FieldSet {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Overlay Opacity", color = Color(0xFFCCCCCC), fontSize = 14.sp, modifier = Modifier.weight(1f))
-                Text("${(overlayOpacity * 100).toInt()}%", color = Color(0xFF888888), fontSize = 14.sp)
-            }
-            Slider(
-                value = overlayOpacity,
-                onValueChange = {
-                    val snapped = Mathf.roundTo(it, 0.05f)
-                    overlayOpacity = snapped
-                    prefs.edit().putFloat("overlay_opacity", snapped).apply()
-                },
-                valueRange = 0.1f..1.0f,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
+        // Overlay opacity now lives in the in-game side menu (Controls tab) so it can be
+        // tuned live against the visible overlay — see XServerDrawer.ControlsContent.
 
         // ── Import / Export ─────────────────────────────────────────
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {

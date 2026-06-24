@@ -725,7 +725,10 @@ public class ControlElement {
         int accent = resolveAccentColor();
         boolean hasAccent = accent != -1;
 
-        float gameHubDim = Math.min(1.0f, 0.5f + overlayOpacity * 0.7f);
+        // Map opacity linearly so the full slider range is usable: 0 = fully invisible,
+        // 1 = fully solid. (Was 0.5 + 0.7*opacity, which floored visibility at ~50% and
+        // saturated at ~71% — the slider felt like it did nothing.)
+        float gameHubDim = overlayOpacity;
         int fillAlpha = (int) (90 * gameHubDim * effectiveOpacity);
         int strokeAlpha = (int) (150 * gameHubDim * effectiveOpacity);
         int pressedFillAlpha = (int) (60 * gameHubDim * effectiveOpacity);
@@ -735,12 +738,12 @@ public class ControlElement {
 
         int fillColor = Color.argb(fillAlpha, 0, 0, 0);
         int strokeColor = hasAccent
-                ? Color.argb(Math.max(strokeAlpha, 110), Color.red(accent), Color.green(accent), Color.blue(accent))
+                ? Color.argb(Math.max(strokeAlpha, (int) (110 * gameHubDim)), Color.red(accent), Color.green(accent), Color.blue(accent))
                 : Color.argb(strokeAlpha, 0x1C, 0x85, 0xFE);
         int pressedFillBase = hasAccent ? accent : 0xFF1C85FE;
         int pressedFillColor = Color.argb(pressedFillAlpha, Color.red(pressedFillBase), Color.green(pressedFillBase), Color.blue(pressedFillBase));
         int pressedStrokeColor = hasAccent
-                ? Color.argb(Math.max(pressedStrokeAlpha, 160), Color.red(accent), Color.green(accent), Color.blue(accent))
+                ? Color.argb(Math.max(pressedStrokeAlpha, (int) (160 * gameHubDim)), Color.red(accent), Color.green(accent), Color.blue(accent))
                 : Color.argb(pressedStrokeAlpha, 0x64, 0xDD, 0xFF);
         int textColor = hasAccent
                 ? Color.argb(textAlpha, Color.red(accent), Color.green(accent), Color.blue(accent))

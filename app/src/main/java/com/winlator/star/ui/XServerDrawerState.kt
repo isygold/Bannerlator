@@ -72,6 +72,10 @@ object XServerDrawerState {
     private val _fpsConfig = MutableStateFlow("")
     val fpsConfig: StateFlow<String> = _fpsConfig
 
+    // On-screen controls overlay opacity (0..1), tuned live from the Controls tab.
+    private val _overlayOpacity = MutableStateFlow(0.75f)
+    val overlayOpacity: StateFlow<Float> = _overlayOpacity
+
     // Callbacks wired by XServerDisplayActivity.
     // @JvmField exposes these as public fields so Java can assign them directly.
     // Runnable avoids the kotlin.Unit return-type mismatch for Java void lambdas.
@@ -101,6 +105,9 @@ object XServerDrawerState {
     // FPS limiter is a standalone host-side present pacer, independent of frame gen. Fired when the
     // in-game Limit FPS toggle/slider changes; the activity applies it to the host renderer live.
     @JvmField var onFpsLimitChange: Runnable? = null
+    // Fired when the Controls-tab opacity slider moves; the activity reads overlayOpacity,
+    // applies it to the live InputControlsView and persists the pref.
+    @JvmField var onOverlayOpacityChange: Runnable? = null
 
     var onCursorExpandedChanged: ((Boolean) -> Unit)? = null
 
@@ -132,6 +139,8 @@ object XServerDrawerState {
 
     fun setFpsExpanded(v: Boolean) { _fpsExpanded.value = v }
     fun setFpsConfig(v: String) { _fpsConfig.value = v }
+    fun setOverlayOpacity(v: Float) { _overlayOpacity.value = v }
+    fun getOverlayOpacityValue(): Float = _overlayOpacity.value
     fun toggleFpsExpanded() { _fpsExpanded.value = !_fpsExpanded.value }
 
     fun reset() {
@@ -153,6 +162,7 @@ object XServerDrawerState {
         _cursorExpanded.value = false
         _fpsExpanded.value = false
         _fpsConfig.value = ""
+        _overlayOpacity.value = 0.75f
         onClose = null; onKeyboard = null; onInputControls = null
         onScreenEffects = null; onGraphicEngine = null; onVibration = null
         onToggleFullscreen = null; onPauseResume = null; onPipMode = null
@@ -161,6 +171,7 @@ object XServerDrawerState {
         onRelativeMouseMovement = null; onDisableMouse = null
         onNativeRenderingToggle = null; onFpsConfigApply = null
         onBionicFgConfigChange = null; onFpsLimitChange = null
+        onOverlayOpacityChange = null
         onCursorExpandedChanged = null
     }
 }
