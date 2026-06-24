@@ -1,5 +1,6 @@
 package com.winlator.star.ui.screens
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -49,6 +50,15 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit) {
     var message by remember { mutableStateOf<String?>(null) }
     var confirmExec by remember { mutableStateOf<Component?>(null) }
 
+    // "Installed" must survive closing/reopening the sheet, so persist it per container
+    // (the in-memory set alone reset every time the sheet recomposed).
+    val installsPrefs = remember { context.getSharedPreferences("component_installs", Context.MODE_PRIVATE) }
+    val installKey = "c${container.id}"
+    fun markInstalled(name: String) {
+        installed = installed + name
+        installsPrefs.edit().putStringSet(installKey, installed).apply()
+    }
+
     // Run an installer-based component: download its installer, then launch the container session.
     fun runExecInstall(c: Component) {
         installing = c.name; progress = 0f
@@ -61,7 +71,7 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit) {
             installing = null
             when (res) {
                 is ComponentExecInstaller.Result.Launched -> { /* session launched; app continues there */ }
-                is ComponentExecInstaller.Result.Done -> installed = installed + c.name
+                is ComponentExecInstaller.Result.Done -> markInstalled(c.name)
                 is ComponentExecInstaller.Result.Error ->
                     message = "Couldn't install ${c.name}: ${res.message}"
             }
@@ -69,6 +79,7 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit) {
     }
 
     LaunchedEffect(Unit) {
+        installed = installsPrefs.getStringSet(installKey, emptySet())?.toSet() ?: emptySet()
         val list = withContext(Dispatchers.IO) { ComponentCatalog.load() }
         components = list
         loadError = list.isEmpty()
@@ -159,7 +170,7 @@ fun ComponentsSheet(container: Container, onDismiss: () -> Unit) {
                                                         }
                                                     }
                                                     installing = null
-                                                    if (err == null) installed = installed + c.name
+                                                    if (err == null) markInstalled(c.name)
                                                     else message = "Couldn't install ${c.name}: $err"
                                                 }
                                             }

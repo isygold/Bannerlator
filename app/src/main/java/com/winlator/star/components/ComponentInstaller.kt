@@ -131,7 +131,9 @@ object ComponentInstaller {
     private fun copyMatching(srcRoot: File, pattern: String, dest: File, arch: String?) {
         if (pattern.isEmpty()) return
         dest.mkdirs()
-        val rx = Regex("^" + Regex.escape(pattern).replace("\\*", ".*") + "$", RegexOption.IGNORE_CASE)
+        // Glob → regex: split on '*' and escape the literal segments (Regex.escape uses \Q…\E,
+        // so escaping the whole pattern first would make a literal '*' instead of a wildcard).
+        val rx = Regex("^" + pattern.split("*").joinToString(".*") { Regex.escape(it) } + "$", RegexOption.IGNORE_CASE)
         var matches = srcRoot.walkTopDown().filter { it.isFile && rx.matches(it.name) }.toList()
         if (arch != null) {
             // Prefer files under the matching arch sub-dir; otherwise just exclude the wrong arch.
