@@ -140,9 +140,22 @@ object UpdateManager {
 
     private class PickedRelease(val updateJsonUrl: String, val assets: Map<String, String>)
 
-    /** First non-draft release (newest first) that carries an update.json asset. */
+    /**
+     * Newest non-draft release (by published_at) that carries an update.json asset.
+     *
+     * The GitHub list-releases API does NOT return a pure newest-first order: it
+     * pins the `make_latest` release to the top, then lists the rest by date. So
+     * a freshly-cut stable would shadow a newer prerelease if we just took the
+     * first entry. Sort by published_at descending ourselves before picking, so
+     * the genuinely-newest release always wins. (ISO-8601 timestamps sort
+     * lexicographically in chronological order.)
+     */
     private fun pickNewestWithUpdateJson(listBody: String): PickedRelease? = try {
-        val arr = org.json.JSONArray(listBody)
+        val raw = org.json.JSONArray(listBody)
+        val releases = ArrayList<JSONObject>(raw.length())
+        for (k in 0 until raw.length()) releases.add(raw.getJSONObject(k))
+        releases.sortWith(compareByDescending { it.optString("published_at", "") })
+        val arr = org.json.JSONArray(releases)
         var result: PickedRelease? = null
         var i = 0
         while (i < arr.length() && result == null) {
