@@ -742,31 +742,36 @@ private fun HudContent(state: XServerDrawerState) {
     // Read with fallback across classic + gamehub key names (mirrors the container dialog).
     fun b(k: String, fb: String, d: String) = (cfg[k] ?: cfg[fb] ?: d) == "1"
 
+    // Every HUD control is keyed on `cfg` so the drawer always mirrors the
+    // setup currently in use: when a container launches, the overlay honors the
+    // saved config and these re-initialize from that same live config (just like
+    // the FPS-limiter rows above). Un-keyed remembers would capture stale values
+    // once and drift from what's actually on screen.
     // Orientation is flipped by tapping the HUD in-game; preserve it on write-back.
-    val hudMode = remember { cfg.getOrDefault("hudMode", "vertical") }
+    val hudMode = remember(cfg) { cfg.getOrDefault("hudMode", "vertical") }
 
-    var gameHub by remember { mutableStateOf(cfg.getOrDefault("hudStyle", "classic") == "gamehub") }
-    var showFPS by remember { mutableStateOf(b("showFPS", "showFPS", "1")) }
-    var showGraph by remember { mutableStateOf(b("showFPSGraph", "showFPSGraph", "0")) }
-    var showCPU by remember { mutableStateOf(b("showCPUUsage", "showCPULoad", "1")) }
-    var showGPU by remember { mutableStateOf(b("showGPULoad", "showGPULoad", "1")) }
-    var showRAM by remember { mutableStateOf(b("showRAM", "showRAM", "1")) }
-    var showPower by remember { mutableStateOf(b("showPower", "showPower", "1")) }
-    var showTemp by remember { mutableStateOf(b("showTemp", "showBatteryTemp", "1")) }
-    var showEngine by remember { mutableStateOf(b("showEngine", "showRenderer", "1")) }
-    var showGpuModel by remember { mutableStateOf(b("showGpuModel", "showGpuModel", "0")) }
-    var dualBattery by remember { mutableStateOf(b("hudDualBattery", "hudDualBattery", "0")) }
+    var gameHub by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudStyle", "classic") == "gamehub") }
+    var showFPS by remember(cfg) { mutableStateOf(b("showFPS", "showFPS", "1")) }
+    var showGraph by remember(cfg) { mutableStateOf(b("showFPSGraph", "showFPSGraph", "0")) }
+    var showCPU by remember(cfg) { mutableStateOf(b("showCPUUsage", "showCPULoad", "1")) }
+    var showGPU by remember(cfg) { mutableStateOf(b("showGPULoad", "showGPULoad", "1")) }
+    var showRAM by remember(cfg) { mutableStateOf(b("showRAM", "showRAM", "1")) }
+    var showPower by remember(cfg) { mutableStateOf(b("showPower", "showPower", "1")) }
+    var showTemp by remember(cfg) { mutableStateOf(b("showTemp", "showBatteryTemp", "1")) }
+    var showEngine by remember(cfg) { mutableStateOf(b("showEngine", "showRenderer", "1")) }
+    var showGpuModel by remember(cfg) { mutableStateOf(b("showGpuModel", "showGpuModel", "0")) }
+    var dualBattery by remember(cfg) { mutableStateOf(b("hudDualBattery", "hudDualBattery", "0")) }
 
-    var scaleValue by remember { mutableFloatStateOf(cfg.getOrDefault("hudScale", "92").toFloatOrNull() ?: 92f) }
-    var opacityValue by remember { mutableFloatStateOf(cfg.getOrDefault("hudOpacity", "80").toFloatOrNull() ?: 80f) }
-    var transValue by remember { mutableFloatStateOf(cfg.getOrDefault("hudTransparency", "0").toFloatOrNull() ?: 0f) }
+    var scaleValue by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("hudScale", "92").toFloatOrNull() ?: 92f) }
+    var opacityValue by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("hudOpacity", "80").toFloatOrNull() ?: 80f) }
+    var transValue by remember(cfg) { mutableFloatStateOf(cfg.getOrDefault("hudTransparency", "0").toFloatOrNull() ?: 0f) }
 
     val skins = listOf("classic", "neon", "mono")
     val colors = listOf("soft", "mid", "vivid")
     val outlines = listOf("off", "soft", "strong")
-    var skin by remember { mutableStateOf(cfg.getOrDefault("hudSkin", "classic")) }
-    var color by remember { mutableStateOf(cfg.getOrDefault("hudColor", "mid")) }
-    var outline by remember { mutableStateOf(cfg.getOrDefault("hudOutline", "soft")) }
+    var skin by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudSkin", "classic")) }
+    var color by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudColor", "mid")) }
+    var outline by remember(cfg) { mutableStateOf(cfg.getOrDefault("hudOutline", "soft")) }
 
     fun i(v: Boolean) = if (v) "1" else "0"
     // Identical key set to ContainerDetailScreen.FpsCounterConfigDialog.buildConfig(),
