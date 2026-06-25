@@ -20,6 +20,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.background
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -34,6 +36,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
@@ -49,6 +53,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.winlator.star.core.UpdateManager
 import androidx.compose.runtime.rememberCoroutineScope
 import com.winlator.star.ui.LocalTopBarActions
 import com.winlator.star.ui.topBarActionsState
@@ -300,6 +306,23 @@ private fun AppShell(
     val backstackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backstackEntry?.destination?.route ?: startRoute
 
+    // In-app update banner: only when a newer stable exists, notify is on, and
+    // this version wasn't skipped.
+    var bannerUpdate by remember { mutableStateOf<UpdateManager.UpdateInfo?>(null) }
+    var bannerDismissed by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        UpdateManager.check(context) { info ->
+            (context as? MainActivity)?.runOnUiThread {
+                if (info != null && info.isNewer &&
+                    UpdateManager.isNotifyEnabled(context) &&
+                    info.versionCode != UpdateManager.skippedVersionCode(context)
+                ) {
+                    bannerUpdate = info
+                }
+            }
+        }
+    }
+
     // Clear top bar actions on navigation so stale actions from a previous screen don't persist.
     // Screens that need actions re-set them via SideEffect on each recomposition.
     LaunchedEffect(currentRoute) {
@@ -359,12 +382,27 @@ private fun AppShell(
                 )
             },
         ) { innerPadding ->
-            AppNavGraph(
-                navController = navController,
-                selectedInputProfileId = selectedInputProfileId,
-                startRoute = startRoute,
-                modifier = Modifier.padding(innerPadding),
-            )
+            Column(modifier = Modifier.padding(innerPadding)) {
+                val upd = bannerUpdate
+                if (upd != null && !bannerDismissed && !editInputControls) {
+                    UpdateBanner(
+                        versionName = upd.versionName,
+                        onUpdate = {
+                            (context as? MainActivity)?.let { UpdateManager.downloadAndInstall(it, upd) {} }
+                        },
+                        onDismiss = {
+                            bannerDismissed = true
+                            UpdateManager.skipVersion(context, upd.versionCode)
+                        },
+                    )
+                }
+                AppNavGraph(
+                    navController = navController,
+                    selectedInputProfileId = selectedInputProfileId,
+                    startRoute = startRoute,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
     } // end CompositionLocalProvider
@@ -398,7 +436,39 @@ private fun AllFilesAccessDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
 }
 
 @Composable
+private fun UpdateBanner(versionName: String, onUpdate: () -> Unit, onDismiss: () -> Unit) {
+    val ink = androidx.compose.ui.graphics.Color(0xFF1A1A2E)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(androidx.compose.ui.graphics.Color(0xFFFFC107))
+            .padding(start = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Update available — V $versionName",
+            color = ink,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 13.sp,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = onUpdate) {
+            Text("Update", color = ink, fontWeight = FontWeight.Bold)
+        }
+        TextButton(onClick = onDismiss) {
+            Text("Skip", color = ink)
+        }
+    }
+}
+
+@Composable
 private fun AboutDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val activity = context as? MainActivity
+    var update by remember { mutableStateOf<UpdateManager.UpdateInfo?>(null) }
+    LaunchedEffect(Unit) {
+        UpdateManager.check(context) { info -> activity?.runOnUiThread { update = info } }
+    }
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             shape = RoundedCornerShape(16.dp),
@@ -428,13 +498,24 @@ private fun AboutDialog(onDismiss: () -> Unit) {
                     fontWeight = FontWeight.Bold,
                     color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
                 )
+                val newer = update?.takeIf { it.isNewer }
                 Text(
                     // Read from BuildConfig so it tracks the gradle versionName automatically
                     // and never drifts from the real app version again.
-                    text = "V ${BuildConfig.VERSION_NAME}",
+                    text = "V ${BuildConfig.VERSION_NAME}" +
+                        (newer?.let { " · latest V ${it.versionName}" } ?: ""),
                     fontSize = 13.sp,
                     color = com.winlator.star.ui.theme.OnSurfaceVariant
                 )
+                if (newer != null) {
+                    Button(
+                        onClick = { activity?.let { UpdateManager.downloadAndInstall(it, newer) {} } },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = androidx.compose.ui.graphics.Color(0xFF4CAF50)
+                        ),
+                        modifier = androidx.compose.ui.Modifier.fillMaxWidth()
+                    ) { Text("Update now", color = androidx.compose.ui.graphics.Color.White) }
+                }
 
                 Spacer(androidx.compose.ui.Modifier.height(4.dp))
                 Divider(color = com.winlator.star.ui.theme.Divider)

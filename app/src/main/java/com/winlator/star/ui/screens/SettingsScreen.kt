@@ -53,6 +53,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -77,6 +78,7 @@ import com.winlator.star.contents.ContentsManager
 import com.winlator.star.core.AppUtils
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.PreloaderDialog
+import com.winlator.star.core.UpdateManager
 import com.winlator.star.fexcore.FEXCoreEditPresetDialog
 import com.winlator.star.fexcore.FEXCorePreset
 import com.winlator.star.fexcore.FEXCorePresetManager
@@ -108,6 +110,14 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
     var useDRI3 by remember { mutableStateOf(prefs.getBoolean("use_dri3", true)) }
     var useXR by remember { mutableStateOf(prefs.getBoolean("use_xr", true)) }
     var cursorSpeed by remember { mutableFloatStateOf(prefs.getFloat("cursor_speed", 1.0f)) }
+
+    // Updates
+    var updateInfo by remember { mutableStateOf<UpdateManager.UpdateInfo?>(null) }
+    var checkingUpdate by remember { mutableStateOf(false) }
+    var notifyUpdates by remember { mutableStateOf(UpdateManager.isNotifyEnabled(context)) }
+    LaunchedEffect(Unit) {
+        UpdateManager.check(context) { info -> activity?.runOnUiThread { updateInfo = info } }
+    }
     var enableWineDebug by remember { mutableStateOf(prefs.getBoolean("enable_wine_debug", false)) }
     var wineDebugChannels by remember { mutableStateOf(
         (prefs.getString("wine_debug_channels", SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS) ?: SettingsFragment.DEFAULT_WINE_DEBUG_CHANNELS).split(",").toMutableList()
@@ -375,6 +385,67 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // ── Updates ──────────────────────────────────────────────────
+        FieldSetLabel("Updates")
+        FieldSet {
+            val latest = updateInfo
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Installed: V ${UpdateManager.installedVersionName()}" +
+                        (latest?.let { "   ·   Latest: V ${it.versionName}" } ?: ""),
+                    color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f)
+                )
+                if (checkingUpdate) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            if (latest != null && latest.isNewer) {
+                Text(
+                    "Update available", color = Color(0xFFFFC107), fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 4.dp)
+                )
+                if (latest.notes.isNotBlank()) {
+                    Text(
+                        latest.notes, color = Color(0xFFCCCCCC), fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
+                }
+                Button(
+                    onClick = { activity?.let { UpdateManager.downloadAndInstall(it, latest) {} } },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50)),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                ) { Text("Download & install V ${latest.versionName}", color = Color.White) }
+            } else if (latest != null) {
+                Text("You're up to date.", color = Color(0xFF888888), fontSize = 13.sp)
+            }
+            Button(
+                onClick = {
+                    checkingUpdate = true
+                    UpdateManager.check(context) { info ->
+                        activity?.runOnUiThread {
+                            updateInfo = info
+                            checkingUpdate = false
+                            when {
+                                info == null -> AppUtils.showToast(context, "Couldn't check for updates")
+                                !info.isNewer -> AppUtils.showToast(context, "You're on the latest version")
+                                else -> {}
+                            }
+                        }
+                    }
+                },
+                enabled = !checkingUpdate,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) { Text(if (checkingUpdate) "Checking…" else "Check for updates", color = Color.White) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = notifyUpdates, onCheckedChange = {
+                    notifyUpdates = it
+                    UpdateManager.setNotifyEnabled(context, it)
+                })
+                Text("Notify me about updates", color = Color(0xFFCCCCCC), fontSize = 14.sp)
+            }
+        }
+
         // ── Box64 Preset ─────────────────────────────────────────────
         FieldSetLabel("Box64")
         FieldSet {

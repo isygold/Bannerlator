@@ -165,6 +165,27 @@ jobs:
         mv app/build/outputs/apk/pubg/release/app-pubg-release.apk \
            app/build/outputs/apk/pubg/release/Bannerlator-${N}-pubg.apk
 
+    - name: Generate update.json
+      # Drives the in-app updater (UpdateManager). The app fetches this from
+      # releases/latest/download/update.json; because make_latest=true +
+      # prerelease=false below, only stable cuts ever change it.
+      run: |
+        VERSION_CODE=$(grep versionCode app/build.gradle | head -1 | grep -oE '[0-9]+' | head -1)
+        N="${{ github.event.inputs.release_number }}"
+        NOTES="${{ github.event.inputs.release_notes }}"
+        [ -z "$NOTES" ] && NOTES="${{ github.event.inputs.release_title }}"
+        jq -n \
+          --argjson vc "$VERSION_CODE" \
+          --arg vn "$VERSION" \
+          --arg notes "$NOTES" \
+          --arg std "Bannerlator-${N}-standard.apk" \
+          --arg lud "Bannerlator-${N}-ludashi.apk" \
+          --arg pbg "Bannerlator-${N}-pubg.apk" \
+          '{versionCode:$vc, versionName:$vn, notes:$notes, minSupported:1,
+            apk:{"com.winlator.banner":$std,"com.ludashi.benchmark":$lud,"com.tencent.ig":$pbg}}' \
+          > update.json
+        echo "Generated update.json:"; cat update.json
+
     - name: Generate changelog table
       run: |
         {
@@ -198,5 +219,6 @@ jobs:
           app/build/outputs/apk/standard/release/Bannerlator-${{ github.event.inputs.release_number }}-standard.apk
           app/build/outputs/apk/ludashi/release/Bannerlator-${{ github.event.inputs.release_number }}-ludashi.apk
           app/build/outputs/apk/pubg/release/Bannerlator-${{ github.event.inputs.release_number }}-pubg.apk
+          update.json
         prerelease: false
         make_latest: true
