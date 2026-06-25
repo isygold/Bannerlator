@@ -49,13 +49,25 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 1.6** — built from Star **marcescence** (`versionName 1.6`, `versionCode 24`) |
+| **Version** | Bannerlator **V 1.7** — built from Star **marcescence** (`versionName 1.7`, `versionCode 25`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
 ---
 
-## 🆕 What's New in 1.6
+## 🆕 What's New in 1.7
+
+- **Steam store — downloads fixed.** Steam game downloads that failed with "Download failed: Unknown error" now work. Two bugs fixed: a **login race** during Steam connection cycling (downloads started before the session re-logged-on), and the full **BouncyCastle** provider not being registered, which crashed depot-manifest saving with a `SHA-1 for provider BC` error.
+- **Components installer (new).** A new in-container **Components** menu installs Wine dependencies — mono, gecko, .NET, vcredist, d3dx, and more — into a container's prefix from a browsable catalog. File-drop installs plus an execute engine for .NET/vcredist-style installers; includes a Win7/WinXP mode and a persisted **"Installed"** status per container.
+- **On-screen controls — overlay opacity.** The overlay-opacity slider moved into the **in-game side menu (Controls tab)**; it's now **live** and a true **0–100 %** (0 % = fully invisible).
+- **FPS overlay.** **Tap the overlay** to toggle **vertical / horizontal** orientation live, and it now shows a live **D3D API label** (VKD3D vs DXVK).
+- **Scrollable Advanced Vulkan dialogs.** The Advanced Vulkan / Graphics Driver config dialogs no longer cut off — they scroll.
+- **Video playback.** Bundled full **ffmpeg-8** libraries for winedmo, improving in-game video / FMV decode.
+  - **⚠️ Updating from an older version?** If a game fails to start after updating, **reinstall imageFS** — open the app's **Settings**, scroll to the **bottom**, and tap **Reinstall imageFS**.
+
+---
+
+## Previously in 1.6
 
 - **New Compatibility Layers download menu.** Browse, download and install **Wine/Proton, DXVK, VKD3D, Box64/WOWBox64 and FEXCore** from one cloud menu on each row — with **Wine/Proton tabs**, an **"in use"** marker for the version the container is using, **install-from-file**, and **live download + install progress bars**. (The download UI follows the pattern of the built-in Adrenotools GPU-driver downloader.)
 - **Standalone FPS limiter.** The in-game FPS cap now works with **any** frame-generation engine — **Off / bionic-fg / lsfg-vk** — on **both** the OpenGL and Vulkan host renderers, live. (Pacing mechanism ported from **GameNative**; when lsfg-vk is multiplying ≥2×, the limiter steps aside so lsfg's own pacing governs.)

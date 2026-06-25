@@ -15,6 +15,29 @@ gh workflow run "Any branch compilation." --repo The412Banner/star-compose --ref
 
 ---
 
+## 2026-06-24 — 🚀 Release 1.7
+
+Cut **Bannerlator 1.7** (`versionName 1.7`, `versionCode 25`, commit `30c869c`). Version bumped in
+`app/build.gradle`; splash screen reads `BuildConfig.VERSION_NAME` so it shows "V 1.7" automatically
+(no hardcoded version strings anywhere). README version line + "What's New in 1.7" updated (1.6 notes
+demoted to "Previously in 1.6"). Release build = workflow "Nightly Manual Release Build" run
+`28140854161` (tag `1.7`, builds standard/ludashi/pubg release APKs). Everything merged to main since
+the 1.6 tag is in this release:
+
+- **Steam store — downloads fixed**: login-race guard (`9f6197e`) + BouncyCastle SHA-1 provider
+  registration (`63e4366`). ⚠️ download-only; raw `wine exe` launch still has no steam-emu (DRM games
+  may not run — see `docs/STEAM_PLUVIA_PORT_PLAN.md`).
+- **Components installer (new)**: in-container Wine-dependency installer (Phase 2 file-drop + Phase 3b
+  execute engine), copy_dll glob + arch-targeting fixes, win7/winXP set_windows, persisted Installed
+  status.
+- **On-screen controls**: overlay-opacity slider moved to in-game side menu, live, true 0–100 %.
+- **FPS overlay**: tap to toggle orientation, live D3D API label (VKD3D vs DXVK).
+- **Vulkan**: Advanced Vulkan / Graphics Driver dialogs scrollable.
+- **Video**: full ffmpeg-8 libs bundled for winedmo.
+
+⚠️ DEVICE-TEST status: Steam download fix, Components installer, and overlay-opacity were CI-green but
+device-test was still pending/partial at release time.
+
 ## 2026-06-24 (late 2) — Steam download fixes + Pluvia/GameNative Steam-store recon & plan
 
 **Steam download bug (✅ MERGED to main `63e4366`/`9f6197e`; compile CI `28139917719` ✅ green;
