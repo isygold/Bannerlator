@@ -739,44 +739,129 @@ private fun HudContent(state: XServerDrawerState) {
     }
 
     val cfg = remember(fpsConfig) { parseConfig(fpsConfig) }
-    val hudMode = remember { cfg.getOrDefault("hudMode", "horizontal") }
+    // Read with fallback across classic + gamehub key names (mirrors the container dialog).
+    fun b(k: String, fb: String, d: String) = (cfg[k] ?: cfg[fb] ?: d) == "1"
 
-    var showFPS by remember { mutableStateOf(cfg.getOrDefault("showFPS", "1") == "1") }
-    var showCPULoad by remember { mutableStateOf(cfg.getOrDefault("showCPULoad", "0") == "1") }
-    var showGPULoad by remember { mutableStateOf(cfg.getOrDefault("showGPULoad", "0") == "1") }
-    var showRAM by remember { mutableStateOf(cfg.getOrDefault("showRAM", "0") == "1") }
-    var showRenderer by remember { mutableStateOf(cfg.getOrDefault("showRenderer", "0") == "1") }
-    var showBatteryTemp by remember { mutableStateOf(cfg.getOrDefault("showBatteryTemp", "0") == "1") }
+    // Orientation is flipped by tapping the HUD in-game; preserve it on write-back.
+    val hudMode = remember { cfg.getOrDefault("hudMode", "vertical") }
 
-    val initScale = cfg.getOrDefault("hudScale", "100").toFloatOrNull() ?: 100f
-    val initTrans = cfg.getOrDefault("hudTransparency", "0").toFloatOrNull() ?: 0f
-    var scaleValue by remember { mutableFloatStateOf(initScale) }
-    var transValue by remember { mutableFloatStateOf(initTrans) }
+    var gameHub by remember { mutableStateOf(cfg.getOrDefault("hudStyle", "classic") == "gamehub") }
+    var showFPS by remember { mutableStateOf(b("showFPS", "showFPS", "1")) }
+    var showGraph by remember { mutableStateOf(b("showFPSGraph", "showFPSGraph", "0")) }
+    var showCPU by remember { mutableStateOf(b("showCPUUsage", "showCPULoad", "1")) }
+    var showGPU by remember { mutableStateOf(b("showGPULoad", "showGPULoad", "1")) }
+    var showRAM by remember { mutableStateOf(b("showRAM", "showRAM", "1")) }
+    var showPower by remember { mutableStateOf(b("showPower", "showPower", "1")) }
+    var showTemp by remember { mutableStateOf(b("showTemp", "showBatteryTemp", "1")) }
+    var showEngine by remember { mutableStateOf(b("showEngine", "showRenderer", "1")) }
+    var showGpuModel by remember { mutableStateOf(b("showGpuModel", "showGpuModel", "0")) }
+    var dualBattery by remember { mutableStateOf(b("hudDualBattery", "hudDualBattery", "0")) }
 
+    var scaleValue by remember { mutableFloatStateOf(cfg.getOrDefault("hudScale", "92").toFloatOrNull() ?: 92f) }
+    var opacityValue by remember { mutableFloatStateOf(cfg.getOrDefault("hudOpacity", "80").toFloatOrNull() ?: 80f) }
+    var transValue by remember { mutableFloatStateOf(cfg.getOrDefault("hudTransparency", "0").toFloatOrNull() ?: 0f) }
+
+    val skins = listOf("classic", "neon", "mono")
+    val colors = listOf("soft", "mid", "vivid")
+    val outlines = listOf("off", "soft", "strong")
+    var skin by remember { mutableStateOf(cfg.getOrDefault("hudSkin", "classic")) }
+    var color by remember { mutableStateOf(cfg.getOrDefault("hudColor", "mid")) }
+    var outline by remember { mutableStateOf(cfg.getOrDefault("hudOutline", "soft")) }
+
+    fun i(v: Boolean) = if (v) "1" else "0"
+    // Identical key set to ContainerDetailScreen.FpsCounterConfigDialog.buildConfig(),
+    // so the in-game drawer and the pre-launch dialog stay fully interchangeable.
     fun buildConfig(): String = listOf(
+        "hudStyle=${if (gameHub) "gamehub" else "classic"}",
         "hudMode=$hudMode",
-        "showFPS=${if (showFPS) "1" else "0"}",
-        "showCPULoad=${if (showCPULoad) "1" else "0"}",
-        "showGPULoad=${if (showGPULoad) "1" else "0"}",
-        "showRAM=${if (showRAM) "1" else "0"}",
-        "showRenderer=${if (showRenderer) "1" else "0"}",
-        "showBatteryTemp=${if (showBatteryTemp) "1" else "0"}",
+        "showFPS=${i(showFPS)}",
+        "showFPSGraph=${i(showGraph)}",
+        "showCPUUsage=${i(showCPU)}",
+        "showCPULoad=${i(showCPU)}",
+        "showGPULoad=${i(showGPU)}",
+        "showRAM=${i(showRAM)}",
+        "showPower=${i(showPower)}",
+        "showTemp=${i(showTemp)}",
+        "showBatteryTemp=${i(showTemp)}",
+        "showEngine=${i(showEngine)}",
+        "showRenderer=${i(showEngine)}",
+        "showGpuModel=${i(showGpuModel)}",
+        "hudDualBattery=${i(dualBattery)}",
+        "hudSkin=$skin",
+        "hudColor=$color",
+        "hudOutline=$outline",
         "hudScale=${scaleValue.toInt()}",
+        "hudOpacity=${opacityValue.toInt()}",
         "hudTransparency=${transValue.toInt()}",
     ).joinToString(",")
 
-    // Size and Opacity sliders
-    LabeledSlider("HUD Scale", scaleValue, 50f..200f, { scaleValue = it }, { state.onFpsConfigApply?.invoke(buildConfig()) }, format = { "${it.toInt()}%" })
-    LabeledSlider("HUD Opacity", transValue, 0f..100f, { transValue = it }, { state.onFpsConfigApply?.invoke(buildConfig()) }, format = { "${it.toInt()}%" })
+    fun apply() { state.onFpsConfigApply?.invoke(buildConfig()) }
+
+    ToggleRow("GameHub-style HUD", gameHub) { gameHub = !gameHub; apply() }
+    Text(
+        if (gameHub) "Rich overlay: skins, colored fields, live FPS graph. Style change applies on next launch."
+        else "Classic Bannerlator overlay.",
+        color = DimWhite.copy(alpha = 0.5f), fontSize = 11.sp,
+        modifier = Modifier.padding(start = 4.dp, top = 2.dp, bottom = 4.dp)
+    )
 
     HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
 
-    ToggleRow("Show FPS", showFPS) { showFPS = !showFPS; state.onFpsConfigApply?.invoke(buildConfig()) }
-    ToggleRow("Show CPU Load", showCPULoad) { showCPULoad = !showCPULoad; state.onFpsConfigApply?.invoke(buildConfig()) }
-    ToggleRow("Show GPU Load", showGPULoad) { showGPULoad = !showGPULoad; state.onFpsConfigApply?.invoke(buildConfig()) }
-    ToggleRow("Show RAM", showRAM) { showRAM = !showRAM; state.onFpsConfigApply?.invoke(buildConfig()) }
-    ToggleRow("Show Renderer", showRenderer) { showRenderer = !showRenderer; state.onFpsConfigApply?.invoke(buildConfig()) }
-    ToggleRow("Show Battery Temp", showBatteryTemp) { showBatteryTemp = !showBatteryTemp; state.onFpsConfigApply?.invoke(buildConfig()) }
+    LabeledSlider("HUD Scale", scaleValue, 50f..150f, { scaleValue = it }, { apply() }, format = { "${it.toInt()}%" })
+    if (gameHub) LabeledSlider("HUD Opacity", opacityValue, 0f..100f, { opacityValue = it }, { apply() }, format = { "${it.toInt()}%" })
+    else LabeledSlider("HUD Transparency", transValue, 0f..50f, { transValue = it }, { apply() }, format = { "${it.toInt()}" })
+
+    HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
+
+    ToggleRow("Frame rate (FPS)", showFPS) { showFPS = !showFPS; apply() }
+    if (gameHub) ToggleRow("FPS graph", showGraph) { showGraph = !showGraph; apply() }
+    ToggleRow("CPU", showCPU) { showCPU = !showCPU; apply() }
+    ToggleRow("GPU", showGPU) { showGPU = !showGPU; apply() }
+    ToggleRow("Memory (RAM)", showRAM) { showRAM = !showRAM; apply() }
+    ToggleRow("Power", showPower) { showPower = !showPower; apply() }
+    ToggleRow("Temperature", showTemp) { showTemp = !showTemp; apply() }
+    ToggleRow("Engine", showEngine) { showEngine = !showEngine; apply() }
+    if (gameHub) {
+        ToggleRow("GPU model", showGpuModel) { showGpuModel = !showGpuModel; apply() }
+        ToggleRow("Dual-battery power fix", dualBattery) { dualBattery = !dualBattery; apply() }
+
+        HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
+        HudChipRow("HUD skin", listOf("Classic", "Neon", "Mono"), skins.indexOf(skin)) { skin = skins[it]; apply() }
+        HudChipRow("HUD color", listOf("Soft", "Mid", "Vivid"), colors.indexOf(color)) { color = colors[it]; apply() }
+        HudChipRow("HUD outline", listOf("Off", "Soft", "Strong"), outlines.indexOf(outline)) { outline = outlines[it]; apply() }
+    }
+}
+
+// ───── 3-stop chip selector (skin / color / outline) ─────
+
+@Composable
+private fun HudChipRow(label: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Text(label, style = MaterialTheme.typography.bodySmall, color = DimWhite)
+        Spacer(Modifier.height(4.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            options.forEachIndexed { idx, opt ->
+                val sel = idx == selected
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = if (idx < options.lastIndex) 6.dp else 0.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (sel) PrimaryDim else DarkSurface)
+                        .clickable { onSelect(idx) }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        opt,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (sel) Color.White else DimWhite,
+                        fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal
+                    )
+                }
+            }
+        }
+    }
 }
 
 // ───── Controls Tab ─────
