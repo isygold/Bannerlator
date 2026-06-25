@@ -63,7 +63,7 @@
 - **FPS overlay.** **Tap the overlay** to toggle **vertical / horizontal** orientation live, and it now shows a live **D3D API label** (VKD3D vs DXVK).
 - **Scrollable Advanced Vulkan dialogs.** The Advanced Vulkan / Graphics Driver config dialogs no longer cut off — they scroll.
 - **Video playback.** Bundled full **ffmpeg-8** libraries for winedmo, improving in-game video / FMV decode.
-  - **⚠️ Updating from an older version?** If a game fails to start after updating, **reinstall imageFS** — open the app's **Settings**, scroll to the **bottom**, and tap **Reinstall imageFS**.
+  - **📦 Please reinstall imageFS after updating.** The ffmpeg-8 libraries live inside imageFS, so a normal app update won't add them — **reinstall imageFS** to get the improved video / FMV playback (and it's also the fix if a game fails to start after updating). Open the app's **Settings**, scroll to the **bottom**, and tap **Reinstall imageFS**.
 
 ---
 
