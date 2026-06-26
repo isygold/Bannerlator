@@ -127,7 +127,8 @@ class SavesViewModel(app: Application) : AndroidViewModel(app) {
                     _isLoading.value = false
                     Toast.makeText(context, "Save exported to ${exportFile.absolutePath}", Toast.LENGTH_LONG).show()
                     if (shareAfterExport) {
-                        val fileUri = FileProvider.getUriForFile(context, "com.winlator.fileprovider", exportFile)
+                        val authority = context.packageName + ".tileprovider"
+                        val fileUri = FileProvider.getUriForFile(context, authority, exportFile)
                         val shareIntent = Intent(Intent.ACTION_SEND).apply {
                             type = "application/octet-stream"
                             putExtra(Intent.EXTRA_STREAM, fileUri)

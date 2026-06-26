@@ -44,8 +44,11 @@ object UpdateManager {
     private const val API_RELEASES_URL =
         "https://api.github.com/repos/$REPO/releases?per_page=30"
 
-    // Reuse the FileProvider already declared in the manifest.
-    private const val FILE_PROVIDER_AUTHORITY = "com.winlator.star.tileprovider"
+    // Reuse the FileProvider already declared in the manifest. The authority is keyed
+    // to the per-flavor applicationId (${applicationId}.tileprovider) so the standard,
+    // ludashi and pubg flavors don't collide on a single device — a fixed authority
+    // caused INSTALL_FAILED_CONFLICTING_PROVIDER when two flavors were installed.
+    private const val FILE_PROVIDER_SUFFIX = ".tileprovider"
 
     private const val PREF_NOTIFY = "update_notify_enabled"
     private const val PREF_SKIP = "update_skip_version"
@@ -260,7 +263,8 @@ object UpdateManager {
 
     private fun install(activity: Activity, apk: File) {
         try {
-            val uri = FileProvider.getUriForFile(activity, FILE_PROVIDER_AUTHORITY, apk)
+            val authority = activity.packageName + FILE_PROVIDER_SUFFIX
+            val uri = FileProvider.getUriForFile(activity, authority, apk)
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, "application/vnd.android.package-archive")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
