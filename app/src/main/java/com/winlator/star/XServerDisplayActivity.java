@@ -1659,6 +1659,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
             });
         }
 
+        // ASR has no compositor copyArea path either, so drive the perf HUD per present (same as
+        // the Vulkan tick above) — otherwise the HUD shows no FPS under the SurfaceFlinger renderer.
+        if (renderer instanceof com.winlator.star.renderer.ASurfaceRenderer) {
+            ((com.winlator.star.renderer.ASurfaceRenderer) renderer).setHudFrameTick(wid -> {
+                if (wid == frameRatingWindowId) {
+                    if (frameRating != null) frameRating.update();
+                    if (frameRatingHorizontal != null) frameRatingHorizontal.update();
+                }
+            });
+        }
+
         if (shortcut != null) {
             renderer.setUnviewableWMClasses("explorer.exe");
         }

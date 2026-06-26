@@ -302,37 +302,17 @@ public class ASurfaceRenderer implements HostRenderer,
                                       boolean isDesktopWindow, boolean isDesktopChild,
                                       Rect outSrc, Rect outDst) {
         outSrc.set(0, 0, w, h);
-        if (isDesktopWindow && rootX == 0 && rootY == 0) {
-            computeLetterboxRect(w, h, surfaceWidth, surfaceHeight, outDst);
-            if (cachedDesktopDst == null) cachedDesktopDst = new Rect();
-            cachedDesktopDst.set(outDst);
-            cachedDesktopSrcW = w; cachedDesktopSrcH = h;
-        } else if (isDesktopChild && cachedDesktopDst != null && cachedDesktopSrcW > 0 && cachedDesktopSrcH > 0) {
-            float scaleX = (float) cachedDesktopDst.width() / cachedDesktopSrcW;
-            float scaleY = (float) cachedDesktopDst.height() / cachedDesktopSrcH;
-            int dstL = cachedDesktopDst.left + (int) (rootX * scaleX);
-            int dstT = cachedDesktopDst.top + (int) (rootY * scaleY);
-            outDst.set(dstL, dstT, dstL + (int) (w * scaleX), dstT + (int) (h * scaleY));
-        } else {
-            // Non-desktop window: map through the view transform (scene scale/offset).
-            int dstL = viewTransformation.viewOffsetX + Math.round(rootX * viewTransformation.sceneScaleX);
-            int dstT = viewTransformation.viewOffsetY + Math.round(rootY * viewTransformation.sceneScaleY);
-            outDst.set(dstL, dstT,
-                    dstL + Math.round(w * viewTransformation.sceneScaleX),
-                    dstT + Math.round(h * viewTransformation.sceneScaleY));
-        }
+        // Uniform map from X-screen space to the letterboxed surface region. `aspect` is the
+        // surface-pixels-per-X-pixel scale (viewWidth/screenWidth) and viewOffset is the
+        // letterbox bar. rootX/rootY are already root-relative X-screen coords, so every window
+        // (desktop, child, top-level) scales identically — no special desktop casing needed.
+        // (Previously used the normalized sceneScaleX (~1.0), which left the game at native size
+        // in the top-left corner instead of filling the surface.)
+        float s = viewTransformation.aspect > 0f ? viewTransformation.aspect : 1f;
+        int dstL = viewTransformation.viewOffsetX + Math.round(rootX * s);
+        int dstT = viewTransformation.viewOffsetY + Math.round(rootY * s);
+        outDst.set(dstL, dstT, dstL + Math.round(w * s), dstT + Math.round(h * s));
         return adjustRectLT(outSrc, outDst);
-    }
-
-    private void computeLetterboxRect(int srcW, int srcH, int dstW, int dstH, Rect outRect) {
-        if (srcH == 0 || dstH == 0) { outRect.set(0, 0, dstW, dstH); return; }
-        float srcAspect = (float) srcW / srcH;
-        float dstAspect = (float) dstW / dstH;
-        int scaledW, scaledH;
-        if (srcAspect > dstAspect) { scaledW = dstW; scaledH = (int) (dstW / srcAspect); }
-        else { scaledH = dstH; scaledW = (int) (dstH * srcAspect); }
-        int left = (dstW - scaledW) / 2, top = (dstH - scaledH) / 2;
-        outRect.set(left, top, left + scaledW, top + scaledH);
     }
 
     private boolean adjustRectLT(Rect src, Rect dst) {
@@ -381,7 +361,7 @@ public class ASurfaceRenderer implements HostRenderer,
             if (DEBUG) Log.d(TAG, "push id=" + windowId + " gpu=" + isGpu + " ahb=" + ahbPtr);
             if (ahbPtr != 0) {
                 nativeSetWindowBuffer(windowId, ahbPtr, -1, windowId, 0);
-                tickHud();
+                if (hudFrameTick != null) hudFrameTick.accept(windowId);
             }
         }
     }
@@ -457,18 +437,16 @@ public class ASurfaceRenderer implements HostRenderer,
         }
     }
 
-    /** Invoked from native (libasurface_renderer) when a scanout frame is latched by SurfaceFlinger. */
+    /** Invoked from native (libasurface_renderer) when a scanout frame is latched by SurfaceFlinger.
+     *  The per-present HUD tick happens in pushWindowBuffer; nothing extra needed here for now. */
     @androidx.annotation.Keep
     public void onScanoutFrameComplete(long packed) {
-        tickHud();
     }
 
-    private void tickHud() {
-        if (hudRef instanceof com.winlator.star.widget.FrameRating) {
-            com.winlator.star.widget.FrameRating fr = (com.winlator.star.widget.FrameRating) hudRef;
-            if (fr.isAttachedToWindow()) fr.post(fr);
-        }
-    }
+    // Ticked once per presented game frame (the activity wires this, gating on its FPS window),
+    // mirroring VulkanRenderer.setHudFrameTick — the perf HUD is otherwise never driven under ASR.
+    private java.util.function.IntConsumer hudFrameTick = null;
+    public void setHudFrameTick(java.util.function.IntConsumer c) { hudFrameTick = c; }
 
     // -------------------------------------------------------------------------
     // HostRenderer
