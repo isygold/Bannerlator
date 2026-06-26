@@ -273,10 +273,6 @@ public class PresentExtension implements Extension {
                 // untouched. Falls back to copyArea for non-AHB (SHM) pixmaps.
                 final com.winlator.star.renderer.ASurfaceRenderer asr =
                     (com.winlator.star.renderer.ASurfaceRenderer) xr;
-                boolean dbgGpu = pixmap.drawable.getTexture() instanceof GPUImage;
-                long dbgAhb = dbgGpu ? ((GPUImage) pixmap.drawable.getTexture()).getHardwareBufferPtr() : 0;
-                android.util.Log.d("ASR_Present", "present win=" + window.id + " cls=" + window.getClassName()
-                        + " mapped=" + window.attributes.isMapped() + " gpu=" + dbgGpu + " ahb=" + dbgAhb);
                 if (window.attributes.isMapped()
                         && pixmap.drawable.getTexture() instanceof GPUImage
                         && ((GPUImage) pixmap.drawable.getTexture()).getHardwareBufferPtr() != 0) {
