@@ -77,3 +77,23 @@ target_link_libraries(vulkan_renderer
         atomic
 )
 
+# SurfaceFlinger (ASurfaceRenderer / ASR) host renderer — ported from
+# GameNative PR #1582 (André Vito), built on StevenMX's scanout work.
+# Self-contained: standard NDK + dlsym'd ASurfaceControl/ASurfaceTransaction
+# (gated to API>=29 at runtime); the scanout AHB arrives via JNI.
+add_library(asurface_renderer SHARED
+        asurfacerenderer/asurface_jni.cpp
+        asurfacerenderer/ASurfaceRendererContext.cpp
+)
+
+target_compile_options(asurface_renderer PRIVATE
+        -Wall -Wextra -fvisibility=hidden -std=c++17
+)
+
+target_link_libraries(asurface_renderer
+        log
+        android
+        dl
+        atomic
+)
+

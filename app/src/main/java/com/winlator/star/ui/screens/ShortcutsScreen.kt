@@ -850,7 +850,13 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
     // Renderer (host: OpenGL / Vulkan) — per-game override, defaults to the container's value.
     var selectedRenderer by remember {
         val id = shortcut.getExtra("renderer", shortcut.container.renderer)
-        mutableStateOf(if (id.equals("vulkan", ignoreCase = true)) "Vulkan" else "OpenGL")
+        mutableStateOf(
+            when {
+                id.equals("vulkan", ignoreCase = true) -> "Vulkan"
+                id.equals("surfaceflinger", ignoreCase = true) -> "SurfaceFlinger"
+                else -> "OpenGL"
+            }
+        )
     }
 
     // Frame Generation engine (off / bionic / lsfg) — per-game override.
@@ -1240,7 +1246,7 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                     // Renderer (host) — per-game override of the container's OpenGL/Vulkan choice.
                     LabeledDropdown(
                         label = stringResource(R.string.renderer),
-                        options = listOf("OpenGL", "Vulkan"),
+                        options = listOf("OpenGL", "Vulkan", "SurfaceFlinger"),
                         selectedOption = selectedRenderer,
                         onSelect = { selectedRenderer = it }
                     )

@@ -218,7 +218,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
         dxWrapperEntries  = res.getStringArray(R.array.dxwrapper_entries).toList()
         audioDriverEntries = res.getStringArray(R.array.audio_driver_entries).toList()
         emulatorEntries   = res.getStringArray(R.array.emulator_entries).toList()
-        rendererEntries = listOf("OpenGL", "Vulkan")
+        rendererEntries = listOf("OpenGL", "Vulkan", "SurfaceFlinger")
         lcAllEntries      = res.getStringArray(R.array.some_lc_all).toList()
         startupSelectionEntries = res.getStringArray(R.array.startup_selection_entries).toList()
         mouseWarpEntries  = listOf(

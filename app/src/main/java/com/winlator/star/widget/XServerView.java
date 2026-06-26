@@ -8,6 +8,7 @@ import android.view.SurfaceView;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
+import com.winlator.star.renderer.ASurfaceRenderer;
 import com.winlator.star.renderer.GLRenderer;
 import com.winlator.star.renderer.HostRenderer;
 import com.winlator.star.renderer.vulkan.VulkanRenderer;
@@ -31,7 +32,34 @@ public class XServerView extends FrameLayout {
     }
 
     public void initRenderer(boolean vulkan) {
-        if (vulkan) {
+        initRenderer(vulkan ? "vulkan" : "gl");
+    }
+
+    public void initRenderer(String rendererType) {
+        boolean vulkan = "vulkan".equalsIgnoreCase(rendererType);
+        boolean surfaceFlinger = "surfaceflinger".equalsIgnoreCase(rendererType);
+        if (surfaceFlinger) {
+            vulkanSurfaceView = new SurfaceView(getContext());
+            vulkanSurfaceView.setLayoutParams(new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            addView(vulkanSurfaceView);
+            final ASurfaceRenderer asrRenderer = new ASurfaceRenderer(this, xServer);
+            renderer = asrRenderer;
+            vulkanSurfaceView.getHolder().addCallback(new SurfaceHolder.Callback() {
+                @Override
+                public void surfaceCreated(SurfaceHolder holder) {
+                    asrRenderer.onSurfaceCreated(holder.getSurface());
+                }
+                @Override
+                public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+                    asrRenderer.onSurfaceChanged(holder.getSurface(), width, height);
+                }
+                @Override
+                public void surfaceDestroyed(SurfaceHolder holder) {
+                    asrRenderer.onSurfaceDestroyed();
+                }
+            });
+        } else if (vulkan) {
             vulkanSurfaceView = new SurfaceView(getContext());
             vulkanSurfaceView.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));

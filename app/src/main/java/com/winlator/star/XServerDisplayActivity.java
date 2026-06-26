@@ -1616,8 +1616,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private void setupUI() {
         FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
         xServerView = new XServerView(this, xServer);
-        boolean useVulkan = container != null && "vulkan".equals(resolvedRenderer());
-        xServerView.initRenderer(useVulkan);
+        String rendererType = container != null ? resolvedRenderer() : "vulkan";
+        // SurfaceFlinger (ASR) requires API 29+; fall back to Vulkan if unsupported.
+        if ("surfaceflinger".equalsIgnoreCase(rendererType)
+                && !com.winlator.star.renderer.ASurfaceRenderer.isSupported()) {
+            rendererType = "vulkan";
+        }
+        boolean useVulkan = "vulkan".equals(rendererType);
+        xServerView.initRenderer(rendererType);
         final HostRenderer renderer = xServerView.getRenderer();
         renderer.setCursorVisible(false);
 
