@@ -1707,7 +1707,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             fpsHudHorizontal = fpsConfig.get("hudMode", "vertical").equals("horizontal");
             boolean gameHubHud = fpsConfig.get("hudStyle", "classic").equals("gamehub");
 
-            String rendererMode = container != null && "vulkan".equals(resolvedRenderer()) ? "Vulkan" : "OpenGL";
+            String resolvedR = resolvedRenderer();
+            String rendererMode = "vulkan".equals(resolvedR) ? "Vulkan"
+                : "surfaceflinger".equals(resolvedR) ? "SurfaceFlinger" : "OpenGL";
             String dxName = dxwrapper.contains("dxvk") ? "DXVK" : dxwrapper.contains("vegas") ? "VEGAS" : "WineD3D";
             hudRendererLabel = rendererMode + " | " + dxName;
             hudEngineShort = dxName;
