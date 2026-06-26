@@ -38,6 +38,9 @@ public class XServerView extends FrameLayout {
     public void initRenderer(String rendererType) {
         boolean vulkan = "vulkan".equalsIgnoreCase(rendererType);
         boolean surfaceFlinger = "surfaceflinger".equalsIgnoreCase(rendererType);
+        // ASR needs every Drawable backed by a composer-compatible AHardwareBuffer. Global flag —
+        // set before any window content Drawable is created (and clear it for GL/Vulkan).
+        com.winlator.star.xserver.Drawable.setAsrMode(surfaceFlinger);
         if (surfaceFlinger) {
             vulkanSurfaceView = new SurfaceView(getContext());
             vulkanSurfaceView.setLayoutParams(new FrameLayout.LayoutParams(

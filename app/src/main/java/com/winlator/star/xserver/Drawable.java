@@ -21,6 +21,13 @@ public class Drawable extends XResource {
     public final Object renderLock = new Object();
     private boolean directScanout = false;
 
+    // SurfaceFlinger (ASR) renderer mode: when enabled, every Drawable is backed by a
+    // composer-compatible AHardwareBuffer (a GPUImage) and its CPU `data` IS the AHB's mapped
+    // memory — so the X server draws straight into a buffer SurfaceFlinger can scan out. Global
+    // static (footgun): MUST default false and only flip true while ASR is the active renderer.
+    private static boolean DRAWABLE_FOR_ASR = false;
+    public static void setAsrMode(boolean value) { DRAWABLE_FOR_ASR = value; }
+
     static {
         System.loadLibrary("winlator");
     }
@@ -30,7 +37,19 @@ public class Drawable extends XResource {
         this.width = (short)width;
         this.height = (short)height;
         this.visual = visual;
-        this.data = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.LITTLE_ENDIAN);
+        if (DRAWABLE_FOR_ASR && width > 0 && height > 0) {
+            GPUImage g = new GPUImage((short)width, (short)height);
+            ByteBuffer vd = g.getHardwareBufferPtr() != 0 ? g.getVirtualData() : null;
+            if (vd != null) {
+                this.texture = g;
+                this.data = vd;
+            } else {
+                g.destroy();
+            }
+        }
+        if (this.data == null) {
+            this.data = ByteBuffer.allocateDirect(width * height * 4).order(ByteOrder.LITTLE_ENDIAN);
+        }
         if (this.data == null) {
             throw new IllegalStateException("Drawable.data initialized as null!");
         }
