@@ -425,103 +425,96 @@ private fun GraphicsContent(state: XServerDrawerState) {
     Spacer(Modifier.height(4.dp))
     HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
 
-    // SGSR section
-    val initSgsrEnabled   by XServerDialogState.sgsrEnabled.collectAsState()
-    val initSgsrSharpness by XServerDialogState.sgsrSharpness.collectAsState()
-    val initHdrEnabled    by XServerDialogState.hdrEnabled.collectAsState()
-    // SGSR/HDR are GL-only (no Vulkan post-process pipeline) -> gray them out on the Vulkan renderer.
-    val effectsSupported  by XServerDialogState.effectsSupported.collectAsState()
-    var sgsrEnabled   by remember(initSgsrEnabled)   { mutableStateOf(initSgsrEnabled) }
-    var sgsrSharpness by remember(initSgsrSharpness)  { mutableIntStateOf(initSgsrSharpness) }
-    var hdrEnabled    by remember(initHdrEnabled)     { mutableStateOf(initHdrEnabled) }
+    // Renderer-specific graphics controls. Each host renderer has its own set, so
+    // show ONLY the set that applies to the active renderer instead of packing the
+    // tab with disabled rows: GL effects on OpenGL, Scaling mode on Vulkan, and
+    // nothing on SurfaceFlinger (frames are scanned out directly, bypassing the
+    // compositor post-process pass). The two flags are mutually exclusive and fixed
+    // for the session (the renderer is chosen at launch).
+    val effectsSupported by XServerDialogState.effectsSupported.collectAsState() // OpenGL renderer
+    val vulkanSupported  by XServerDialogState.vulkanSupported.collectAsState()  // Vulkan renderer
 
-    ToggleRow("SGSR", sgsrEnabled, effectsSupported) { sgsrEnabled = it; pushSgsrUpdate(sgsrEnabled, sgsrSharpness, hdrEnabled) }
+    if (effectsSupported) {
+        // ---- OpenGL: SGSR / HDR + Screen Effects (GL EffectComposer features) ----
+        val initSgsrEnabled   by XServerDialogState.sgsrEnabled.collectAsState()
+        val initSgsrSharpness by XServerDialogState.sgsrSharpness.collectAsState()
+        val initHdrEnabled    by XServerDialogState.hdrEnabled.collectAsState()
+        var sgsrEnabled   by remember(initSgsrEnabled)   { mutableStateOf(initSgsrEnabled) }
+        var sgsrSharpness by remember(initSgsrSharpness) { mutableIntStateOf(initSgsrSharpness) }
+        var hdrEnabled    by remember(initHdrEnabled)    { mutableStateOf(initHdrEnabled) }
 
-    if (sgsrEnabled && effectsSupported) {
+        ToggleRow("SGSR", sgsrEnabled, true) { sgsrEnabled = it; pushSgsrUpdate(sgsrEnabled, sgsrSharpness, hdrEnabled) }
+        if (sgsrEnabled) {
+            Spacer(Modifier.height(4.dp))
+            IntSlider("Sharpness", sgsrSharpness, 0..100, { sgsrSharpness = it }, { pushSgsrUpdate(sgsrEnabled, sgsrSharpness, hdrEnabled) })
+        }
+        ToggleRow("HDR", hdrEnabled, true) { hdrEnabled = it; pushSgsrUpdate(sgsrEnabled, sgsrSharpness, hdrEnabled) }
+
+        HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
+
+        Text("Screen Effects", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
         Spacer(Modifier.height(4.dp))
-        IntSlider("Sharpness", sgsrSharpness, 0..100, { sgsrSharpness = it }, { pushSgsrUpdate(sgsrEnabled, sgsrSharpness, hdrEnabled) })
+
+        val seBrightness by XServerDialogState.seBrightness.collectAsState()
+        val seContrast by XServerDialogState.seContrast.collectAsState()
+        val seGamma by XServerDialogState.seGamma.collectAsState()
+        val seFxaa by XServerDialogState.seFxaa.collectAsState()
+        val seCrt by XServerDialogState.seCrt.collectAsState()
+        val seToon by XServerDialogState.seToon.collectAsState()
+        val seNtsc by XServerDialogState.seNtsc.collectAsState()
+        var localBrightness by remember(seBrightness) { mutableFloatStateOf(seBrightness) }
+        var localContrast by remember(seContrast) { mutableFloatStateOf(seContrast) }
+        var localGamma by remember(seGamma) { mutableFloatStateOf(seGamma) }
+        var localFxaa by remember(seFxaa) { mutableStateOf(seFxaa) }
+        var localCrt by remember(seCrt) { mutableStateOf(seCrt) }
+        var localToon by remember(seToon) { mutableStateOf(seToon) }
+        var localNtsc by remember(seNtsc) { mutableStateOf(seNtsc) }
+
+        fun applySe() {
+            XServerDialogState.onScreenEffectsApply?.invoke(localBrightness, localContrast, localGamma, localFxaa, localCrt, localToon, localNtsc, 0)
+        }
+
+        LabeledSlider("Brightness", localBrightness, -100f..100f, { localBrightness = it; applySe() }, enabled = true)
+        LabeledSlider("Contrast", localContrast, -100f..100f, { localContrast = it; applySe() }, enabled = true)
+        LabeledSlider("Gamma", localGamma, 0.5f..3.0f, { localGamma = it; applySe() }, enabled = true, format = { "%.2f".format(it) })
+
+        SeShaderToggle("FXAA", localFxaa, true) { localFxaa = it; applySe() }
+        SeShaderToggle("CRT", localCrt, true) { localCrt = it; applySe() }
+        SeShaderToggle("Toon", localToon, true) { localToon = it; applySe() }
+        SeShaderToggle("NTSC", localNtsc, true) { localNtsc = it; applySe() }
+
+        HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
     }
 
-    ToggleRow("HDR", hdrEnabled, effectsSupported) { hdrEnabled = it; pushSgsrUpdate(sgsrEnabled, sgsrSharpness, hdrEnabled) }
+    if (vulkanSupported) {
+        // ---- Vulkan: Scaling mode (spatial upscaler) ----
+        // Single source of truth for scaling/filtering on the Vulkan renderer (modes
+        // 1/2 drive the base sampler filter natively). Keyed on the live value so the
+        // picker reflects the seeded/launch config. Drawer-only / session-live.
+        val initUpscalerMode by XServerDialogState.upscalerMode.collectAsState()
+        var upscalerMode by remember(initUpscalerMode) { mutableIntStateOf(initUpscalerMode) }
 
-    if (!effectsSupported) {
+        Text("Scaling mode", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        Spacer(Modifier.height(8.dp))
+        UpscalerModeButtons(upscalerMode, true) {
+            upscalerMode = it
+            XServerDialogState.onUpscalerApply?.invoke(it)
+        }
+
+        HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
+    }
+
+    if (!effectsSupported && !vulkanSupported) {
+        // ---- SurfaceFlinger: direct scanout bypasses the compositor, so no
+        //      post-process / scaling controls apply. ----
         Text(
-            "SGSR / HDR require the OpenGL renderer",
-            color = DimWhite.copy(alpha = 0.5f),
-            fontSize = 11.sp,
-            modifier = Modifier.padding(start = 12.dp, top = 2.dp)
+            "No graphics enhancements are available with the SurfaceFlinger renderer.",
+            color = DimWhite.copy(alpha = 0.6f),
+            fontSize = 12.sp,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
         )
+        HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
     }
-
-    HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
-
-    // Scaling mode (Vulkan spatial upscaler). Vulkan-only — the inverse of effectsSupported
-    // (which is GL-only). Single source of truth for scaling/filtering on the Vulkan renderer:
-    // modes 1/2 also drive the base sampler filter natively. Drawer-only / session-live.
-    val initUpscalerMode by XServerDialogState.upscalerMode.collectAsState()
-    val vulkanSupported  by XServerDialogState.vulkanSupported.collectAsState()
-    // Key on the live value so the picker reflects the seeded/launch config and doesn't
-    // capture a stale default (same pattern as the SGSR/HUD controls above).
-    var upscalerMode by remember(initUpscalerMode) { mutableIntStateOf(initUpscalerMode) }
-
-    Text("Scaling mode", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-    Spacer(Modifier.height(8.dp))
-    UpscalerModeButtons(upscalerMode, vulkanSupported) {
-        upscalerMode = it
-        XServerDialogState.onUpscalerApply?.invoke(it)
-    }
-    if (!vulkanSupported) {
-        Text(
-            "Scaling mode requires the Vulkan renderer",
-            color = DimWhite.copy(alpha = 0.5f),
-            fontSize = 11.sp,
-            modifier = Modifier.padding(start = 12.dp, top = 2.dp)
-        )
-    }
-
-    HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
-
-    Text("Screen Effects", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-    Spacer(Modifier.height(4.dp))
-
-    val seBrightness by XServerDialogState.seBrightness.collectAsState()
-    val seContrast by XServerDialogState.seContrast.collectAsState()
-    val seGamma by XServerDialogState.seGamma.collectAsState()
-    val seFxaa by XServerDialogState.seFxaa.collectAsState()
-    val seCrt by XServerDialogState.seCrt.collectAsState()
-    val seToon by XServerDialogState.seToon.collectAsState()
-    val seNtsc by XServerDialogState.seNtsc.collectAsState()
-    var localBrightness by remember(seBrightness) { mutableFloatStateOf(seBrightness) }
-    var localContrast by remember(seContrast) { mutableFloatStateOf(seContrast) }
-    var localGamma by remember(seGamma) { mutableFloatStateOf(seGamma) }
-    var localFxaa by remember(seFxaa) { mutableStateOf(seFxaa) }
-    var localCrt by remember(seCrt) { mutableStateOf(seCrt) }
-    var localToon by remember(seToon) { mutableStateOf(seToon) }
-    var localNtsc by remember(seNtsc) { mutableStateOf(seNtsc) }
-
-    fun applySe() {
-        XServerDialogState.onScreenEffectsApply?.invoke(localBrightness, localContrast, localGamma, localFxaa, localCrt, localToon, localNtsc, 0)
-    }
-
-    LabeledSlider("Brightness", localBrightness, -100f..100f, { localBrightness = it; applySe() }, enabled = effectsSupported)
-    LabeledSlider("Contrast", localContrast, -100f..100f, { localContrast = it; applySe() }, enabled = effectsSupported)
-    LabeledSlider("Gamma", localGamma, 0.5f..3.0f, { localGamma = it; applySe() }, enabled = effectsSupported, format = { "%.2f".format(it) })
-
-    SeShaderToggle("FXAA", localFxaa, effectsSupported) { localFxaa = it; applySe() }
-    SeShaderToggle("CRT", localCrt, effectsSupported) { localCrt = it; applySe() }
-    SeShaderToggle("Toon", localToon, effectsSupported) { localToon = it; applySe() }
-    SeShaderToggle("NTSC", localNtsc, effectsSupported) { localNtsc = it; applySe() }
-
-    if (!effectsSupported) {
-        Text(
-            "Screen effects require the OpenGL renderer",
-            color = DimWhite.copy(alpha = 0.5f),
-            fontSize = 11.sp,
-            modifier = Modifier.padding(start = 12.dp, top = 2.dp)
-        )
-    }
-
-    HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
 
     val nativeRenderingEnabled by state.nativeRenderingEnabled.collectAsState()
     ToggleRow("Native Rendering", nativeRenderingEnabled) { state.onNativeRenderingToggle?.run() }
