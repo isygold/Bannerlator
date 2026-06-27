@@ -15,6 +15,8 @@
 #include "fsr_easu_frag.h"
 #include "fsr_rcas_frag.h"
 #include "downscale_frag.h"
+#include "cas_frag.h"
+#include "hdr_frag.h"
 
 // Internal sentinel for upFrame.mode: high-quality supersampling downscale.
 // (Not a user-selectable upscalerMode; gated by the hqDownscale flag.)
@@ -88,10 +90,16 @@ VulkanRendererContext::~VulkanRendererContext() {
     // upscaler resources (DS freed back to winTexPool while it is still alive)
     destroyColorTarget(offscreenImg, offscreenMem, offscreenView, offscreenFB, offscreenDS);
     destroyColorTarget(midImg, midMem, midView, midFB, midDS);
+    destroyColorTarget(fx1Img, fx1Mem, fx1View, fx1FB, fx1DS);
+    destroyColorTarget(fx2Img, fx2Mem, fx2View, fx2FB, fx2DS);
     if (sgsrPipeline      != VK_NULL_HANDLE) vk_.DestroyPipeline(device, sgsrPipeline, nullptr);
     if (easuPipeline      != VK_NULL_HANDLE) vk_.DestroyPipeline(device, easuPipeline, nullptr);
     if (rcasPipeline      != VK_NULL_HANDLE) vk_.DestroyPipeline(device, rcasPipeline, nullptr);
     if (downscalePipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, downscalePipeline, nullptr);
+    if (casPipelineOff    != VK_NULL_HANDLE) vk_.DestroyPipeline(device, casPipelineOff, nullptr);
+    if (casPipelineSwap   != VK_NULL_HANDLE) vk_.DestroyPipeline(device, casPipelineSwap, nullptr);
+    if (hdrPipelineOff    != VK_NULL_HANDLE) vk_.DestroyPipeline(device, hdrPipelineOff, nullptr);
+    if (hdrPipelineSwap   != VK_NULL_HANDLE) vk_.DestroyPipeline(device, hdrPipelineSwap, nullptr);
     if (postPipeLayout    != VK_NULL_HANDLE) vk_.DestroyPipelineLayout(device, postPipeLayout, nullptr);
     if (offscreenRenderPass != VK_NULL_HANDLE) vk_.DestroyRenderPass(device, offscreenRenderPass, nullptr);
     if (upscaleSampler    != VK_NULL_HANDLE) vk_.DestroySampler(device, upscaleSampler, nullptr);
@@ -538,6 +546,12 @@ void VulkanRendererContext::createPostPipelines() {
     rcasPipeline = createPostPipeline(fsr_rcas_code, sizeof(fsr_rcas_code), renderPass);
     // Supersampling downscale writes the swapchain too.
     downscalePipeline = createPostPipeline(downscale_code, sizeof(downscale_code), renderPass);
+    // CAS/HDR effects: an offscreen-targeted variant (non-final, writes an fx target)
+    // and a swapchain-targeted variant (final pass). Bound by stage at record time.
+    casPipelineOff  = createPostPipeline(cas_code, sizeof(cas_code), offscreenRenderPass);
+    casPipelineSwap = createPostPipeline(cas_code, sizeof(cas_code), renderPass);
+    hdrPipelineOff  = createPostPipeline(hdr_code, sizeof(hdr_code), offscreenRenderPass);
+    hdrPipelineSwap = createPostPipeline(hdr_code, sizeof(hdr_code), renderPass);
 }
 
 bool VulkanRendererContext::createColorTarget(int w, int h, VkImage& img, VkDeviceMemory& mem,
@@ -605,9 +619,35 @@ bool VulkanRendererContext::ensureMid(int w, int h) {
     return true;
 }
 
+bool VulkanRendererContext::ensureFx1(int w, int h) {
+    if (fx1Img!=VK_NULL_HANDLE && fx1W==w && fx1H==h) return true;
+    if (w<=0||h<=0) return false;
+    if (fx1Img!=VK_NULL_HANDLE) { vk_.DeviceWaitIdle(device); destroyColorTarget(fx1Img,fx1Mem,fx1View,fx1FB,fx1DS); }
+    fx1W=fx1H=0;
+    if (!createColorTarget(w,h,fx1Img,fx1Mem,fx1View,fx1FB,fx1DS)) {
+        RLOG_E("ensureFx1: createColorTarget %dx%d failed", w, h);
+        return false;
+    }
+    fx1W=w; fx1H=h;
+    return true;
+}
+
+bool VulkanRendererContext::ensureFx2(int w, int h) {
+    if (fx2Img!=VK_NULL_HANDLE && fx2W==w && fx2H==h) return true;
+    if (w<=0||h<=0) return false;
+    if (fx2Img!=VK_NULL_HANDLE) { vk_.DeviceWaitIdle(device); destroyColorTarget(fx2Img,fx2Mem,fx2View,fx2FB,fx2DS); }
+    fx2W=fx2H=0;
+    if (!createColorTarget(w,h,fx2Img,fx2Mem,fx2View,fx2FB,fx2DS)) {
+        RLOG_E("ensureFx2: createColorTarget %dx%d failed", w, h);
+        return false;
+    }
+    fx2W=w; fx2H=h;
+    return true;
+}
+
 void VulkanRendererContext::createWinTexPool() {
 
-    // 128 window textures + cursor + offscreen + mid (upscaler) targets.
+    // 128 window textures + cursor + offscreen + mid + fx1 + fx2 (upscaler/effect) targets.
     VkDescriptorPoolSize ps{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 160};
     VkDescriptorPoolCreateInfo ci{}; ci.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     ci.flags=VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
@@ -954,7 +994,8 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
         // Spatial-upscaler path: composite to an offscreen target at game res,
         // then SGSR/FSR-upscale it into the swapchain (see recordUpscalePasses).
         recordUpscalePasses(cb, imgIdx, draws, cursorDrawn,
-            ptrX, ptrY, curHotX, curHotY, curW, curH);
+            ptrX, ptrY, curHotX, curHotY, curW, curH,
+            ox, oy, sx, sy, cw, ch);
     } else {
 
     VkRenderPassBeginInfo rpi{}; rpi.sType=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1004,30 +1045,40 @@ void VulkanRendererContext::recordCmdBuf(VkCommandBuffer cb, uint32_t imgIdx,
 
 void VulkanRendererContext::recordUpscalePasses(VkCommandBuffer cb, uint32_t imgIdx,
     const std::vector<DrawEntry>& draws, bool cursorDrawn,
-    short ptrX, short ptrY, short curHotX, short curHotY, short curW, short curH)
+    short ptrX, short ptrY, short curHotX, short curHotY, short curW, short curH,
+    float ox, float oy, float sx, float sy, float scw, float sch)
 {
-    // ---- Stage 1: composite all game windows (+ cursor) 1:1 into the offscreen
-    //              target at game/container resolution, with an identity scene
-    //              transform. This is the upscaler input.
-    const float cw=(float)offscreenW, ch=(float)offscreenH;
-    {
-        VkClearValue clr={{{0.f,0.f,0.f,1.f}}};
+    const VkClearValue blk={{{0.f,0.f,0.f,1.f}}};
+    const VkViewport fullVp{0,0,(float)swapchainExt.width,(float)swapchainExt.height,0,1};
+    const VkRect2D   fullSc{{0,0},swapchainExt};
+
+    const bool hasScaling = (upFrame.mode>=3 && upFrame.mode<=6) || upFrame.mode==UPMODE_DOWNSCALE;
+    const bool fxOn       = upFrame.cas || upFrame.hdr;
+
+    // Composite all game windows (+ cursor) into `fb` (an offscreenRenderPass target).
+    // `identity` 1:1-maps each window into a W x H target (upscaler input at game res);
+    // otherwise the normal scene transform places them (effects-only path = direct path
+    // geometry, just rendered to fx1 so an effect can sample it).
+    auto composite=[&](VkFramebuffer fb,int W,int H,bool identity,float cw,float ch){
         VkRenderPassBeginInfo rpi{}; rpi.sType=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        rpi.renderPass=offscreenRenderPass; rpi.framebuffer=offscreenFB;
-        rpi.renderArea={{0,0},{(uint32_t)offscreenW,(uint32_t)offscreenH}};
-        rpi.clearValueCount=1; rpi.pClearValues=&clr;
+        rpi.renderPass=offscreenRenderPass; rpi.framebuffer=fb;
+        rpi.renderArea={{0,0},{(uint32_t)W,(uint32_t)H}};
+        rpi.clearValueCount=1; rpi.pClearValues=&blk;
         vk_.CmdBeginRenderPass(cb,&rpi,VK_SUBPASS_CONTENTS_INLINE);
-        VkViewport vp{0,0,cw,ch,0,1}; vk_.CmdSetViewport(cb,0,1,&vp);
-        VkRect2D scr{{0,0},{(uint32_t)offscreenW,(uint32_t)offscreenH}}; vk_.CmdSetScissor(cb,0,1,&scr);
+        VkViewport vp{0,0,(float)W,(float)H,0,1}; vk_.CmdSetViewport(cb,0,1,&vp);
+        VkRect2D scr{{0,0},{(uint32_t)W,(uint32_t)H}}; vk_.CmdSetScissor(cb,0,1,&scr);
         vk_.CmdBindPipeline(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline);
         for (auto& d : draws) {
             if (d.ds==VK_NULL_HANDLE) continue;
             vk_.CmdBindDescriptorSets(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeLayout,0,1,&d.ds,0,nullptr);
             WindowPushConstants pc{};
-            pc.ndcX0=(float)d.x/cw*2.f-1.f;
-            pc.ndcY0=(float)d.y/ch*2.f-1.f;
-            pc.ndcX1=(float)(d.x+d.w)/cw*2.f-1.f;
-            pc.ndcY1=(float)(d.y+d.h)/ch*2.f-1.f;
+            if (identity) {
+                pc.ndcX0=(float)d.x/cw*2.f-1.f;       pc.ndcY0=(float)d.y/ch*2.f-1.f;
+                pc.ndcX1=(float)(d.x+d.w)/cw*2.f-1.f; pc.ndcY1=(float)(d.y+d.h)/ch*2.f-1.f;
+            } else {
+                pc.ndcX0=(ox+(float)d.x*sx)/cw*2.f-1.f;        pc.ndcY0=(oy+(float)d.y*sy)/ch*2.f-1.f;
+                pc.ndcX1=(ox+(float)(d.x+d.w)*sx)/cw*2.f-1.f;  pc.ndcY1=(oy+(float)(d.y+d.h)*sy)/ch*2.f-1.f;
+            }
             pc.useTexAlpha=0;
             vk_.CmdPushConstants(cb,pipeLayout,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(pc),&pc);
             vk_.CmdDraw(cb,4,1,0,0);
@@ -1036,43 +1087,59 @@ void VulkanRendererContext::recordUpscalePasses(VkCommandBuffer cb, uint32_t img
             vk_.CmdBindDescriptorSets(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeLayout,0,1,&cursorDS,0,nullptr);
             float cx=(float)std::max(0,(int)ptrX-curHotX), cy=(float)std::max(0,(int)ptrY-curHotY);
             WindowPushConstants cpc{};
-            cpc.ndcX0=cx/cw*2.f-1.f; cpc.ndcY0=cy/ch*2.f-1.f;
-            cpc.ndcX1=(cx+curW)/cw*2.f-1.f; cpc.ndcY1=(cy+curH)/ch*2.f-1.f;
+            if (identity) {
+                cpc.ndcX0=cx/cw*2.f-1.f; cpc.ndcY0=cy/ch*2.f-1.f;
+                cpc.ndcX1=(cx+curW)/cw*2.f-1.f; cpc.ndcY1=(cy+curH)/ch*2.f-1.f;
+            } else {
+                cpc.ndcX0=(ox+cx*sx)/cw*2.f-1.f; cpc.ndcY0=(oy+cy*sy)/ch*2.f-1.f;
+                cpc.ndcX1=(ox+(cx+curW)*sx)/cw*2.f-1.f; cpc.ndcY1=(oy+(cy+curH)*sy)/ch*2.f-1.f;
+            }
             cpc.useTexAlpha=1;
             vk_.CmdPushConstants(cb,pipeLayout,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(cpc),&cpc);
             vk_.CmdDraw(cb,4,1,0,0);
         }
         vk_.CmdEndRenderPass(cb);
-    }
+    };
 
-    VkClearValue blk={{{0.f,0.f,0.f,1.f}}};
-    VkViewport fullVp{0,0,(float)swapchainExt.width,(float)swapchainExt.height,0,1};
-    VkRect2D   fullSc{{0,0},swapchainExt};
-
-    // Single-pass post passes (SGSR / sharpen-only RCAS / supersampling downscale)
-    // all sample the offscreen target and write the swapchain with a CLEAR (black
-    // letterbox bars). They differ only in pipeline + push constants.
-    if (upFrame.mode==3 || upFrame.mode==6 || upFrame.mode==UPMODE_DOWNSCALE) {
-        VkPipeline   pl   = (upFrame.mode==3) ? sgsrPipeline
-                          : (upFrame.mode==6) ? rcasPipeline
-                          :                     downscalePipeline;
-        const void*  pcd; uint32_t pcsz;
-        if (upFrame.mode==3)                { pcd=&upFrame.sgsrPC; pcsz=sizeof(upFrame.sgsrPC); }
-        else if (upFrame.mode==6)           { pcd=&upFrame.rcasPC; pcsz=sizeof(upFrame.rcasPC); }
-        else                                { pcd=&upFrame.dsPC;   pcsz=sizeof(upFrame.dsPC);   }
+    // A full-target post pass: sample `srcDS`, draw the quad into `fb` at the full
+    // swapchain viewport. `toSwapchain` selects which render pass `fb` belongs to.
+    auto postPass=[&](VkPipeline pl, VkFramebuffer fb, bool toSwapchain,
+                      VkDescriptorSet srcDS, const void* pcd, uint32_t pcsz){
         VkRenderPassBeginInfo rpi{}; rpi.sType=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        rpi.renderPass=renderPass; rpi.framebuffer=swapchainFBs[imgIdx]; rpi.renderArea={{0,0},swapchainExt};
+        rpi.renderPass = toSwapchain ? renderPass : offscreenRenderPass;
+        rpi.framebuffer=fb; rpi.renderArea={{0,0},swapchainExt};
         rpi.clearValueCount=1; rpi.pClearValues=&blk;
         vk_.CmdBeginRenderPass(cb,&rpi,VK_SUBPASS_CONTENTS_INLINE);
         vk_.CmdSetViewport(cb,0,1,&fullVp); vk_.CmdSetScissor(cb,0,1,&fullSc);
         vk_.CmdBindPipeline(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,pl);
-        vk_.CmdBindDescriptorSets(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,postPipeLayout,0,1,&offscreenDS,0,nullptr);
+        vk_.CmdBindDescriptorSets(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,postPipeLayout,0,1,&srcDS,0,nullptr);
         vk_.CmdPushConstants(cb,postPipeLayout,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,pcsz,pcd);
         vk_.CmdDraw(cb,4,1,0,0);
         vk_.CmdEndRenderPass(cb);
-    } else {
-        // ---- FSR: EASU offscreen -> mid (at output res), then RCAS mid -> swapchain.
-        {
+    };
+
+    // ---- Stage 1 (+ scaling): produce the pre-effects image; curDS = its sampler.
+    VkDescriptorSet curDS = VK_NULL_HANDLE;
+    if (hasScaling) {
+        // composite 1:1 into offscreen at game res (the upscaler input)
+        composite(offscreenFB, offscreenW, offscreenH, /*identity*/true, (float)offscreenW, (float)offscreenH);
+        // The scaling stage writes the swapchain directly only when no effect follows;
+        // otherwise it writes fx1 so CAS/HDR can sample it. Cross-binding a swapchain-
+        // renderPass post pipeline into an offscreenRenderPass fx target reuses the
+        // exact pattern the composite stage already uses (window `pipeline` -> offscreen).
+        const bool scaleFinal = !fxOn;
+        VkFramebuffer stFB = scaleFinal ? swapchainFBs[imgIdx] : fx1FB;
+        if (upFrame.mode==3 || upFrame.mode==6 || upFrame.mode==UPMODE_DOWNSCALE) {
+            VkPipeline   pl   = (upFrame.mode==3) ? sgsrPipeline
+                              : (upFrame.mode==6) ? rcasPipeline
+                              :                     downscalePipeline;
+            const void*  pcd; uint32_t pcsz;
+            if (upFrame.mode==3)      { pcd=&upFrame.sgsrPC; pcsz=sizeof(upFrame.sgsrPC); }
+            else if (upFrame.mode==6) { pcd=&upFrame.rcasPC; pcsz=sizeof(upFrame.rcasPC); }
+            else                      { pcd=&upFrame.dsPC;   pcsz=sizeof(upFrame.dsPC);   }
+            postPass(pl, stFB, scaleFinal, offscreenDS, pcd, pcsz);
+        } else {
+            // FSR: EASU offscreen -> mid (at output res, mid viewport), then RCAS mid -> stFB.
             VkRenderPassBeginInfo rpi{}; rpi.sType=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
             rpi.renderPass=offscreenRenderPass; rpi.framebuffer=midFB;
             rpi.renderArea={{0,0},{(uint32_t)midW,(uint32_t)midH}};
@@ -1085,19 +1152,34 @@ void VulkanRendererContext::recordUpscalePasses(VkCommandBuffer cb, uint32_t img
             vk_.CmdPushConstants(cb,postPipeLayout,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(upFrame.easuPC),&upFrame.easuPC);
             vk_.CmdDraw(cb,4,1,0,0);
             vk_.CmdEndRenderPass(cb);
+            postPass(rcasPipeline, stFB, scaleFinal, midDS, &upFrame.rcasPC, sizeof(upFrame.rcasPC));
         }
-        {
-            VkRenderPassBeginInfo rpi{}; rpi.sType=VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            rpi.renderPass=renderPass; rpi.framebuffer=swapchainFBs[imgIdx]; rpi.renderArea={{0,0},swapchainExt};
-            rpi.clearValueCount=1; rpi.pClearValues=&blk;
-            vk_.CmdBeginRenderPass(cb,&rpi,VK_SUBPASS_CONTENTS_INLINE);
-            vk_.CmdSetViewport(cb,0,1,&fullVp); vk_.CmdSetScissor(cb,0,1,&fullSc);
-            vk_.CmdBindPipeline(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,rcasPipeline);
-            vk_.CmdBindDescriptorSets(cb,VK_PIPELINE_BIND_POINT_GRAPHICS,postPipeLayout,0,1,&midDS,0,nullptr);
-            vk_.CmdPushConstants(cb,postPipeLayout,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(upFrame.rcasPC),&upFrame.rcasPC);
-            vk_.CmdDraw(cb,4,1,0,0);
-            vk_.CmdEndRenderPass(cb);
-        }
+        if (scaleFinal) return;     // no effects: scaling wrote the swapchain, done
+        curDS = fx1DS;
+    } else {
+        // Effects-only (no scaling mode active): composite with the normal scene
+        // transform straight into fx1 (full swapchain), then run the effect chain.
+        composite(fx1FB, (int)swapchainExt.width, (int)swapchainExt.height, /*identity*/false, scw, sch);
+        curDS = fx1DS;
+    }
+
+    // ---- Effect chain: CAS then HDR. The last effect writes the swapchain; earlier
+    //      ones ping-pong between fx1 and fx2 (both at swapchain resolution).
+    int effects[2]; int n=0;
+    if (upFrame.cas) effects[n++]=0;   // 0 = CAS
+    if (upFrame.hdr) effects[n++]=1;   // 1 = HDR
+    for (int i=0;i<n;i++) {
+        const bool last   = (i==n-1);
+        const bool toSwap = last;
+        VkFramebuffer tgtFB; VkDescriptorSet tgtDS;
+        if (toSwap)               { tgtFB=swapchainFBs[imgIdx]; tgtDS=VK_NULL_HANDLE; }
+        else if (curDS==fx1DS)    { tgtFB=fx2FB; tgtDS=fx2DS; }
+        else                      { tgtFB=fx1FB; tgtDS=fx1DS; }
+        if (effects[i]==0)
+            postPass(toSwap?casPipelineSwap:casPipelineOff, tgtFB, toSwap, curDS, &upFrame.casPC, sizeof(upFrame.casPC));
+        else
+            postPass(toSwap?hdrPipelineSwap:hdrPipelineOff, tgtFB, toSwap, curDS, &upFrame.hdrPC, sizeof(upFrame.hdrPC));
+        if (!toSwap) curDS = tgtDS;
     }
 }
 
@@ -1106,9 +1188,12 @@ void VulkanRendererContext::recordUpscalePasses(VkCommandBuffer cb, uint32_t img
 // before recordCmdBuf. Resources are (re)created here as needed.
 void VulkanRendererContext::planUpscaleFrame() {
     upFrame.active=false;
+    upFrame.cas = casEnabled;
+    upFrame.hdr = hdrEnabled;
     if (containerWidth<=0 || containerHeight<=0) return;
     if (swapchain==VK_NULL_HANDLE) return;
 
+    const bool fxOn = casEnabled || hdrEnabled;
     const float scW=(float)swapchainExt.width, scH=(float)swapchainExt.height;
     const bool renderAboveDisplay =
         ((int)swapchainExt.width<containerWidth || (int)swapchainExt.height<containerHeight);
@@ -1124,71 +1209,108 @@ void VulkanRendererContext::planUpscaleFrame() {
         outY=((int)swapchainExt.height-outH)/2;
     };
 
+    bool scaling=false;
+
     // ---- Supersampling: high-quality downscale (render res > display res) ----
     // Independent of upscalerMode; takes priority when its precondition holds.
     if (hqDownscale && renderAboveDisplay) {
         int outX,outY,outW,outH; fitRect(outX,outY,outW,outH);
-        if (outW<=0||outH<=0) return;
-        if (!ensureOffscreen(containerWidth,containerHeight)) return; // render res (large)
-        upFrame.active=true; upFrame.mode=UPMODE_DOWNSCALE;
-        upFrame.outX=outX; upFrame.outY=outY; upFrame.outW=outW; upFrame.outH=outH;
-        DownscalePushConstants& d=upFrame.dsPC;
-        d.ndc[0]=(float)outX/scW*2.f-1.f;          d.ndc[1]=(float)outY/scH*2.f-1.f;
-        d.ndc[2]=(float)(outX+outW)/scW*2.f-1.f;   d.ndc[3]=(float)(outY+outH)/scH*2.f-1.f;
-        d.srcW=(float)containerWidth; d.srcH=(float)containerHeight;
-        d.dstW=(float)outW;           d.dstH=(float)outH;
-        return;
+        if (outW>0 && outH>0 && ensureOffscreen(containerWidth,containerHeight)) {
+            upFrame.active=true; upFrame.mode=UPMODE_DOWNSCALE; scaling=true;
+            upFrame.outX=outX; upFrame.outY=outY; upFrame.outW=outW; upFrame.outH=outH;
+            DownscalePushConstants& d=upFrame.dsPC;
+            d.ndc[0]=(float)outX/scW*2.f-1.f;          d.ndc[1]=(float)outY/scH*2.f-1.f;
+            d.ndc[2]=(float)(outX+outW)/scW*2.f-1.f;   d.ndc[3]=(float)(outY+outH)/scH*2.f-1.f;
+            d.srcW=(float)containerWidth; d.srcH=(float)containerHeight;
+            d.dstW=(float)outW;           d.dstH=(float)outH;
+        }
+    } else {
+        // Upscale modes 3-5 need the game to render below display; mode 6 (sharpen)
+        // runs at any resolution (it is a pure sharpen / cheap scale+sharpen).
+        int mode=upscalerMode;
+        if (mode>=3 && (mode==6 || renderBelowDisplay)) {
+            int outX,outY,outW,outH;
+            if (mode==4) {                               // fsr (fill / stretch)
+                outX=0; outY=0; outW=(int)swapchainExt.width; outH=(int)swapchainExt.height;
+            } else {                                     // sgsr(3) / fsr_fit(5) / sharpen(6)
+                fitRect(outX,outY,outW,outH);
+            }
+            bool ok = (outW>0 && outH>0) && ensureOffscreen(containerWidth,containerHeight);
+            if (ok && (mode==4||mode==5)) ok = ensureMid(outW,outH);
+            if (ok) {
+                float nx0=(float)outX/scW*2.f-1.f, ny0=(float)outY/scH*2.f-1.f;
+                float nx1=(float)(outX+outW)/scW*2.f-1.f, ny1=(float)(outY+outH)/scH*2.f-1.f;
+                upFrame.active=true; upFrame.mode=mode; scaling=true;
+                upFrame.outX=outX; upFrame.outY=outY; upFrame.outW=outW; upFrame.outH=outH;
+
+                if (mode==3) {
+                    SgsrPushConstants& p=upFrame.sgsrPC;
+                    p.ndc[0]=nx0; p.ndc[1]=ny0; p.ndc[2]=nx1; p.ndc[3]=ny1;
+                    p.viewportInfo[0]=1.f/(float)containerWidth;
+                    p.viewportInfo[1]=1.f/(float)containerHeight;
+                    p.viewportInfo[2]=(float)containerWidth;
+                    p.viewportInfo[3]=(float)containerHeight;
+                    // SGSR EdgeSharpness from the slider: 0.5 .. 2.5 (default 2.0 at 0.25 stops).
+                    p.edgeSharpness = 0.5f + (1.0f - upscaleSharpnessStops) * 2.0f;
+                } else if (mode==6) {
+                    // Sharpen-only: RCAS samples the offscreen (game res) 1:1; the quad maps
+                    // [0,1] across the fit rect, so outputSize = game res keeps texelFetch in
+                    // bounds (1:1 at native, nearest scale+sharpen below native).
+                    RcasPushConstants& r=upFrame.rcasPC;
+                    r.ndc[0]=nx0; r.ndc[1]=ny0; r.ndc[2]=nx1; r.ndc[3]=ny1;
+                    fsrRcasCon(r.con, upscaleSharpnessStops);
+                    r.outW=(float)containerWidth; r.outH=(float)containerHeight;
+                } else {                                     // fsr (4) / fsr_fit (5)
+                    EasuPushConstants& e=upFrame.easuPC;
+                    e.ndc[0]=-1.f; e.ndc[1]=-1.f; e.ndc[2]=1.f; e.ndc[3]=1.f; // full mid target
+                    fsrEasuCon(e.con0,e.con1,e.con2,e.con3,
+                               (float)containerWidth,(float)containerHeight,
+                               (float)containerWidth,(float)containerHeight,
+                               (float)outW,(float)outH);
+                    e.outW=(float)outW; e.outH=(float)outH;
+                    RcasPushConstants& r=upFrame.rcasPC;
+                    r.ndc[0]=nx0; r.ndc[1]=ny0; r.ndc[2]=nx1; r.ndc[3]=ny1;
+                    fsrRcasCon(r.con, upscaleSharpnessStops);
+                    r.outW=(float)outW; r.outH=(float)outH;
+                }
+            }
+        }
     }
 
-    int mode=upscalerMode;
-    if (mode<3) return;                          // 0/1/2 use the direct path
-    // Upscale modes 3-5 need the game to render below display; mode 6 (sharpen)
-    // runs at any resolution (it is a pure sharpen / cheap scale+sharpen).
-    if (mode!=6 && !renderBelowDisplay) return;
-
-    int outX,outY,outW,outH;
-    if (mode==4) {                               // fsr (fill / stretch)
-        outX=0; outY=0; outW=(int)swapchainExt.width; outH=(int)swapchainExt.height;
-    } else {                                     // sgsr(3) / fsr_fit(5) / sharpen(6)
-        fitRect(outX,outY,outW,outH);
+    // ---- Effects-only path: no scaling mode engaged, but CAS/HDR are on. Composite
+    //      at output (swapchain) resolution and run the effect chain (mirror mode 6's
+    //      "any resolution" handling). ----
+    if (!scaling) {
+        if (!fxOn) return;                       // nothing to do -> direct path
+        upFrame.active=true; upFrame.mode=0;
+        upFrame.outX=0; upFrame.outY=0;
+        upFrame.outW=(int)swapchainExt.width; upFrame.outH=(int)swapchainExt.height;
     }
-    if (outW<=0||outH<=0) return;
-    if (!ensureOffscreen(containerWidth,containerHeight)) return;
-    if ((mode==4||mode==5) && !ensureMid(outW,outH)) return;
 
-    float nx0=(float)outX/scW*2.f-1.f, ny0=(float)outY/scH*2.f-1.f;
-    float nx1=(float)(outX+outW)/scW*2.f-1.f, ny1=(float)(outY+outH)/scH*2.f-1.f;
-
-    upFrame.active=true; upFrame.mode=mode;
-    upFrame.outX=outX; upFrame.outY=outY; upFrame.outW=outW; upFrame.outH=outH;
-
-    if (mode==3) {
-        SgsrPushConstants& p=upFrame.sgsrPC;
-        p.ndc[0]=nx0; p.ndc[1]=ny0; p.ndc[2]=nx1; p.ndc[3]=ny1;
-        p.viewportInfo[0]=1.f/(float)containerWidth;
-        p.viewportInfo[1]=1.f/(float)containerHeight;
-        p.viewportInfo[2]=(float)containerWidth;
-        p.viewportInfo[3]=(float)containerHeight;
-    } else if (mode==6) {
-        // Sharpen-only: RCAS samples the offscreen (game res) 1:1; the quad maps
-        // [0,1] across the fit rect, so outputSize = game res keeps texelFetch in
-        // bounds (1:1 at native, nearest scale+sharpen below native).
-        RcasPushConstants& r=upFrame.rcasPC;
-        r.ndc[0]=nx0; r.ndc[1]=ny0; r.ndc[2]=nx1; r.ndc[3]=ny1;
-        fsrRcasCon(r.con, 0.25f);
-        r.outW=(float)containerWidth; r.outH=(float)containerHeight;
-    } else {                                     // fsr (4) / fsr_fit (5)
-        EasuPushConstants& e=upFrame.easuPC;
-        e.ndc[0]=-1.f; e.ndc[1]=-1.f; e.ndc[2]=1.f; e.ndc[3]=1.f; // full mid target
-        fsrEasuCon(e.con0,e.con1,e.con2,e.con3,
-                   (float)containerWidth,(float)containerHeight,
-                   (float)containerWidth,(float)containerHeight,
-                   (float)outW,(float)outH);
-        e.outW=(float)outW; e.outH=(float)outH;
-        RcasPushConstants& r=upFrame.rcasPC;
-        r.ndc[0]=nx0; r.ndc[1]=ny0; r.ndc[2]=nx1; r.ndc[3]=ny1;
-        fsrRcasCon(r.con, 0.25f);
-        r.outW=(float)outW; r.outH=(float)outH;
+    // ---- Ensure the effect-chain intermediates and pack the CAS/HDR push constants.
+    if (fxOn && upFrame.active) {
+        const int fw=(int)swapchainExt.width, fh=(int)swapchainExt.height;
+        const int nEffects=(casEnabled?1:0)+(hdrEnabled?1:0);
+        bool ok = ensureFx1(fw,fh) && (nEffects<2 || ensureFx2(fw,fh));
+        if (!ok) {
+            // Out of memory for the fx targets: skip effects this frame. Keep the
+            // scaling pass if there was one; otherwise fall back to the direct path.
+            upFrame.cas=false; upFrame.hdr=false;
+            if (!scaling) upFrame.active=false;
+            return;
+        }
+        if (casEnabled) {
+            CasPushConstants& c=upFrame.casPC;
+            c.ndc[0]=-1.f; c.ndc[1]=-1.f; c.ndc[2]=1.f; c.ndc[3]=1.f;
+            c.resolution[0]=(float)fw; c.resolution[1]=(float)fh;
+            int s = casSharpness; if (s<0) s=0; if (s>100) s=100;
+            c.sharpness = (float)s / 100.0f;     // higher slider = stronger sharpen
+        }
+        if (hdrEnabled) {
+            HdrPushConstants& h=upFrame.hdrPC;
+            h.ndc[0]=-1.f; h.ndc[1]=-1.f; h.ndc[2]=1.f; h.ndc[3]=1.f;
+            h.resolution[0]=(float)fw; h.resolution[1]=(float)fh;
+        }
     }
 }
 
@@ -1637,6 +1759,32 @@ void VulkanRendererContext::setHqDownscale(bool enabled) {
     if (hqDownscale==enabled) { RLOG("setHqDownscale: already %d, skipping", (int)enabled); return; }
     RLOG("setHqDownscale: %d -> %d", (int)hqDownscale, (int)enabled);
     hqDownscale=enabled;
+    needsRender.store(true); dirtyCV.notify_one();
+}
+
+void VulkanRendererContext::setCas(bool enabled, int sharpness) {
+    if (sharpness<0) sharpness=0; if (sharpness>100) sharpness=100;
+    if (casEnabled==enabled && casSharpness==sharpness) return;
+    RLOG("setCas: %d/%d -> %d/%d", (int)casEnabled, casSharpness, (int)enabled, sharpness);
+    casEnabled=enabled; casSharpness=sharpness;
+    needsRender.store(true); dirtyCV.notify_one();
+}
+
+void VulkanRendererContext::setHdr(bool enabled) {
+    if (hdrEnabled==enabled) return;
+    RLOG("setHdr: %d -> %d", (int)hdrEnabled, (int)enabled);
+    hdrEnabled=enabled;
+    needsRender.store(true); dirtyCV.notify_one();
+}
+
+void VulkanRendererContext::setUpscaleSharpness(int sharpness) {
+    if (sharpness<0) sharpness=0; if (sharpness>100) sharpness=100;
+    // Slider 0..100 -> RCAS stops: slider 100 = 0 stops (sharpest), slider 0 = 1.0 stop
+    // (softest). Default slider 75 -> 0.25 stops, matching the previous hard-coded value.
+    float stops = (float)(100 - sharpness) / 100.0f;
+    if (upscaleSharpnessStops==stops) return;
+    RLOG("setUpscaleSharpness: slider=%d -> %.3f stops", sharpness, stops);
+    upscaleSharpnessStops=stops;
     needsRender.store(true); dirtyCV.notify_one();
 }
 

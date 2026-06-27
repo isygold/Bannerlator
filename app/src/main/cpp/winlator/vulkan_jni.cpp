@@ -259,6 +259,27 @@ Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetHqDownscale(JNIEn
     if (r) r->setHqDownscale(enabled == JNI_TRUE);
 }
 
+// Composable AMD CAS sharpen (layers on top of any scaling mode, runs at native res).
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetCas(JNIEnv*, jobject, jlong handle, jboolean enabled, jint sharpness) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setCas(enabled == JNI_TRUE, (int)sharpness);
+}
+
+// Composable fake-HDR (binary on/off).
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetHdr(JNIEnv*, jobject, jlong handle, jboolean enabled) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setHdr(enabled == JNI_TRUE);
+}
+
+// Real upscaler sharpness (RCAS stops + SGSR EdgeSharpness) from a 0..100 slider.
+extern "C" JNIEXPORT void JNICALL
+Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetUpscaleSharpness(JNIEnv*, jobject, jlong handle, jint sharpness) {
+    auto* r = reinterpret_cast<VulkanRendererContext*>(handle);
+    if (r) r->setUpscaleSharpness((int)sharpness);
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_winlator_star_renderer_vulkan_VulkanRenderer_nativeSetPresentMode(JNIEnv*, jobject, jlong handle, jint mode) {
     auto* r = reinterpret_cast<VulkanRendererContext*>(handle);

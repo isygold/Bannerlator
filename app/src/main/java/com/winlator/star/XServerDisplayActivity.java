@@ -1693,6 +1693,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // Supersampling: when the launch resolution was scaled above display res (see onCreate),
             // run the compositor's quality Lanczos downscale. No-op when render scale is Off.
             vkRenderer.setHqDownscale(hqDownscale);
+            // Composable CAS / fake-HDR + real upscaler sharpness — drawer-only / session-live,
+            // default off (sharpness defaults to the legacy 0.25 RCAS stops == slider 75). Seed
+            // the renderer and mirror the defaults into the drawer state.
+            vkRenderer.setUpscaleSharpness(75);
+            vkRenderer.setCas(false, 60);
+            vkRenderer.setHdr(false);
+            XServerDialogState.INSTANCE.setUpscaleSharpness(75);
+            XServerDialogState.INSTANCE.setCasEnabled(false);
+            XServerDialogState.INSTANCE.setCasSharpness(60);
+            XServerDialogState.INSTANCE.setHdrVkEnabled(false);
             vkRenderer.setSwapRB(container.getRendererSwapRB());
             // Must run before the surface is created so onSurfaceCreated sets up the scanout path.
             boolean nativeOn = container.isRendererNative();
@@ -1840,8 +1850,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             com.winlator.star.renderer.vulkan.VulkanRenderer vkr =
                 (com.winlator.star.renderer.vulkan.VulkanRenderer) renderer;
             ds.onUpscalerApply = (mode) -> vkr.setUpscaler(mode);
+            ds.onCasApply = (enabled, sharpness) -> vkr.setCas(enabled, sharpness);
+            ds.onHdrApply = (enabled) -> vkr.setHdr(enabled);
+            ds.onUpscaleSharpnessApply = (sharpness) -> vkr.setUpscaleSharpness(sharpness);
         } else {
             ds.onUpscalerApply = null;
+            ds.onCasApply = null;
+            ds.onHdrApply = null;
+            ds.onUpscaleSharpnessApply = null;
         }
 
         // Input Controls state (renderer-independent: controller profiles + vibration work on

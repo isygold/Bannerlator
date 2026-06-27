@@ -107,6 +107,9 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private native void nativeSetFilterMode(long handle, int mode);
     private native void nativeSetUpscaler(long handle, int mode);
     private native void nativeSetHqDownscale(long handle, boolean enabled);
+    private native void nativeSetCas(long handle, boolean enabled, int sharpness);
+    private native void nativeSetHdr(long handle, boolean enabled);
+    private native void nativeSetUpscaleSharpness(long handle, int sharpness);
     private native void nativeSetSwapRB(long handle, boolean enabled);
     private native void nativeSetPresentMode(long handle, int mode);
     private native int[] nativeGetSupportedPresentModes(long handle);
@@ -144,6 +147,9 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                     nativeSetFilterMode(nativeHandle, pendingFilterMode);
                     nativeSetUpscaler(nativeHandle, pendingUpscaler);
                     nativeSetHqDownscale(nativeHandle, pendingHqDownscale);
+                    nativeSetUpscaleSharpness(nativeHandle, pendingUpscaleSharpness);
+                    nativeSetCas(nativeHandle, pendingCasEnabled, pendingCasSharpness);
+                    nativeSetHdr(nativeHandle, pendingHdrEnabled);
                     nativeSetSwapRB(nativeHandle, pendingSwapRB);
                     updateTransform();
                     nativeSetCursorVisible(nativeHandle, cursorVisible);
@@ -705,6 +711,27 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         synchronized (lock) { if (nativeHandle != 0) nativeSetHqDownscale(nativeHandle, enabled); }
     }
 
+    // Composable AMD CAS sharpen (sharpness 0..100). Layers on any scaling mode and
+    // runs even at native res. Drawer-only / session-live, like the scaling mode.
+    public void setCas(boolean enabled, int sharpness) {
+        pendingCasEnabled = enabled;
+        pendingCasSharpness = sharpness;
+        synchronized (lock) { if (nativeHandle != 0) nativeSetCas(nativeHandle, enabled, sharpness); }
+    }
+
+    // Composable fake-HDR (binary on/off). Drawer-only / session-live.
+    public void setHdr(boolean enabled) {
+        pendingHdrEnabled = enabled;
+        synchronized (lock) { if (nativeHandle != 0) nativeSetHdr(nativeHandle, enabled); }
+    }
+
+    // Real upscaler sharpness (RCAS stops + SGSR EdgeSharpness) from a 0..100 slider.
+    // Default 75 == the previously hard-coded 0.25 RCAS stops. Drawer-only / session-live.
+    public void setUpscaleSharpness(int sharpness) {
+        pendingUpscaleSharpness = sharpness;
+        synchronized (lock) { if (nativeHandle != 0) nativeSetUpscaleSharpness(nativeHandle, sharpness); }
+    }
+
     public void setSwapRB(boolean enabled) {
         pendingSwapRB = enabled;
         synchronized (lock) { if (nativeHandle != 0) nativeSetSwapRB(nativeHandle, enabled); }
@@ -758,6 +785,10 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private int     pendingFilterMode     = 0;
     private int     pendingUpscaler       = 0;
     private boolean pendingHqDownscale    = false;
+    private boolean pendingCasEnabled     = false;
+    private int     pendingCasSharpness   = 60;
+    private boolean pendingHdrEnabled     = false;
+    private int     pendingUpscaleSharpness = 75;   // 75 -> 0.25 RCAS stops (legacy default)
     private boolean pendingSwapRB         = false;
     public int getFpsLimit() { return fpsLimit; }
     public void setFpsLimit(int limit) {

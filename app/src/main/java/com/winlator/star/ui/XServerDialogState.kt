@@ -80,6 +80,36 @@ object XServerDialogState {
     @JvmField var onUpscalerApply: UpscalerApplyCallback? = null
 
     // -------------------------------------------------------------------------
+    // Vulkan composable post effects (CAS sharpen + fake-HDR) + real upscaler
+    // sharpness. Drawer-only / session-live, same lifecycle as the scaling mode.
+    // -------------------------------------------------------------------------
+    private val _casEnabled = MutableStateFlow(false)
+    val casEnabled: StateFlow<Boolean> = _casEnabled
+    fun setCasEnabled(v: Boolean) { _casEnabled.value = v }
+
+    private val _casSharpness = MutableStateFlow(60)
+    val casSharpness: StateFlow<Int> = _casSharpness
+    fun setCasSharpness(v: Int) { _casSharpness.value = v }
+
+    private val _hdrVkEnabled = MutableStateFlow(false)
+    val hdrVkEnabled: StateFlow<Boolean> = _hdrVkEnabled
+    fun setHdrVkEnabled(v: Boolean) { _hdrVkEnabled.value = v }
+
+    // 0..100; 75 == the legacy 0.25 RCAS stops. Drives RCAS + SGSR EdgeSharpness.
+    private val _upscaleSharpness = MutableStateFlow(75)
+    val upscaleSharpness: StateFlow<Int> = _upscaleSharpness
+    fun setUpscaleSharpness(v: Int) { _upscaleSharpness.value = v }
+
+    fun interface CasApplyCallback { fun invoke(enabled: Boolean, sharpness: Int) }
+    @JvmField var onCasApply: CasApplyCallback? = null
+
+    fun interface HdrApplyCallback { fun invoke(enabled: Boolean) }
+    @JvmField var onHdrApply: HdrApplyCallback? = null
+
+    fun interface UpscaleSharpnessCallback { fun invoke(sharpness: Int) }
+    @JvmField var onUpscaleSharpnessApply: UpscaleSharpnessCallback? = null
+
+    // -------------------------------------------------------------------------
     // Vibration dialog
     // -------------------------------------------------------------------------
     private val _vibrationSlots = MutableStateFlow<List<Pair<String, Boolean>>>(emptyList())
@@ -285,6 +315,10 @@ object XServerDialogState {
         _hdrEnabled.value      = false
         _upscalerMode.value    = 0
         _vulkanSupported.value = false
+        _casEnabled.value      = false
+        _casSharpness.value    = 60
+        _hdrVkEnabled.value    = false
+        _upscaleSharpness.value = 75
         _vibrationSlots.value  = emptyList()
         _logLines.value        = emptyList()
         _logPaused.value       = false
@@ -312,6 +346,7 @@ object XServerDialogState {
         onMagnifierZoom = null; onMagnifierHide = null
         onSgsrUpdate = null
         onUpscalerApply = null
+        onCasApply = null; onHdrApply = null; onUpscaleSharpnessApply = null
         onVibrationSlotChanged = null
         onInputControlsConfirm = null; onInputControlsSettings = null
         onScreenEffectsApply = null; onSeAddProfile = null; onSeRemoveProfile = null

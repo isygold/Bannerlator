@@ -443,7 +443,7 @@ private fun GraphicsContent(state: XServerDrawerState) {
         var sgsrSharpness by remember(initSgsrSharpness) { mutableIntStateOf(initSgsrSharpness) }
         var hdrEnabled    by remember(initHdrEnabled)    { mutableStateOf(initHdrEnabled) }
 
-        ToggleRow("SGSR", sgsrEnabled, true) { sgsrEnabled = it; pushSgsrUpdate(sgsrEnabled, sgsrSharpness, hdrEnabled) }
+        ToggleRow("Sharpen (CAS)", sgsrEnabled, true) { sgsrEnabled = it; pushSgsrUpdate(sgsrEnabled, sgsrSharpness, hdrEnabled) }
         if (sgsrEnabled) {
             Spacer(Modifier.height(4.dp))
             IntSlider("Sharpness", sgsrSharpness, 0..100, { sgsrSharpness = it }, { pushSgsrUpdate(sgsrEnabled, sgsrSharpness, hdrEnabled) })
@@ -499,6 +499,42 @@ private fun GraphicsContent(state: XServerDrawerState) {
         UpscalerModeButtons(upscalerMode, true) {
             upscalerMode = it
             XServerDialogState.onUpscalerApply?.invoke(it)
+        }
+
+        // "Sharpness" controls the REAL upscaler sharpness (RCAS stops / SGSR EdgeSharpness)
+        // and only applies to the sharpening scaling modes (SGSR/FSR/FSR-Fit/Sharpen).
+        if (upscalerMode == 3 || upscalerMode == 4 || upscalerMode == 5 || upscalerMode == 6) {
+            val initUpscaleSharpness by XServerDialogState.upscaleSharpness.collectAsState()
+            var upscaleSharpness by remember(initUpscaleSharpness) { mutableIntStateOf(initUpscaleSharpness) }
+            Spacer(Modifier.height(4.dp))
+            IntSlider("Sharpness", upscaleSharpness, 0..100, { upscaleSharpness = it }, {
+                XServerDialogState.onUpscaleSharpnessApply?.invoke(upscaleSharpness)
+            })
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        // ---- Composable post effects (layer on top of any scaling mode) ----
+        val initCasEnabled   by XServerDialogState.casEnabled.collectAsState()
+        val initCasSharpness by XServerDialogState.casSharpness.collectAsState()
+        val initHdrVkEnabled by XServerDialogState.hdrVkEnabled.collectAsState()
+        var casEnabled   by remember(initCasEnabled)   { mutableStateOf(initCasEnabled) }
+        var casSharpness by remember(initCasSharpness) { mutableIntStateOf(initCasSharpness) }
+        var hdrVkEnabled by remember(initHdrVkEnabled) { mutableStateOf(initHdrVkEnabled) }
+
+        ToggleRow("CAS", casEnabled, true) {
+            casEnabled = it
+            XServerDialogState.onCasApply?.invoke(casEnabled, casSharpness)
+        }
+        if (casEnabled) {
+            Spacer(Modifier.height(4.dp))
+            IntSlider("CAS Sharpness", casSharpness, 0..100, { casSharpness = it }, {
+                XServerDialogState.onCasApply?.invoke(casEnabled, casSharpness)
+            })
+        }
+        ToggleRow("HDR", hdrVkEnabled, true) {
+            hdrVkEnabled = it
+            XServerDialogState.onHdrApply?.invoke(hdrVkEnabled)
         }
 
         HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))

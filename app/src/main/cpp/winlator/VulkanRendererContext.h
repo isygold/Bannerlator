@@ -116,9 +116,10 @@ struct WindowPushConstants { float ndcX0, ndcY0, ndcX1, ndcY1; int useTexAlpha; 
 // Push-constant layouts for the spatial-upscaler post passes. The leading vec4
 // `ndc` matches upscale.vert; the remaining members are read only by the
 // fragment stage. std430 offsets line up with these C structs.
-struct SgsrPushConstants {                 // 32 bytes
+struct SgsrPushConstants {                 // 36 bytes
     float ndc[4];
     float viewportInfo[4];                 // xy = 1/inputSize, zw = inputSize px
+    float edgeSharpness;                   // SGSR EdgeSharpness, from the slider
 };
 struct EasuPushConstants {                 // 88 bytes
     float    ndc[4];
@@ -134,6 +135,18 @@ struct DownscalePushConstants {            // 32 bytes
     float ndc[4];
     float srcW, srcH;                      // render (source) resolution
     float dstW, dstH;                      // display (output) resolution
+};
+// Composable post effects (AMD CAS sharpen + fake-HDR). Both lead with vec4 ndc
+// (offset 0) like the upscaler PCs and stay well under the 88-byte PC range.
+struct CasPushConstants {                  // 32 bytes
+    float ndc[4];
+    float resolution[2];                   // input texture size in px
+    float sharpness;                       // CAS SHARPNESS term [0..1]
+    float _pad;
+};
+struct HdrPushConstants {                  // 24 bytes
+    float ndc[4];
+    float resolution[2];                   // input texture size in px
 };
 
 class VulkanRendererContext {
@@ -186,6 +199,9 @@ public:
     void setFilterMode(int mode);
     void setUpscaler(int mode);
     void setHqDownscale(bool enabled);
+    void setCas(bool enabled, int sharpness);
+    void setHdr(bool enabled);
+    void setUpscaleSharpness(int sharpness);
     void setSwapRB(bool enabled);
     void setPresentMode(VkPresentModeKHR mode);
     std::vector<int> getSupportedPresentModes() const;
@@ -339,6 +355,15 @@ private:
     // exclusive in practice (one is render>display, the other render<display).
     bool              hqDownscale       = false;
 
+    // Composable post effects, independent of the scaling mode. CAS layers a sharpen
+    // on top of any mode (incl. native res); HDR is a binary fake-HDR. The upscaler
+    // sharpness (RCAS stops / SGSR EdgeSharpness) is driven by its own slider; default
+    // 0.25 stops matches the value the upscaler shipped hard-coded.
+    bool              casEnabled        = false;
+    int               casSharpness      = 60;     // slider 0..100 -> CAS SHARPNESS
+    bool              hdrEnabled        = false;
+    float             upscaleSharpnessStops = 0.25f; // RCAS stops; SGSR edge derived
+
     VkSampler         upscaleSampler    = VK_NULL_HANDLE; // linear clamp; offscreen/mid input
     VkFormat          offscreenFmt      = VK_FORMAT_R8G8B8A8_UNORM;
     VkRenderPass      offscreenRenderPass = VK_NULL_HANDLE; // CLEAR -> SHADER_READ_ONLY
@@ -347,6 +372,13 @@ private:
     VkPipeline        easuPipeline      = VK_NULL_HANDLE;
     VkPipeline        rcasPipeline      = VK_NULL_HANDLE;
     VkPipeline        downscalePipeline = VK_NULL_HANDLE;
+    // CAS/HDR can be either a non-final pass (writes an fx target via
+    // offscreenRenderPass) or the final pass (writes the swapchain via renderPass);
+    // a pipeline is render-pass-specific, so keep one variant of each.
+    VkPipeline        casPipelineOff    = VK_NULL_HANDLE; // -> fx target (offscreenRenderPass)
+    VkPipeline        casPipelineSwap   = VK_NULL_HANDLE; // -> swapchain (renderPass)
+    VkPipeline        hdrPipelineOff    = VK_NULL_HANDLE;
+    VkPipeline        hdrPipelineSwap   = VK_NULL_HANDLE;
 
     // offscreen composite target @ game/container resolution
     VkImage           offscreenImg  = VK_NULL_HANDLE;
@@ -364,6 +396,22 @@ private:
     VkDescriptorSet   midDS   = VK_NULL_HANDLE;
     int               midW = 0, midH = 0;
 
+    // Effect-chain intermediates @ swapchain resolution. fx1 holds the scaled (or
+    // composited) image fed into CAS/HDR; fx2 ping-pongs when both effects run.
+    VkImage           fx1Img  = VK_NULL_HANDLE;
+    VkDeviceMemory    fx1Mem  = VK_NULL_HANDLE;
+    VkImageView       fx1View = VK_NULL_HANDLE;
+    VkFramebuffer     fx1FB   = VK_NULL_HANDLE;
+    VkDescriptorSet   fx1DS   = VK_NULL_HANDLE;
+    int               fx1W = 0, fx1H = 0;
+
+    VkImage           fx2Img  = VK_NULL_HANDLE;
+    VkDeviceMemory    fx2Mem  = VK_NULL_HANDLE;
+    VkImageView       fx2View = VK_NULL_HANDLE;
+    VkFramebuffer     fx2FB   = VK_NULL_HANDLE;
+    VkDescriptorSet   fx2DS   = VK_NULL_HANDLE;
+    int               fx2W = 0, fx2H = 0;
+
     // Per-frame upscale plan, computed in renderFrame, consumed by recordCmdBuf.
     // upFrame.mode reuses the upscalerMode enum (3=sgsr,4=fsr,5=fsr_fit,6=sharpen)
     // plus an internal sentinel (UPMODE_DOWNSCALE) for the supersampling path.
@@ -371,10 +419,14 @@ private:
         bool active = false;
         int  mode = 0;
         int  outX = 0, outY = 0, outW = 0, outH = 0;
+        bool cas = false;   // run CAS this frame (snapshot of casEnabled)
+        bool hdr = false;   // run HDR this frame (snapshot of hdrEnabled)
         SgsrPushConstants      sgsrPC{};
         EasuPushConstants      easuPC{};
         RcasPushConstants      rcasPC{};
         DownscalePushConstants dsPC{};
+        CasPushConstants       casPC{};
+        HdrPushConstants       hdrPC{};
     } upFrame;
 
     VkCommandPool                cmdPool = VK_NULL_HANDLE;
@@ -419,10 +471,14 @@ private:
                             VkFramebuffer& fb, VkDescriptorSet& ds);
     bool ensureOffscreen(int w, int h);
     bool ensureMid(int w, int h);
+    bool ensureFx1(int w, int h);
+    bool ensureFx2(int w, int h);
     void recordUpscalePasses(VkCommandBuffer cb, uint32_t imgIdx,
                              const std::vector<DrawEntry>& draws, bool cursorDrawn,
                              short ptrX, short ptrY, short curHotX, short curHotY,
-                             short curW, short curH);
+                             short curW, short curH,
+                             float ox, float oy, float sx, float sy,
+                             float cw, float ch);
     void planUpscaleFrame();
     void createWinTexPool();
     void createCursorPipeline();

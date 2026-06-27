@@ -20,15 +20,15 @@
 layout(binding = 0) uniform sampler2D ps0;
 
 layout(push_constant) uniform PC {
-    vec4 ndc;          // quad NDC rect, consumed by window.vert (offset 0)
-    vec4 ViewportInfo; // xy = 1/inputSize (texel size), zw = inputSize in pixels
+    vec4  ndc;          // quad NDC rect, consumed by window.vert (offset 0)
+    vec4  ViewportInfo; // xy = 1/inputSize (texel size), zw = inputSize in pixels
+    float EdgeSharpness; // driven by the "Sharpness" slider (default 2.0)
 } pc;
 
 layout(location = 0) in  vec2 fragTexCoord;
 layout(location = 0) out vec4 out_Target0;
 
 const float EdgeThreshold = 8.0 / 255.0;
-const float EdgeSharpness = 2.0;
 
 float fastLanczos2(float x) {
     float wA = x - 4.0;
@@ -93,7 +93,7 @@ void main() {
 
         float maxY = max(max(left.y, left.z), max(right.x, right.w));
         float minY = min(min(left.y, left.z), min(right.x, right.w));
-        finalY = clamp(EdgeSharpness * finalY, minY, maxY);
+        finalY = clamp(pc.EdgeSharpness * finalY, minY, maxY);
 
         float deltaY = finalY - color.w;
         deltaY = clamp(deltaY, -23.0 / 255.0, 23.0 / 255.0);
