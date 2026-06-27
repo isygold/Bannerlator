@@ -15,7 +15,38 @@ gh workflow run "Any branch compilation." --repo The412Banner/star-compose --ref
 
 ---
 
-## 2026-06-25 (latest) — 1.9 STABLE cut ✅ (SurfaceFlinger renderer + DXVK 3.0 / Vulkan 1.4)
+## 2026-06-27 (latest) — Vulkan spatial upscalers + sharpen + supersampling (Phase 1/1b)
+
+Branch `feat/vulkan-upscaler-sgsr-fsr` (NOT merged). First fork with real SGSR **and** FSR1 upscaling on the
+default Vulkan renderer, plus native-res sharpen and supersampling — in one app. Full design/provenance log:
+`docs/SGSR_HDR_VULKAN_PLAN.md`; per-renderer summary `docs/render_upgrades_report.html`.
+
+**Built a Vulkan post-process framework** in `app/src/main/cpp/winlator/VulkanRendererContext.cpp` (offscreen
+composite target at game res → post/upscale pass → swapchain), then layered features on it:
+
+- **Scaling mode** (in-game drawer, live, Vulkan-only): None / Linear / Nearest / **SGSR** / **FSR** / **FSR (Fit)** /
+  **Sharpen**. Modes via `VulkanRenderer.setUpscaler(int)` 0–6. Upscalers engage only when the game renders below
+  display res; **Sharpen (6)** runs FSR RCAS at any res incl. native.
+- **Supersampling ("Render scale")** — pre-launch container + per-game-shortcut setting Off/1.25x/1.5x/2x (stored via
+  `renderScale` extra, no DB migration). Launch multiplies the X11 render res (aspect-preserve, clamp 7680x4320, even
+  dims); compositor runs a new Lanczos-2 `downscale.frag` via `setHqDownscale(true)`. DSR/OGSSAA-style.
+- **Per-renderer Graphics tab** — shows ONLY the active renderer's controls (OpenGL→SGSR/HDR+ScreenEffects;
+  Vulkan→Scaling mode; SurfaceFlinger→"no enhancements" note) instead of greying out the rest.
+
+**Shaders bundled** (offline-compiled to `.spv` C-array headers, license headers retained): SGSR 1.0 (Qualcomm,
+BSD-3), FSR1 EASU+RCAS (AMD, MIT), Lanczos downscale. Approach for FSR-in-compositor / FSR-Fit credited to GameNative.
+**HDR deferred** (Android WSI rarely exposes an HDR10 surface; revisit later).
+
+**Commits:** `5f5a4a0` native upscaler + drawer · `28ab22d` per-renderer tab · `c3cbe49` Phase 1b sharpen+supersampling
+· docs `33ad5f4`. **CI:** Phase 1 GREEN (`28276691564`, `28277238762`); full Phase-1b build `28277821185` running
+(compile gate). **DEVICE-UNTESTED** — next step is on-device: sub-native upscale modes, native-res sharpen, 1.5x
+supersampling, and per-renderer tab. Then **Phase 2** = port GL effects (FXAA/CRT/Toon/NTSC/color) to Vulkan.
+
+CI for this repo is MANUAL: `gh workflow run build-artifacts.yml --ref <branch>`.
+
+---
+
+## 2026-06-25 — 1.9 STABLE cut ✅ (SurfaceFlinger renderer + DXVK 3.0 / Vulkan 1.4)
 
 Merged `feat/surfaceflinger-renderer` to main (ff `d915798`), bumped to **1.9 / versionCode 29** (`eb39c2b`),
 and cut **1.9 stable** (release run `28215839109`, `make_latest`, `update.json` attached → in-app updater
