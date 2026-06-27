@@ -2,6 +2,62 @@
 
 ---
 
+## 2026-06-27 — P4 "Lean GL path" (render-upgrades roadmap, final phase) — steps 1+3
+
+**Status:** branch `feat/p4-lean-gl-1-3` off main `35fd80d` (pushed). 2 commits. CI
+`28304623016` (`build-artifacts.yml`, all 3 flavors) running. Baseline main build
+`28304103719` ✅ green (known-good fallback). NOT merged; device-test pending.
+
+**Context:** Vulkan render-upgrades (P1 SGSR/FSR framework, P1b/1c CAS/HDR/sliders, P2 the
+5 GL effects → Vulkan, + native-mutex) are all DONE + on main. P3 (ReShade `.fx` engine)
+DROPPED. **P4 = the last phase**, and it targets the *Java GL renderer only*.
+
+**Recon (graphics-vulkan-engineer, read-only):** the roadmap's framing — "reduce
+GLSurfaceView overhead" — is mostly the wrong target. In the default config (DRI3 on) the
+game frame is **already zero-copy** on GL via AHardwareBuffer→EGLImageKHR (`GPUImage`), so
+there's no per-frame CPU upload to kill. EGL context is already GLES3 (`XServerView.java:89`)
+despite `GLES20.*` calls → GLES3 APIs available today. Real gaps: `setFilterMode` is a dead
+no-op on GL; no low-res→cheap-upscale path; full-frame `glTexSubImage2D` only on the
+SHM/DRI3-off/cursor path; effect chain renders base into a full-res FBO even for 1 effect.
+GameHub's `libxserver.so` is proprietary but its "direct scanout" rides the same AHB/EGLImage
+primitives we already own → P4 = clean-room reimpl with in-tree CAS/SGSR/FSR, nothing
+license-blocked. Ladder = 5 rungs; this batch = the low-risk 1–3.
+
+**Implemented (this batch):**
+- **Step 1 — `f7e0670` setFilterMode real on GL.** `GLRenderer.java`: new `windowTexFilter`
+  field; `setFilterMode(int)` maps `2→GL_NEAREST else→GL_LINEAR` (matches Vulkan convention),
+  applied in `renderDrawable` ONLY when `material == windowMaterial` so the **cursor stays
+  LINEAR**. Launch hook `XServerDisplayActivity.java:1785`
+  `renderer.setFilterMode(container.getRendererFilterMode())` gated `instanceof GLRenderer`
+  (was dead/unreachable before — nothing called `HostRenderer.setFilterMode`; Vulkan drives
+  filtering via `setUpscaler`). `getRendererFilterMode()` verified to exist (`Container.java:497`).
+- **Step 2 — PBO async upload — ❌ DROPPED.** First CI failed to compile
+  (`Texture.java:153 int cannot be converted to Buffer`): this project's compileSdk exposes
+  only the `Buffer` overload of `GLES30.glTexSubImage2D`, not the int-offset (PBO) variant →
+  a PBO can't feed the texture, so no benefit (`glTexImage2D`-with-offset would realloc every
+  frame, slower than the sync path). Cleanly reverted (`Texture.java` diff vs main now empty).
+  Deferred, not delivered. Lesson: don't assume Android GLES30 int-offset texSubImage exists.
+- **Step 3 — `c085dd9` glBlitFramebuffer for trivial copy stage.** `EffectComposer.render()`:
+  null-material (pure-copy) pass now goes through `blitReadBufferTo` (GLES30
+  `glBlitFramebuffer`, COLOR_BUFFER_BIT, LINEAR, scissor disabled) instead of program-bind +
+  textured quad. ALL real shader passes (Color/FXAA/Toon/CRT/NTSC/CAS) + the source-less
+  `drawFrame` scene render are UNCHANGED — only the degenerate null-material branch changed
+  (which also fixes an old clear-then-draw-nothing→black bug). Bit-identical with-effects output.
+
+**Deferred:** Step 4 (low-res render-target → cheap upscale = the actual "GameHub feel" win,
+higher risk: letterbox/scissor + keep cursor full-res) and Step 5 (drop GLSurfaceView for an
+owned EGL/SurfaceView present thread). Step 2 (async CPU-path upload) would need a non-PBO
+mechanism given this SDK's bindings.
+
+**Confidence:** step 1 = would-work/needs-device-proof (sampler state only, no fast-path
+regression); step 3 = would-work (bit-identical for shipped effects). No SDK in the agent env
+→ correctness proven by CI compile + device test, not local build.
+
+**Next:** CI green → device-test (GL renderer + Filter toggle nearest/linear; confirm cursor
+stays sharp; effects still composite) → merge to main. No tag/release (artifacts only).
+
+---
+
 ## 2026-06-27 — #19 follow-up: Layout L wired + A/L card chooser
 
 **Status:** branch `fix/shortcut-name-overflow` (pushed). Commit `324bb4a` (L + chooser) +
