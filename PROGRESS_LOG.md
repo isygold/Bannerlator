@@ -39,7 +39,15 @@ only checked `cas||hdr`, so the scale pass treated itself as final and skipped t
 space scene:** SGSR + CRT now shows the CRT fringing/scanlines on the upscaled image (was dropped pre-fix), and
 SGSR + NTSC + CRT (3-deep chain) renders both effects cleanly — no black screen/corruption. **Phase 2 is
 device-proven** (Color/Toon/CRT/NTSC visually confirmed + the scaling-chain fix; FXAA wired, subtle by nature).
-Branch tip `0593385`. Ready to merge to main + artifacts build.
+Branch tip `0593385`. **Merged to main (ff `eee9d57`), branch deleted; artifacts build `28291121833` ✅ green.**
+
+**Phase 3 (ReShade-style `.fx` engine) DROPPED 2026-06-27.** The upscalers (SGSR/FSR/Sharpen/downscale) are
+resolution-reconstruction passes wired into the compositor — not ReShade-style fixed-res filters, so they stay hardcoded
+(the headline differentiator). The cosmetic effects (CAS/HDR/FXAA/Toon/Color/CRT/NTSC) are fully covered by the curated
+hardcoded set with better perf/reliability on mobile/Turnip. A data-driven engine only pays off for user/community
+extensibility without rebuilds, which isn't a goal. **Effects work is complete.** Remaining: P4 (lean native-GLES2 GL path)
++ the queued overlay-opacity button-fill bug. The Vulkan renderer now carries the full stack: SGSR/FSR/Sharpen upscalers +
+CAS + fake-HDR + FXAA/Toon/Color/CRT/NTSC, all on the default path.
 
 Ported the 5 remaining GL-only screen effects onto the **same** Vulkan post chain as composable controls,
 at full GL parity:
