@@ -1,5 +1,47 @@
 # Star-Compose — Progress Log
 
+---
+
+## 2026-06-27 — Issue #19 "Name of games is empty" + game-card redesign
+
+**Status:** branch `fix/shortcut-name-overflow` (pushed, NOT merged). Layout A build CI `28299970224` running.
+
+**Root cause (#19):** in `ShortcutsScreen.kt` list-mode `ShortcutItem`, the right-aligned
+resolution+DXVK/VKD3D info column had no width bound. In a `Row`, unweighted children are
+measured before the weighted name column gets the remainder, so a long version string (e.g.
+a DXVK/VKD3D nightly with a commit id in its name) grew unbounded → collapsed the weighted
+name column to 0 width ("name is empty") AND pushed the trailing ⋮ overflow menu off-screen.
+
+**Iterations on the branch:**
+- `1dd8d4d` interim: capped info column `widthIn(max=120dp)` + ellipsize. Device-tested by user
+  → fixed the blank name but now TRUNCATED the component versions (not acceptable).
+- `e496040` interim: split DXVK/VKD3D onto own lines, wrap to 2 lines, cap 140dp.
+- `b598adb` (current tip) **Layout A redesign**: replaced the info column with a 3:4 poster
+  cover (reuses `shortcut.icon`, same bitmap the grid uses) + name/container + graphics
+  components as colour-coded chips on a wrapping `FlowRow` (`CompChip` helper + 4 chip colors,
+  `ExperimentalLayoutApi`). Long version strings wrap to another chip line / grow the row
+  taller instead of clipping. CI building (`28299970224`).
+
+**Design exploration (HTML mockups, rendered via headless chromium, saved to /sdcard/Download):**
+- `docs/shortcut_card_layouts.html` — 6 layouts A–F (poster, square-icon+chips, hero banner,
+  16:9 spec grid, two-tier stat strip, current-for-comparison).
+- `docs/shortcut_card_layouts_dense.html` — 6 denser layouts G–L that ALSO show renderer
+  (OpenGL/Vulkan/SurfaceFlinger), frame-gen (off/bionic/lsfg), audio (ALSA/PulseAudio) and
+  x86 backend (FEXCore/Box64/wowbox64 + box64/FEX preset). Real values pulled from arrays.xml
+  + ShortcutsScreen.
+- `docs/shortcut_card_L_final.html` — **user likes layout L** (bright primary chips
+  renderer·DXVK·frame-gen + muted secondary line driver·VKD3D·backend), **audio dropped per
+  user so the secondary line fits one row / card is shorter**. Resolution moves into subtitle.
+
+**NEXT:** user wants to SEE the layout A build on device first, but LIKES L → likely wire L
+(swap the FlowRow chip cloud for L's two-tier primary/secondary) on the same branch. L needs
+3 more shortcut extras resolved in ShortcutItem: `renderer`, `frameGenEngine`, `emulator`
+(+ box64Preset/fexcorePreset). Keys all confirmed present.
+
+---
+
+## (legacy) Star-Compose
+
 **Repo:** https://github.com/The412Banner/star-compose (main branch)  
 **Mirror:** https://github.com/kalteatz24/winlator-test (star-compose branch)  
 **Local:** `/data/data/com.termux/files/home/winlator-test`  
