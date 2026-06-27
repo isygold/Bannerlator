@@ -671,7 +671,9 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         if (classicHudRef != null && classicHudRef.isAttachedToWindow()) classicHudRef.post(classicHudRef);
         xServerView.queueEvent(this::updateScene);
         final String msg = mode ? "Native Rendering+ Enabled" : "Native Rendering+ Disabled";
-        xServerView.post(() -> Toast.makeText(xServerView.getContext(), msg, Toast.LENGTH_SHORT).show());
+        // Use the app's styled toast (white text on a custom background); a raw Toast.makeText here
+        // inherits the dark app theme and renders as a black box with invisible text.
+        xServerView.post(() -> com.winlator.star.core.AppUtils.showToast(xServerView.getContext(), msg));
     }
 
     public boolean isNativeMode() { return nativeMode; }

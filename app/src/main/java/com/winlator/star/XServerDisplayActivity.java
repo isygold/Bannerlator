@@ -1692,9 +1692,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // Scaling mode owns the base sampler filter on Vulkan (modes 1/2 call setFilterMode
             // internally), so drive the launch through setUpscaler instead of a separate
             // setFilterMode call — keeping the in-game "Scaling mode" picker the single source of
-            // truth for scaling/filtering. Seed it from the container's saved filter mode
-            // (0=nearest -> upscaler 2, 1=linear -> upscaler 1) and mirror it into the drawer.
-            int initialUpscaler = container.getRendererFilterMode() == 1 ? 1 : 2;
+            // truth for scaling/filtering. Default the scaling mode to Linear (1) — the safe,
+            // artifact-free choice for a global default — and only seed Nearest (2) when the
+            // container's filter mode is explicitly Nearest; mirror it into the drawer.
+            // (filterMode: 0=default -> Linear, 1=linear -> Linear, 2=nearest -> Nearest.)
+            int initialUpscaler = container.getRendererFilterMode() == 2 ? 2 : 1;
             vkRenderer.setUpscaler(initialUpscaler);
             XServerDialogState.INSTANCE.setUpscalerMode(initialUpscaler);
             // Supersampling: when the launch resolution was scaled above display res (see onCreate),
