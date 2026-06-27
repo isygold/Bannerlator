@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.lazy.LazyColumn
@@ -646,18 +647,21 @@ private fun ShortcutItem(
         val vkd3dVersion = cfgMap["vkd3dVersion"] ?: ""
         Column(
             horizontalAlignment = Alignment.End,
-            modifier = Modifier.padding(end = 4.dp),
+            // Cap + ellipsize so long DXVK/VKD3D version strings (e.g. nightlies with a
+            // commit id) can't grow unbounded, squeeze the weighted name column to 0
+            // ("name is empty") and shove the overflow menu off-screen (issue #19).
+            modifier = Modifier.widthIn(max = 120.dp).padding(end = 4.dp),
         ) {
             val topLine = listOf(resolution, driverLabel).filter { it.isNotEmpty() }.joinToString(" · ")
             if (topLine.isNotEmpty()) {
-                Text(topLine, fontSize = 10.sp, color = OnSurfaceVariant, maxLines = 1)
+                Text(topLine, fontSize = 10.sp, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             val bottomLine = listOfNotNull(
                 if (dxvkVersion.isNotEmpty()) "DXVK $dxvkVersion" else null,
                 if (vkd3dVersion.isNotEmpty()) "VKD3D $vkd3dVersion" else null,
             ).joinToString(" · ")
             if (bottomLine.isNotEmpty()) {
-                Text(bottomLine, fontSize = 10.sp, color = OnSurfaceVariant, maxLines = 1)
+                Text(bottomLine, fontSize = 10.sp, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
         Box {
