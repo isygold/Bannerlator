@@ -22,6 +22,26 @@ public class EffectComposer {
     private RenderTarget writeBuffer;
     private final GLRenderer renderer;
 
+    // ---- GL spatial-upscaler (SGSR / FSR) state ----------------------------------------
+    // Mirrors the Vulkan "Scaling mode" picker: 0=None 1=Linear 2=Nearest 3=SGSR 4=FSR
+    // 5=FSR(Fit) 6=Sharpen(CAS). Only the spatial modes (3/4/5) use the low-res render
+    // target below; None/Linear/Nearest drive GLRenderer.setFilterMode and Sharpen reuses
+    // the existing CAS post-effect, so for those the upscaler slots stay null and render()
+    // falls through to the unchanged default path. Drawer-only / session-live.
+    private int   upscalerMode     = 0;
+    private float upscaleSharpness = 0.75f;             // 0..1; 0.75 == legacy default
+    // Internal render scale for the low-res stage. 0.667 (2/3) == FSR "Quality" (a 1.5x
+    // upscale): a good general default that gives the upscaler real work while staying
+    // cheap. Fixed / session-live; not user-exposed.
+    private static final float RENDER_SCALE = 0.667f;
+    private RenderTarget lowResBuffer;                  // allocated lazily, sub-surface size
+    private int lowResW, lowResH;                       // allocated low-res dimensions
+    // The dedicated upscaler pass(es). For SGSR only `upscalePrimary` is set (single pass);
+    // for FSR `upscalePrimary` = EASU and `upscaleSecondary` = RCAS (two passes). Both null
+    // for every non-spatial mode -> isSpatialUpscale() false -> default render path.
+    private Effect upscalePrimary;
+    private Effect upscaleSecondary;
+
     // Constructor
     public EffectComposer(GLRenderer renderer) {
         this.renderer = renderer;
@@ -102,6 +122,17 @@ public class EffectComposer {
 //        Log.d(TAG, "render() called");
 
         initBuffers();
+
+        // Spatial-upscaler path (SGSR / FSR): render the scene into a low-res target and
+        // upsample it back to surface resolution before the post-effect chain. Strictly
+        // gated to the spatial modes with a wired upscaler pass and the windowed/
+        // non-magnified case (canSpatialUpscale()); for every other frame this is skipped
+        // and the default path below runs unchanged.
+        if (isSpatialUpscale() && canSpatialUpscale()) {
+            renderUpscaled();
+            isRendering = false;
+            return;
+        }
 
         // Set up framebuffer if there are effects to render
         if (hasEffects()) {
@@ -227,6 +258,147 @@ public class EffectComposer {
             Log.d(TAG, "ToonEffect added");
         }
         renderer.xServerView.requestRender();
+    }
+
+    // ====================================================================================
+    //  GL spatial upscaler (SGSR / FSR) — low-res render-target stage
+    // ====================================================================================
+
+    // True when the composer has anything to do this frame: either post-effects or an
+    // active spatial upscaler. Widens the old hasEffects()-only gate in GLRenderer so a
+    // scaling mode with no post-effects still routes through render(). Identical to
+    // hasEffects() whenever no spatial upscaler is engaged.
+    public synchronized boolean isActive() {
+        return hasEffects() || isSpatialUpscale();
+    }
+
+    // A spatial upscaler is engaged only when a spatial mode (3/4/5) selected one of the
+    // dedicated upscaler passes. Modes 0/1/2/6 leave the slots null.
+    private boolean isSpatialUpscale() {
+        return upscalePrimary != null;
+    }
+
+    // The low-res render-target stage replicates the default (windowed, magnifier-enabled,
+    // zoom == 1) frame path. Bail to the normal path for fullscreen / magnified / XR /
+    // cursor-relative-offset frames so those keep their existing behavior exactly.
+    private boolean canSpatialUpscale() {
+        return renderer.getSurfaceWidth() > 0 && renderer.getSurfaceHeight() > 0
+            && !renderer.isFullscreen()
+            && renderer.getMagnifierZoom() == 1.0f
+            && !renderer.isScreenOffsetYRelativeToCursor()
+            && !com.winlator.star.XrActivity.isEnabled(null);
+    }
+
+    // Select the scaling mode. Modes 0/1/2 (None/Linear/Nearest) and 6 (Sharpen/CAS) are
+    // NOT spatial upscalers and leave the dedicated slots null (None/Linear/Nearest are
+    // handled by GLRenderer.setFilterMode; Sharpen by the existing CAS post-effect). The
+    // spatial modes 3 (SGSR) / 4 (FSR) / 5 (FSR-Fit) build their pass(es) below. Sharpness
+    // is 0..1 and drives SGSR EdgeSharpness / FSR RCAS at draw time. Session-live.
+    public synchronized void setUpscaler(int mode, float sharpness01) {
+        this.upscalerMode = mode;
+        this.upscaleSharpness = sharpness01;
+        upscalePrimary = null;
+        upscaleSecondary = null;
+        // Spatial passes are wired in 1b (SGSR) / 1c (FSR / FSR-Fit).
+        switch (mode) {
+            default: break;
+        }
+        renderer.xServerView.requestRender();
+    }
+
+    public synchronized void setUpscaleSharpness(float sharpness01) {
+        this.upscaleSharpness = sharpness01;
+        renderer.xServerView.requestRender();
+    }
+
+    public int getUpscalerMode() { return upscalerMode; }
+
+    // Allocate the low-res target once, lazily, at the current render-scaled surface size.
+    // Like readBuffer/writeBuffer this does not reallocate on a surface-size change (the
+    // game session is fixed to one orientation); the allocated dims drive the upscale math.
+    private void initLowResBuffer() {
+        if (lowResBuffer == null) {
+            int w = Math.max(1, Math.round(renderer.getSurfaceWidth()  * RENDER_SCALE));
+            int h = Math.max(1, Math.round(renderer.getSurfaceHeight() * RENDER_SCALE));
+            lowResBuffer = new RenderTarget();
+            lowResBuffer.allocateFramebuffer(w, h);
+            lowResW = w;
+            lowResH = h;
+        }
+    }
+
+    private void renderUpscaled() {
+        int sw = renderer.surfaceWidth;
+        int sh = renderer.surfaceHeight;
+        initLowResBuffer();
+
+        // 1. Draw the scene (windows only, no cursor) into the low-res buffer.
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, lowResBuffer.getFramebuffer());
+        renderer.drawWindowsScaled(RENDER_SCALE);
+
+        // 2. Upscale low-res -> readBuffer at surface res. SGSR is single-pass; FSR runs
+        //    EASU (low -> surface) then RCAS (surface -> surface, 1:1).
+        if (upscaleSecondary == null) {
+            bindAndClear(readBuffer.getFramebuffer(), sw, sh);
+            drawUpscalePass(upscalePrimary, lowResBuffer, lowResW, lowResH, sw, sh);
+        } else {
+            bindAndClear(writeBuffer.getFramebuffer(), sw, sh);
+            drawUpscalePass(upscalePrimary, lowResBuffer, lowResW, lowResH, sw, sh);
+            bindAndClear(readBuffer.getFramebuffer(), sw, sh);
+            drawUpscalePass(upscaleSecondary, writeBuffer, sw, sh, sw, sh);
+        }
+        // readBuffer now holds the upscaled image at surface resolution.
+
+        // 3. Run the post-effect chain (Color/FXAA/Toon/CRT/NTSC/CAS/HDR) on top, keeping
+        //    the result in readBuffer (never to screen here). Identical ping-pong to the
+        //    default loop; material-less stages fall back to the blit copy.
+        for (Effect effect : effects) {
+            if (effect.getMaterial() == null) {
+                blitReadBufferTo(writeBuffer.getFramebuffer());
+                swapBuffers();
+                continue;
+            }
+            bindAndClear(writeBuffer.getFramebuffer(), sw, sh);
+            renderEffect(effect);
+            swapBuffers();
+        }
+
+        // 4. Composite the final image to the screen, then draw the cursor full-res on top.
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+        GLES20.glViewport(0, 0, sw, sh);
+        blitReadBufferTo(0);
+        renderer.drawCursorFullRes();
+    }
+
+    private void bindAndClear(int framebuffer, int w, int h) {
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, framebuffer);
+        GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
+        GLES20.glViewport(0, 0, w, h);
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+    }
+
+    // Draw one upscaler pass: full-screen quad sampling `src` (input res srcW x srcH) into
+    // the bound framebuffer (output res outW x outH). Shared by SGSR/EASU/RCAS; each
+    // material reads whichever of resolution/srcResolution/sharpness it declares.
+    private void drawUpscalePass(Effect effect, RenderTarget src,
+                                 int srcW, int srcH, int outW, int outH) {
+        ShaderMaterial material = effect.getMaterial();
+        if (material == null) return;
+        material.use();
+        renderer.getQuadVertices().bind(material.programId);
+        material.setUniformVec2("resolution", outW, outH);
+        material.setUniformVec2("srcResolution", srcW, srcH);
+        material.setUniformFloat("sharpness", upscaleSharpness);
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, src.getTextureId());
+        // The reference SGSR/EASU samplers expect CLAMP_TO_EDGE + linear filtering.
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+        material.setUniformInt("screenTexture", 0);
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, renderer.quadVertices.count());
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
     }
 
 }

@@ -232,7 +232,7 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
             viewportNeedsUpdate = true;
         }
 
-        if (effectComposer != null && effectComposer.hasEffects() && surfaceWidth > 0 && surfaceHeight > 0) {
+        if (effectComposer != null && effectComposer.isActive() && surfaceWidth > 0 && surfaceHeight > 0) {
             try {
                 effectComposer.render();
             } catch (Exception e) {
@@ -398,6 +398,42 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     public void toggleFullscreen() {
         toggleFullscreen = true;
         xServerView.requestRender();
+    }
+
+    // ---- GL spatial-upscaler support (EffectComposer low-res render-target stage) ----
+    // Render ONLY the windows (no cursor) into the currently-bound framebuffer, with the
+    // viewport scaled by `scale`. This produces the low-resolution source that the
+    // EffectComposer SGSR/FSR pass upsamples back to surface resolution. It mirrors the
+    // default frame path (magnifier-enabled, zoom == 1, windowed) used by drawFrame()
+    // exactly, minus the cursor — so the pointer is NEVER rendered into the low-res target
+    // and stays crisp (it is composited full-res afterwards by drawCursorFullRes()).
+    // drawFrame() itself is left byte-identical; this is only ever called on the GL
+    // upscaler path, which EffectComposer gates to the windowed/non-magnified case.
+    public void drawWindowsScaled(float scale) {
+        int vx = Math.round(viewTransformation.viewOffsetX * scale);
+        int vy = Math.round(viewTransformation.viewOffsetY * scale);
+        int vw = Math.max(1, Math.round(viewTransformation.viewWidth  * scale));
+        int vh = Math.max(1, Math.round(viewTransformation.viewHeight * scale));
+        GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
+        GLES20.glViewport(vx, vy, vw, vh);
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+        XForm.makeTransform(tmpXForm2, 0, 0, 1, 1, 0);
+        renderWindows();
+        viewportNeedsUpdate = true; // restore the normal viewport on the next non-upscaler frame
+    }
+
+    // Composite the cursor at full surface resolution on top of the already-upscaled frame.
+    // Uses the same view-region viewport + identity scene transform as the default windowed
+    // frame, so the pointer position matches the non-upscaler path and is never point-sampled
+    // or run through the upscaler. Caller must have the screen framebuffer (0) bound.
+    public void drawCursorFullRes() {
+        if (!cursorVisible) return;
+        GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
+        GLES20.glViewport(viewTransformation.viewOffsetX, viewTransformation.viewOffsetY,
+                          viewTransformation.viewWidth, viewTransformation.viewHeight);
+        XForm.makeTransform(tmpXForm2, 0, 0, 1, 1, 0);
+        renderCursor();
+        viewportNeedsUpdate = true;
     }
 
     private Drawable createRootCursorDrawable() {
