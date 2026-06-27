@@ -25,7 +25,22 @@ durable checkpoint; the live session is volatile.
 
 ---
 
-## 2026-06-27 (latest) — Native-mutex merge + on-screen controls opacity shadow fix
+## 2026-06-27 (latest) — 🚀 Release 1.9.2 (stable patch)
+
+Opacity fix device-confirmed working by user → cut **1.9.2** stable patch. Bumped `app/build.gradle`
+versionCode 30→31, versionName 1.9.1→1.9.2 (`84b6bc1`), pushed main, dispatched `release.yml`
+(run `28295471682`) with tag `1.9.2`, title `Bannerlator 1.9.2`, make_prerelease=`false`
+(→ prerelease:false + make_latest:true). Workflow builds all 3 release APKs + generates/attaches
+update.json (vc31) so the in-app updater offers it to stable users.
+
+**What 1.9.2 ships (since 1.9.1):** full Vulkan effect suite — P1c CAS + fake-HDR + sharpness sliders,
+P2 FXAA/Toon/Color/CRT/NTSC screen effects; Native-Rendering ↔ presets mutex; Linear default scaling
+mode; on-screen-controls overlay-opacity drop-shadow fix (`1d9439e`). Plain numeric tag = stable per the
+versioning hard rule (patch X.Y.Z allowed on explicit user request).
+
+---
+
+## 2026-06-27 — Native-mutex merge + on-screen controls opacity shadow fix
 
 **1. Native-Rendering ↔ presets mutex MERGED to main.** User device-tested the latest `feat/vulkan-native-mutex`
 build and confirmed it good. Fast-forwarded `main` `506ac6a`→`1c9c576` (`3ed78bb` mutex + `1c9c576` toast
