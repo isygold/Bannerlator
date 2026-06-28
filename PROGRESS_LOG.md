@@ -2,6 +2,31 @@
 
 ---
 
+## 2026-06-28 (s4) — 🆕 STEP 2: VRR / refresh-rate matching IMPLEMENTED (branch `feat/vrr-refresh-rate`, device-test owed)
+
+Step 1 (debanding+NIS) merged to main earlier today; started Step 2 = make the panel refresh rate follow the
+game FPS via `Surface.setFrameRate` votes (complementary to the FPS limiter: limiter=render rate, VRR=display
+rate). One Surface-level vote on the parent SurfaceView covers all 3 host renderers (GL / Vulkan compositor /
+SurfaceFlinger-ASR) since SF aggregates frame-rate votes over the layer subtree; existing Vulkan native child-SC
+votes left intact.
+
+5 commits on `feat/vrr-refresh-rate` (off main, pushed, NOT merged):
+1. `4882473` XServerView.setDisplayFrameRate(float,int) — SDK_INT>=30 guard, picks active holder Surface,
+   remembers last rate + re-asserts in surfaceChanged (added a holder callback to glSurfaceView which had none).
+2. `4671c26` applyVrr()/reapplyVrr()/resolvedMatchRefreshRate() in XServerDisplayActivity — votes 0 when
+   off/uncapped, `cap` normally, `cap×mult` in the lsfg-governs case; wired into applyFpsLimit + onStop(release)
+   + onResume(reassert) + drawer onMatchRefreshChange.
+3. `dcbefb5` Container `matchRefreshRate` extra (default ON) + shortcut resolver.
+4. `2b603e5` drawer "Match refresh rate to FPS" toggle + XServerDrawerState flow.
+5. `5ff90db` ContainerDetail editor switch + strings.
+
+Reviewed rate logic + cross-layer contract names (sound; `getFrameGenMultiplier()` confirmed to exist).
+CI dispatched run `28330068467`. **Device-test owed:** `dumpsys SurfaceFlinger | grep -i frameRate` per renderer,
+verify vote=cap when capped, cap×mult under lsfg, clears (0) when toggle-off/uncapped, re-asserts bg→fg, watch
+power/heat. Risk: setFrameRate is a HINT (battery-saver may ignore). No release/tag cut.
+
+---
+
 ## 2026-06-28 (s4) — ✅ VULKAN RETEST PASSED on new AIO torture cards → `feat/deband-nis` CLEARED TO MERGE
 
 User built the AIO Graphics Test with the Banding scene + new "Scaling Tests >" sub-page (builder used the
