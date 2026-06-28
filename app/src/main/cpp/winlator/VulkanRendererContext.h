@@ -121,6 +121,11 @@ struct SgsrPushConstants {                 // 36 bytes
     float viewportInfo[4];                 // xy = 1/inputSize, zw = inputSize px
     float edgeSharpness;                   // SGSR EdgeSharpness, from the slider
 };
+struct NisPushConstants {                  // 36 bytes
+    float ndc[4];
+    float viewportInfo[4];                 // xy = 1/inputSize, zw = inputSize px
+    float sharpness;                       // NIS sharpness [0..1], from the slider
+};
 struct EasuPushConstants {                 // 88 bytes
     float    ndc[4];
     uint32_t con0[4], con1[4], con2[4], con3[4];
@@ -374,7 +379,9 @@ private:
     //   3 = sgsr     (Snapdragon GSR 1.0; single pass; aspect-fit / letterbox)
     //   4 = fsr      (AMD FSR1 EASU+RCAS; two passes; fill / stretch)
     //   5 = fsr_fit  (AMD FSR1 EASU+RCAS; two passes; aspect-fit / letterbox)
-    // Shader upscaling only engages for modes 3-5 AND when the game render
+    //   6 = sharpen  (RCAS-only; any resolution; aspect-fit / letterbox)
+    //   7 = nis      (NVIDIA Image Scaling NVScaler; single pass; aspect-fit)
+    // Shader upscaling only engages for modes 3-7 AND when the game render
     // resolution (container) is smaller than the swapchain. Otherwise the
     // existing direct-to-swapchain path is used unchanged.
     int               upscalerMode      = 0;
@@ -412,6 +419,7 @@ private:
     VkRenderPass      offscreenRenderPass = VK_NULL_HANDLE; // CLEAR -> SHADER_READ_ONLY
     VkPipelineLayout  postPipeLayout    = VK_NULL_HANDLE;
     VkPipeline        sgsrPipeline      = VK_NULL_HANDLE;
+    VkPipeline        nisPipeline       = VK_NULL_HANDLE; // NVIDIA Image Scaling (mode 7)
     VkPipeline        easuPipeline      = VK_NULL_HANDLE;
     VkPipeline        rcasPipeline      = VK_NULL_HANDLE;
     VkPipeline        downscalePipeline = VK_NULL_HANDLE;
@@ -481,6 +489,7 @@ private:
         bool ntsc = false;  // snapshot of ntscEnabled
         bool crt = false;   // snapshot of crtEnabled
         SgsrPushConstants      sgsrPC{};
+        NisPushConstants       nisPC{};
         EasuPushConstants      easuPC{};
         RcasPushConstants      rcasPC{};
         DownscalePushConstants dsPC{};

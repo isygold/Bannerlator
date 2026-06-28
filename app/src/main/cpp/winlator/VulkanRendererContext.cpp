@@ -12,6 +12,7 @@
 #include "window_frag.h"
 #include "upscale_vert.h"
 #include "sgsr_frag.h"
+#include "nis_frag.h"
 #include "fsr_easu_frag.h"
 #include "fsr_rcas_frag.h"
 #include "downscale_frag.h"
@@ -100,6 +101,7 @@ VulkanRendererContext::~VulkanRendererContext() {
     destroyColorTarget(fx1Img, fx1Mem, fx1View, fx1FB, fx1DS);
     destroyColorTarget(fx2Img, fx2Mem, fx2View, fx2FB, fx2DS);
     if (sgsrPipeline      != VK_NULL_HANDLE) vk_.DestroyPipeline(device, sgsrPipeline, nullptr);
+    if (nisPipeline       != VK_NULL_HANDLE) vk_.DestroyPipeline(device, nisPipeline, nullptr);
     if (easuPipeline      != VK_NULL_HANDLE) vk_.DestroyPipeline(device, easuPipeline, nullptr);
     if (rcasPipeline      != VK_NULL_HANDLE) vk_.DestroyPipeline(device, rcasPipeline, nullptr);
     if (downscalePipeline != VK_NULL_HANDLE) vk_.DestroyPipeline(device, downscalePipeline, nullptr);
@@ -560,6 +562,8 @@ void VulkanRendererContext::createPostPipelines() {
     // SGSR & RCAS write the swapchain -> renderPass.
     easuPipeline = createPostPipeline(fsr_easu_code, sizeof(fsr_easu_code), offscreenRenderPass);
     sgsrPipeline = createPostPipeline(sgsr_code,     sizeof(sgsr_code),     renderPass);
+    // NIS NVScaler is single-pass and writes the swapchain directly -> renderPass.
+    nisPipeline  = createPostPipeline(nis_code,      sizeof(nis_code),      renderPass);
     rcasPipeline = createPostPipeline(fsr_rcas_code, sizeof(fsr_rcas_code), renderPass);
     // Supersampling downscale writes the swapchain too.
     downscalePipeline = createPostPipeline(downscale_code, sizeof(downscale_code), renderPass);
@@ -1080,7 +1084,7 @@ void VulkanRendererContext::recordUpscalePasses(VkCommandBuffer cb, uint32_t img
     const VkViewport fullVp{0,0,(float)swapchainExt.width,(float)swapchainExt.height,0,1};
     const VkRect2D   fullSc{{0,0},swapchainExt};
 
-    const bool hasScaling = (upFrame.mode>=3 && upFrame.mode<=6) || upFrame.mode==UPMODE_DOWNSCALE;
+    const bool hasScaling = (upFrame.mode>=3 && upFrame.mode<=7) || upFrame.mode==UPMODE_DOWNSCALE;
     // Must include EVERY chainable effect (matches planUpscaleFrame's fxOn) — else a
     // scaling mode (SGSR/FSR/Sharpen/downscale) treats the scale as final and writes
     // straight to the swapchain, skipping the effect chain (CRT/NTSC/etc. silently dropped).
@@ -1161,12 +1165,14 @@ void VulkanRendererContext::recordUpscalePasses(VkCommandBuffer cb, uint32_t img
         // exact pattern the composite stage already uses (window `pipeline` -> offscreen).
         const bool scaleFinal = !fxOn;
         VkFramebuffer stFB = scaleFinal ? swapchainFBs[imgIdx] : fx1FB;
-        if (upFrame.mode==3 || upFrame.mode==6 || upFrame.mode==UPMODE_DOWNSCALE) {
+        if (upFrame.mode==3 || upFrame.mode==6 || upFrame.mode==7 || upFrame.mode==UPMODE_DOWNSCALE) {
             VkPipeline   pl   = (upFrame.mode==3) ? sgsrPipeline
+                              : (upFrame.mode==7) ? nisPipeline
                               : (upFrame.mode==6) ? rcasPipeline
                               :                     downscalePipeline;
             const void*  pcd; uint32_t pcsz;
             if (upFrame.mode==3)      { pcd=&upFrame.sgsrPC; pcsz=sizeof(upFrame.sgsrPC); }
+            else if (upFrame.mode==7) { pcd=&upFrame.nisPC;  pcsz=sizeof(upFrame.nisPC);  }
             else if (upFrame.mode==6) { pcd=&upFrame.rcasPC; pcsz=sizeof(upFrame.rcasPC); }
             else                      { pcd=&upFrame.dsPC;   pcsz=sizeof(upFrame.dsPC);   }
             postPass(pl, stFB, scaleFinal, offscreenDS, pcd, pcsz);
@@ -1316,6 +1322,17 @@ void VulkanRendererContext::planUpscaleFrame() {
                     r.ndc[0]=nx0; r.ndc[1]=ny0; r.ndc[2]=nx1; r.ndc[3]=ny1;
                     fsrRcasCon(r.con, upscaleSharpness01);
                     r.outW=(float)containerWidth; r.outH=(float)containerHeight;
+                } else if (mode==7) {
+                    // NIS NVScaler: single pass, samples the offscreen (game res) and
+                    // upscales into the fit rect. ViewportInfo mirrors SGSR (xy=1/inSize,
+                    // zw=inSize); the slider drives NIS sharpness [0..1].
+                    NisPushConstants& p=upFrame.nisPC;
+                    p.ndc[0]=nx0; p.ndc[1]=ny0; p.ndc[2]=nx1; p.ndc[3]=ny1;
+                    p.viewportInfo[0]=1.f/(float)containerWidth;
+                    p.viewportInfo[1]=1.f/(float)containerHeight;
+                    p.viewportInfo[2]=(float)containerWidth;
+                    p.viewportInfo[3]=(float)containerHeight;
+                    p.sharpness = upscaleSharpness01;
                 } else {                                     // fsr (4) / fsr_fit (5)
                     EasuPushConstants& e=upFrame.easuPC;
                     e.ndc[0]=-1.f; e.ndc[1]=-1.f; e.ndc[2]=1.f; e.ndc[3]=1.f; // full mid target
@@ -1833,7 +1850,7 @@ void VulkanRendererContext::setFilterMode(int mode) {
 }
 
 void VulkanRendererContext::setUpscaler(int mode) {
-    if (mode<0||mode>6) mode=0;   // 0=none 1=linear 2=nearest 3=sgsr 4=fsr 5=fsr_fit 6=sharpen
+    if (mode<0||mode>7) mode=0;   // 0=none 1=linear 2=nearest 3=sgsr 4=fsr 5=fsr_fit 6=sharpen 7=nis
     if (upscalerMode==mode) { RLOG("setUpscaler: already %d, skipping", mode); return; }
     RLOG("setUpscaler: %d -> %d", upscalerMode, mode);
     upscalerMode=mode;
