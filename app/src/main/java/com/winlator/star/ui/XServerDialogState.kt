@@ -61,6 +61,28 @@ object XServerDialogState {
     @JvmField var onSgsrUpdate: SgsrUpdateCallback? = null
 
     // -------------------------------------------------------------------------
+    // Scaling mode (GL spatial upscaler) — parity with the Vulkan picker below.
+    // 0=None 1=Linear 2=Nearest 3=SGSR 4=FSR 5=FSR(Fit) 6=Sharpen(CAS). Modes 0/1/2
+    // drive GLRenderer.setFilterMode; 3/4/5 engage the EffectComposer SGSR/FSR low-res
+    // stage; 6 reuses the existing CAS post-effect. Drawer-only / session-live; gated to
+    // the GL renderer via effectsSupported.
+    // -------------------------------------------------------------------------
+    private val _glUpscalerMode = MutableStateFlow(0)
+    val glUpscalerMode: StateFlow<Int> = _glUpscalerMode
+    fun setGlUpscalerMode(v: Int) { _glUpscalerMode.value = v }
+
+    // 0..100; drives SGSR EdgeSharpness / FSR RCAS / CAS level for the GL picker.
+    private val _glUpscaleSharpness = MutableStateFlow(75)
+    val glUpscaleSharpness: StateFlow<Int> = _glUpscaleSharpness
+    fun setGlUpscaleSharpness(v: Int) { _glUpscaleSharpness.value = v }
+
+    fun interface GlUpscalerApplyCallback { fun invoke(mode: Int) }
+    @JvmField var onGlUpscalerApply: GlUpscalerApplyCallback? = null
+
+    fun interface GlUpscaleSharpnessCallback { fun invoke(sharpness: Int) }
+    @JvmField var onGlUpscaleSharpnessApply: GlUpscaleSharpnessCallback? = null
+
+    // -------------------------------------------------------------------------
     // Scaling mode (Vulkan spatial upscaler)
     // -------------------------------------------------------------------------
     // 0=none 1=linear 2=nearest 3=sgsr 4=fsr(fill) 5=fsr_fit(letterbox). Drawer-only /

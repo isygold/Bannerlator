@@ -435,6 +435,31 @@ private fun GraphicsContent(state: XServerDrawerState) {
     val vulkanSupported  by XServerDialogState.vulkanSupported.collectAsState()  // Vulkan renderer
 
     if (effectsSupported) {
+        // ---- OpenGL: Scaling mode (real SGSR / FSR1 spatial upscalers; parity with the
+        //      Vulkan picker). Modes 0/1/2 drive the base sampler filter; 3/4/5 engage the
+        //      EffectComposer low-res upscale stage; 6 = the existing CAS sharpen.
+        //      Drawer-only / session-live. ----
+        val initGlUpscalerMode by XServerDialogState.glUpscalerMode.collectAsState()
+        var glUpscalerMode by remember(initGlUpscalerMode) { mutableIntStateOf(initGlUpscalerMode) }
+
+        Text("Scaling mode", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        Spacer(Modifier.height(8.dp))
+        UpscalerModeButtons(glUpscalerMode, true) {
+            glUpscalerMode = it
+            XServerDialogState.onGlUpscalerApply?.invoke(it)
+        }
+        // "Sharpness" drives SGSR EdgeSharpness / FSR RCAS / CAS, for the sharpening modes.
+        if (glUpscalerMode == 3 || glUpscalerMode == 4 || glUpscalerMode == 5 || glUpscalerMode == 6) {
+            val initGlUpscaleSharpness by XServerDialogState.glUpscaleSharpness.collectAsState()
+            var glUpscaleSharpness by remember(initGlUpscaleSharpness) { mutableIntStateOf(initGlUpscaleSharpness) }
+            Spacer(Modifier.height(4.dp))
+            IntSlider("Sharpness", glUpscaleSharpness, 0..100, { glUpscaleSharpness = it }, {
+                XServerDialogState.onGlUpscaleSharpnessApply?.invoke(glUpscaleSharpness)
+            })
+        }
+
+        HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
+
         // ---- OpenGL: SGSR / HDR + Screen Effects (GL EffectComposer features) ----
         val initSgsrEnabled   by XServerDialogState.sgsrEnabled.collectAsState()
         val initSgsrSharpness by XServerDialogState.sgsrSharpness.collectAsState()

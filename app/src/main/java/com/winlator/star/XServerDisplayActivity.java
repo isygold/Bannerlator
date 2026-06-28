@@ -2098,6 +2098,27 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
         };
 
+        // GL "Scaling mode" (real SGSR / FSR1 spatial upscalers) — parity with the Vulkan
+        // picker; drawer-only / session-live, default None. Seed the drawer state + a default
+        // sharpness, prime the composer, and wire the apply callbacks. GL renderer only (this
+        // method already returned for non-GL above), so these never fire on Vulkan/ASR.
+        // Seed the picker to match the base sampler filter the launch already applied
+        // (container filter mode), mirroring the Vulkan seed: Nearest -> 2, else Linear (1).
+        int glSeedMode = (container != null && container.getRendererFilterMode() == 2) ? 2 : 1;
+        ds.setGlUpscalerMode(glSeedMode);
+        ds.setGlUpscaleSharpness(75);
+        glRenderer.getEffectComposer().setUpscaler(glSeedMode, 0.75f);
+        ds.onGlUpscalerApply = (mode) -> {
+            if (glRenderer == null) return;
+            // None/Linear/spatial/sharpen -> linear base sampler; Nearest -> point.
+            glRenderer.setFilterMode(mode == 2 ? 2 : 1);
+            glRenderer.getEffectComposer().setUpscaler(mode); // keeps the current sharpness
+        };
+        ds.onGlUpscaleSharpnessApply = (sharpness) -> {
+            if (glRenderer == null) return;
+            glRenderer.getEffectComposer().setUpscaleSharpness(sharpness / 100.0f);
+        };
+
         setupTmCallbacks();
     }
 

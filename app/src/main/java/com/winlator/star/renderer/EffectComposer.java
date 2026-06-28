@@ -41,6 +41,10 @@ public class EffectComposer {
     // for every non-spatial mode -> isSpatialUpscale() false -> default render path.
     private Effect upscalePrimary;
     private Effect upscaleSecondary;
+    // Scaling-mode 6 (Sharpen) reuses the existing AMD CAS post-effect (FSREffect) rather
+    // than the low-res stage. Tracked as a picker-owned instance so switching modes only
+    // ever removes the picker's CAS, never the one the separate "Sharpen (CAS)" toggle adds.
+    private Effect pickerCasEffect;
 
     // Constructor
     public EffectComposer(GLRenderer renderer) {
@@ -315,15 +319,44 @@ public class EffectComposer {
             default:
                 break;
         }
+        // Mode 6 (Sharpen) reuses the existing AMD CAS post-effect; every other mode drops
+        // the picker's CAS. Tracked separately so the parallel "Sharpen (CAS)" toggle is
+        // never disturbed (both manage their own FSREffect instance).
+        if (mode == 6) {
+            if (pickerCasEffect == null) pickerCasEffect = buildPickerCas();
+        } else if (pickerCasEffect != null) {
+            removeEffect(pickerCasEffect);
+            pickerCasEffect = null;
+        }
         renderer.xServerView.requestRender();
+    }
+
+    private Effect buildPickerCas() {
+        com.winlator.star.renderer.effects.FSREffect cas = new com.winlator.star.renderer.effects.FSREffect();
+        cas.setMode(com.winlator.star.renderer.effects.FSREffect.MODE_SUPER_RESOLUTION);
+        // FSREffect levels run 1..5; map the 0..1 slider onto that (matches the toggle's
+        // sharpness/25 + 1 mapping for a 0..100 slider).
+        cas.setLevel(upscaleSharpness * 4.0f + 1.0f);
+        addEffect(cas);
+        return cas;
     }
 
     public synchronized void setUpscaleSharpness(float sharpness01) {
         this.upscaleSharpness = sharpness01;
+        // SGSR/FSR read sharpness as a live uniform (no rebuild). The CAS shader bakes its
+        // level at compile time, so rebuild the picker's CAS effect to apply a new level.
+        if (pickerCasEffect != null) {
+            removeEffect(pickerCasEffect);
+            pickerCasEffect = buildPickerCas();
+        }
         renderer.xServerView.requestRender();
     }
 
+    // Re-select a mode keeping the current sharpness (used when only the mode changes).
+    public synchronized void setUpscaler(int mode) { setUpscaler(mode, this.upscaleSharpness); }
+
     public int getUpscalerMode() { return upscalerMode; }
+    public float getUpscaleSharpness() { return upscaleSharpness; }
 
     // Allocate the low-res target once, lazily, at the current render-scaled surface size.
     // Like readBuffer/writeBuffer this does not reallocate on a surface-size change (the
