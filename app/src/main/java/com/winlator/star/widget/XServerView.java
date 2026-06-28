@@ -3,6 +3,8 @@ package com.winlator.star.widget;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.opengl.GLSurfaceView;
+import android.os.Build;
+import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.ViewGroup;
@@ -24,6 +26,17 @@ public class XServerView extends FrameLayout {
     private GLSurfaceView glSurfaceView;
     private final ExecutorService eventExecutor = Executors.newSingleThreadExecutor();
     private XServer xServer;
+
+    // VRR / refresh-rate matching. The last frame-rate vote requested by the activity is remembered
+    // here and re-asserted in surfaceChanged() so it survives calls made before the surface exists
+    // and any surface recreation. 0f means "no vote" (clears any previous request). The compatibility
+    // is Surface.FRAME_RATE_COMPATIBILITY_DEFAULT (== 0) so SurfaceFlinger picks the seamless mapping
+    // (e.g. 60 -> 59.94) itself.
+    private float lastFrameRate = 0f;
+    private int lastFrameRateCompat = 0;
+    // Flip to true to only switch the panel mode when it can be done seamlessly (no black frame).
+    // API 31+ only; default keeps it simple and lets SurfaceFlinger decide.
+    private static final boolean FRAME_RATE_SEAMLESS_ONLY = false;
 
     public XServerView(Context context, XServer xServer) {
         super(context);
@@ -56,6 +69,7 @@ public class XServerView extends FrameLayout {
                 @Override
                 public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
                     asrRenderer.onSurfaceChanged(holder.getSurface(), width, height);
+                    reassertFrameRate();
                 }
                 @Override
                 public void surfaceDestroyed(SurfaceHolder holder) {
@@ -76,6 +90,7 @@ public class XServerView extends FrameLayout {
                 @Override
                 public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
                     ((VulkanRenderer)renderer).onSurfaceChanged(width, height);
+                    reassertFrameRate();
                 }
                 @Override
                 public void surfaceDestroyed(SurfaceHolder holder) {
@@ -93,6 +108,18 @@ public class XServerView extends FrameLayout {
             renderer = glRenderer;
             glSurfaceView.setRenderer(glRenderer);
             glSurfaceView.setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
+            // GLSurfaceView manages its own SurfaceHolder.Callback for EGL; we add an extra one
+            // purely to re-assert the VRR frame-rate vote when the surface is (re)created.
+            glSurfaceView.getHolder().addCallback(new SurfaceHolder.Callback() {
+                @Override
+                public void surfaceCreated(SurfaceHolder holder) {}
+                @Override
+                public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+                    reassertFrameRate();
+                }
+                @Override
+                public void surfaceDestroyed(SurfaceHolder holder) {}
+            });
             addView(glSurfaceView);
         }
     }
@@ -128,5 +155,43 @@ public class XServerView extends FrameLayout {
             return vulkanSurfaceView.getSurfaceControl();
         }
         return null;
+    }
+
+    // Vote a target display refresh rate for the active host renderer's window (VRR / refresh-rate
+    // matching). ONE Surface-level vote covers all three renderers: SurfaceFlinger aggregates
+    // frame-rate votes over a layer subtree, so a vote on the parent SurfaceView also covers the
+    // Vulkan/ASR native child SurfaceControls. fps == 0f clears the vote (lets the panel run free).
+    // The request is remembered and re-asserted in surfaceChanged() (see reassertFrameRate()).
+    // Safe to call before the surface exists. Surface.setFrameRate is API 30+, so it is a no-op
+    // below that (minSdk is 26).
+    public void setDisplayFrameRate(float fps, int compatibility) {
+        lastFrameRate = fps;
+        lastFrameRateCompat = compatibility;
+        applyFrameRateToSurface(fps, compatibility);
+    }
+
+    // Re-apply the last requested vote; called from the surfaceChanged callbacks so the vote
+    // survives surface (re)creation and any early call made before the surface was valid.
+    private void reassertFrameRate() {
+        applyFrameRateToSurface(lastFrameRate, lastFrameRateCompat);
+    }
+
+    private void applyFrameRateToSurface(float fps, int compatibility) {
+        if (Build.VERSION.SDK_INT < 30) return;
+        SurfaceHolder holder = null;
+        if (vulkanSurfaceView != null) holder = vulkanSurfaceView.getHolder();
+        else if (glSurfaceView != null) holder = glSurfaceView.getHolder();
+        if (holder == null) return;
+        Surface surface = holder.getSurface();
+        if (surface == null || !surface.isValid()) return;
+        try {
+            if (Build.VERSION.SDK_INT >= 31 && FRAME_RATE_SEAMLESS_ONLY) {
+                surface.setFrameRate(fps, compatibility, Surface.CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);
+            } else {
+                surface.setFrameRate(fps, compatibility);
+            }
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // Surface was released, or the rate/compat is rejected — ignore, vote is best-effort.
+        }
     }
 }
