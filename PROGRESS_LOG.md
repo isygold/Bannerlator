@@ -2,6 +2,46 @@
 
 ---
 
+## 2026-06-28 — 🧩 BIONIC-FG: Track-3 FSR3 Optical Flow built + `.so` delivered for manual injection (NOT device-tested)
+
+**Resume context for the bionic-fg frame-gen shader-pool / model-expansion effort.** Detail memory =
+`project_bannerlator_bionic_fg_shader_pool.md`. Fork = `The412Banner/bionic-fg`, clone `/home/claude-user/bionic-fg-fork`.
+
+**WHAT GOT DONE THIS SESSION:**
+- ✅ **Track 3 = FSR3 Optical Flow added as runtime model 3.** Branch `feat/fsr3-optical-flow-model`
+  (off `b0c2e5c`), commits `d6f4a09`(embed FSR3 OF SPIR-V idx66-69 + restore dropped `IsValidSpirv`) →
+  `9f06376`(model-3 dispatch + clamp→3) → `5eb11a7`(GLSL src+docs) → `603d26e`(CI workflow). PUSHED, unmerged.
+  Source = FidelityFX-SDK optical-flow passes (MIT), reimplemented subgroup-free GLSL for Turnip/no-DXC.
+  15 OF passes → reuse model-0 warp/blend/synth back half. Models 0/1/2 byte-unchanged (additive).
+- ✅ **Built `libbionic_fg.so` (arm64-v8a).** NEW self-build workflow in the fork `.github/workflows/build-so.yml`,
+  CI run `28323607624` **GREEN** (NDK r26b 26.1.10909125 / android-26, matches app). No external patch needed —
+  the single-device anti-deadlock fixes (fork commit `ac2f5c0`) are already an ANCESTOR of Track-3, so the
+  source self-contains models 0/1/2/3 + single-device `create(device,…)` + manifest `disable_environment`.
+- ✅ **Delivered to device for manual inject:** `/sdcard/Download/libbionic_fg.so` (6.3M, md5 `971e6aaa…`) +
+  `/sdcard/Download/VkLayer_BIONIC_framegen.json`. User will inject + test LATER.
+
+**🔑 CRITICAL ARCH FINDING (corrects prior records):** the app does NOT compile bionic-fg in its main NDK
+build (no `add_subdirectory(bionic-fg)`); the layer ships as a **prebuilt asset**
+`app/src/main/assets/bionic-fg/libbionic_fg.so`, built by the SEPARATE manual `build-bionic-fg.yml`. So the
+recorded "model-2 app CI GREEN" only bundled the OLD prebuilt `.so` — **shipped layer = `9136405c` (Jun 21),
+pre-model-1/2/3.** Models 1/2/3 + the shader_02 fix were NEVER in any shipped layer until this new `.so`.
+
+**▶️ WHAT TO DO LATER (resume):**
+1. **User injects + device-tests the new `.so`** — replace `<imagefs root>/usr/lib/libbionic_fg.so`,
+   set `model = 3` in `…/home/<container>/.config/bionic-fg/conf.toml` (UI only writes 0/1), FG enabled.
+   ⚠️ **CLOBBER CAVEAT:** `ImageFsInstaller.installBionicFgLayer` re-stages the OLD bundled asset whenever
+   on-device size ≠ bundled size → inject right BEFORE launching or it reverts. Also worth testing model 2 (V2).
+2. **Triage results:** FSR3 OF is compile-proven only — main risks = PERF (heavy SAD motion search; tunable
+   search window `BR`/`SR` in `of3_flow.comp`) + visual correctness. shader_02 fix + model 2 also first-ever on device.
+3. **If we want to ship for real** (not just inject): rebuild the bundled asset — either dispatch the app's
+   `build-bionic-fg.yml` AFTER refreshing/removing the now-redundant 608-line `patches/bionic-fg-bannerlator-fixes.patch`
+   (stale; fixes already in source), OR repoint that workflow to build the fork branch like `build-so.yml` does;
+   then commit the new `.so` to `assets/`, bump versionCode (NOT a release per [[feedback_bannerlator_release_versioning_rule]]).
+4. **Roadmap Tracks 4 & 5 BLOCKED on toolchains** (no sudo): Track 4 Lossless DXBC→SPIR-V needs `vkd3d-compiler`
+   (meson/widl/spirv-headers all missing); Track 5 RIFE/IFRNet needs an `ncnn` build. Revisit when toolchains available.
+
+---
+
 ## 2026-06-28 — 🛠️ BUILT: Debanding + NIS upscaler (branch `feat/deband-nis`, CI pending, NOT device-tested)
 
 Implemented Track-1 step 1 from the master plan below. **Branch `feat/deband-nis` off main, 6 commits
@@ -1857,3 +1897,5 @@ Last CI: `24577265773` ✅ green
 - OpenGL: Scaling-mode "Sharpen" (mode 6, `glUpscaleSharpness` steps=3) + standalone "Sharpen (CAS)" toggle (`sgsrSharpness` steps=3) → snap to 5 notches {0,25,50,75,100}.
 - Vulkan: "Sharpen" mode 6 (`upscaleSharpness` :547) + standalone "CAS" toggle (`casSharpness` :568) → continuous.
 - Fix later: add `steps=3` to the two VK sliders, or drop `steps` on the two GL ones (lean continuous-everywhere; GL keeps notches only for the "stop 0 = OFF" guarantee).
+
+**UPDATE 2026-06-28 (later):** ✅ OpenGL NIS DEVICE-PROVEN — user: "it worked like vulkan". Adreno GL shader-compile risk CLEARED. NIS now proven on BOTH renderers, matching looks. (Install: NIS vc32 needed `pm install -r -d` over the bionic-fg vc33 build via root bridge.) NIS feature merge-ready; debanding (other half of branch) may want a quick dark-gradient check before merge.
