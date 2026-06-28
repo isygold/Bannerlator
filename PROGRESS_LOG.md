@@ -6,8 +6,9 @@
 
 Implemented Track-1 step 1 from the master plan below. **Branch `feat/deband-nis` off main, 6 commits
 `194b7b9`→`cc3e0e7` (+log `a53a226`), PUSHED, NOT merged, NOT device-tested.** Shaders compile clean
-(glslangValidator), all cross-layer contracts reviewed+consistent. **CI dispatched: run `28319416413`
-(build-artifacts.yml — CI is manual workflow_dispatch, not auto-on-push).** Awaiting CI result + on-device A/B.
+(glslangValidator), all cross-layer contracts reviewed+consistent. **CI ✅ GREEN — run `28319416413`
+(build-artifacts.yml, all flavors; only a harmless Node-20 deprecation annotation).** First real compile of the
+C++/JNI/Java/Kotlin passed. NEXT = on-device A/B (see ⚠️ below), then merge.
 
 **DEBANDING** — terminal TPDF/IGN dither pass (float-only hash, Adreno-safe), `deband.frag`+header,
 appended LAST as `FX_DEBAND`, registered in fxOn in BOTH planUpscaleFrame AND recordUpscalePasses
