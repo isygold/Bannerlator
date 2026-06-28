@@ -39,7 +39,11 @@ class SplashViewModel(app: Application) : AndroidViewModel(app) {
                 _progress.value = pct
             },
             {
-                // Install complete — show Proceed button instead of hiding splash immediately.
+                // Install complete. Progress is derived from an estimated content length
+                // (and the post-extraction steps report nothing), so the last tick lands
+                // around 98%. Snap to 100% here — the true completion point — so the bar
+                // reads "Installation complete" instead of freezing under the Proceed button.
+                _progress.value = 100
                 _showProceed.value = true
             },
         )

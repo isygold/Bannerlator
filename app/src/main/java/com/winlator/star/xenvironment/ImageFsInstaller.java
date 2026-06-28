@@ -166,6 +166,10 @@ public abstract class ImageFsInstaller {
                 installBionicFgLayer(activity, imageFs);
                 installLsfgVkLayer(activity, imageFs);
                 installFFmpeg8(activity, imageFs);
+                // Progress is derived from an estimated content length and the post-extraction
+                // steps above report nothing, so the bar otherwise stalls around 98%. Snap to
+                // 100% now that everything is truly done, before the dialog closes.
+                activity.runOnUiThread(() -> dialog.setProgress(100));
             }
             else AppUtils.showToast(activity, R.string.unable_to_install_system_files);
 
