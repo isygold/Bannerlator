@@ -2,6 +2,43 @@
 
 ---
 
+## 2026-06-28 (s4) — ▶️ RESUME / CURRENT STATUS: VRR + manual picker built & verified; pacing tweak pending
+
+**Where things stand on the graphics roadmap:**
+- **STEP 1 (debanding + NIS): DONE — MERGED to main** (`feat/deband-nis` ff `71e2d27..4565b80`, branch deleted).
+  Both device-proven on Vulkan via the new AIO torture cards (banding ramp + scaling combo). Not in a tagged
+  release yet (per versioning rule — no stable cut without explicit say-so).
+- **STEP 2 (VRR / refresh-rate matching): BUILT + DEVICE-VERIFIED**, branch `feat/vrr-refresh-rate` (off main,
+  NOT merged). Took 3 fixes to get the panel to actually move: seamless→ALWAYS (`c29acc0`), capability gating
+  (`83da657`), and the big one — window `preferredRefreshRate` was pinning the panel to max and out-voting our
+  surface vote (`35dd636`). After that, all 4 states verified on-device (Vulkan, AYANEO 144Hz panel):
+  cap+match→60, cap+nomatch→144, uncapped+match→144, incapable→greyed. Clean 60↔144 both directions.
+- **Manual refresh-rate picker: BUILT** (`fa77da6`, CI `28333613335` GREEN) — unified 'Refresh rate' drawer
+  control (Auto match-FPS + manual snap-to-supported-modes chips, auto-detected via getSupportedRefreshRates;
+  Auto greys chips; whole group greys on incapable devices). Editor got a manual FilterChip row. Auto path
+  byte-identical (reviewed). DEVICE-TEST OWED.
+
+**Open issue — FPS oscillation (user-observed):** with limiter=60 + Auto-match ON, FPS swings 56↔64 every few
+seconds. Two suspects: (1) **AYASpace system refresh control** — the test device is an AYANEO handheld whose
+AYASpace overlay has its OWN 'Refresh Rate' control (Auto/144/120/90/60), was pinned to 144; its polling
+service likely re-asserts 144 vs our VRR every few seconds (matches the timing). (2) **limiter/VSync beat** —
+matching the panel to exactly the cap removes the 144Hz headroom that hid the limiter's pacing jitter (panel
+likely 59.94 vs cap 60.0). 
+
+**▶️ NEXT (test plan, before merge):** (1) DIAGNOSTIC — set AYASpace Refresh Rate→Auto, re-test: swing stops =
+system contention (config fix, document it), persists = pacing beat. (2) Install build `28333613335`, verify
+manual picker (Auto-off+pick 90/120 → dumpsys locks panel to it regardless of cap) + headroom check (manual
+120 + cap 60 should be smooth) + auto-path 4/4 regression. (3) If pacing beat confirmed → add **cap-below-
+refresh** fix (pace limiter to ~refresh−1 when Auto matching). (4) Then MERGE feat/vrr-refresh-rate (VRR +
+manual picker + any pacing fix) to main → then STEP 3.
+
+**Device-driving notes:** measure VRR while game is FOREGROUND (it releases the vote on background); 'go'
+handshake + `sleep 12; dumpsys` works. Key greps: activeMode= , setFrameRate=/{10492, the per-layer
+`Hz ... Always/OnlySeamless` vote line. Move-cursor-to-touchpoint is ON (tap absolute). Newest device
+screenshots in /sdcard/Pictures/Screenshots/.
+
+---
+
 ## 2026-06-28 (s4) — 🆕 Manual refresh-rate picker built (unified Auto + manual control)
 
 On top of the verified VRR, added a unified "Refresh rate" drawer control: the match-refresh toggle is now
