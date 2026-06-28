@@ -334,9 +334,10 @@ public class EffectComposer {
     private Effect buildPickerCas() {
         com.winlator.star.renderer.effects.FSREffect cas = new com.winlator.star.renderer.effects.FSREffect();
         cas.setMode(com.winlator.star.renderer.effects.FSREffect.MODE_SUPER_RESOLUTION);
-        // FSREffect levels run 1..5; map the 0..1 slider onto that (matches the toggle's
-        // sharpness/25 + 1 mapping for a 0..100 slider).
-        cas.setLevel(upscaleSharpness * 4.0f + 1.0f);
+        // FSREffect's level scale is INVERTED: level 1 == CAS sharpness 0.90 (sharpest),
+        // level 5 == 0.12 (softest). So a higher "Sharpness" slider must map to a LOWER
+        // level. Invert the 0..1 slider: 1.0 -> level 1 (sharpest), 0 -> level 5 (softest).
+        cas.setLevel((1.0f - upscaleSharpness) * 4.0f + 1.0f);
         addEffect(cas);
         return cas;
     }

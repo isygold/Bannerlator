@@ -2085,7 +2085,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             if (cur != null) glRenderer.getEffectComposer().removeEffect(cur);
             if (enabled) {
                 com.winlator.star.renderer.effects.FSREffect newFsr = new com.winlator.star.renderer.effects.FSREffect();
-                newFsr.setLevel((float)sharpness / 25.0f + 1.0f);
+                // FSREffect level scale is inverted (level 1 = sharpest, level 5 = softest);
+                // map the 0..100 "Sharpness" slider so higher = sharper -> lower level.
+                newFsr.setLevel((100.0f - (float)sharpness) / 25.0f + 1.0f);
                 newFsr.setMode(com.winlator.star.renderer.effects.FSREffect.MODE_SUPER_RESOLUTION);
                 glRenderer.getEffectComposer().addEffect(newFsr);
             }
