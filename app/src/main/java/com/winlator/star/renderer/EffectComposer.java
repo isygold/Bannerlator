@@ -46,6 +46,15 @@ public class EffectComposer {
     // ever removes the picker's CAS, never the one the separate "Sharpen (CAS)" toggle adds.
     private Effect pickerCasEffect;
 
+    // ---- Terminal debanding / dither slot ---------------------------------------------
+    // Debanding is ALWAYS the last pass (it dithers the final image just before the 8-bit
+    // screen quantize), so it is NOT part of the `effects` ping-pong list; it lives in its
+    // own slot and is rendered after the effect loop in BOTH render() and renderUpscaled().
+    // When active, no regular effect renders straight to screen: the chain ends in
+    // readBuffer and this pass takes readBuffer -> screen. Drawer-only / session-live.
+    private Effect debandEffect;
+    private int    debandStrengthPct = 100;            // slider 0..200 -> strength/100 LSBs
+
     // Constructor
     public EffectComposer(GLRenderer renderer) {
         this.renderer = renderer;
@@ -138,8 +147,12 @@ public class EffectComposer {
             return;
         }
 
-        // Set up framebuffer if there are effects to render
-        if (hasEffects()) {
+        // Terminal debanding forces the whole chain to end in a buffer (readBuffer); the
+        // dedicated deband pass below then dithers readBuffer -> screen.
+        final boolean terminalDeband = hasDeband();
+
+        // Set up framebuffer if there are effects to render (or a terminal deband pass).
+        if (hasEffects() || terminalDeband) {
             GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, readBuffer.getFramebuffer());
 //            Log.d(TAG, "Binding to readBuffer framebuffer: " + readBuffer.getFramebuffer());
         } else {
@@ -153,7 +166,8 @@ public class EffectComposer {
 
         // Iterate through each effect and render it
         for (Effect effect : effects) {
-            boolean renderToScreen = effect == effects.get(effects.size() - 1);
+            // With a terminal deband pass, NO regular effect renders straight to screen.
+            boolean renderToScreen = (effect == effects.get(effects.size() - 1)) && !terminalDeband;
             int targetFramebuffer = renderToScreen ? 0 : writeBuffer.getFramebuffer();
 
             // Trivial pure-copy stage: an effect with no shader material is not a real effect, so a
@@ -190,7 +204,36 @@ public class EffectComposer {
 //            Log.d(TAG, "Buffers swapped");
         }
 
+        // Terminal debanding: readBuffer now holds the final pre-dither image (scene, or
+        // the last effect's output) -> dither it straight to the screen.
+        if (terminalDeband) {
+            renderDeband(0);
+        }
+
         isRendering = false; // Reset flag after rendering
+    }
+
+    // Render the terminal deband pass: sample readBuffer, dither to `targetFramebuffer`
+    // (the screen) at surface res. Like renderEffect() but also feeds the `strength`
+    // uniform (the other effects don't declare it).
+    private void renderDeband(int targetFramebuffer) {
+        if (debandEffect == null) return;
+        ShaderMaterial material = debandEffect.getMaterial();
+        if (material == null) return;
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, targetFramebuffer);
+        GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
+        GLES20.glViewport(0, 0, renderer.surfaceWidth, renderer.surfaceHeight);
+        renderer.setViewportNeedsUpdate(true);
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+        material.use();
+        renderer.getQuadVertices().bind(material.programId);
+        material.setUniformVec2("resolution", renderer.surfaceWidth, renderer.surfaceHeight);
+        material.setUniformFloat("strength", debandStrengthPct / 100.0f); // slider 100 -> 1.0 LSB
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, readBuffer.getTextureId());
+        material.setUniformInt("screenTexture", 0);
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, renderer.quadVertices.count());
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, 0);
     }
 
     // Renders a single effect
@@ -273,7 +316,24 @@ public class EffectComposer {
     // scaling mode with no post-effects still routes through render(). Identical to
     // hasEffects() whenever no spatial upscaler is engaged.
     public synchronized boolean isActive() {
-        return hasEffects() || isSpatialUpscale();
+        return hasEffects() || isSpatialUpscale() || hasDeband();
+    }
+
+    // Terminal debanding is engaged when a DebandEffect occupies the dedicated slot.
+    private boolean hasDeband() {
+        return debandEffect != null;
+    }
+
+    // Toggle / configure the terminal debanding pass. strength 0..200 -> strength/100 LSBs
+    // (100 = 1.0 LSB, the default). Session-live, mirrors the Vulkan setDeband.
+    public synchronized void setDeband(boolean enabled, int strength) {
+        this.debandStrengthPct = strength;
+        if (enabled) {
+            if (debandEffect == null) debandEffect = new com.winlator.star.renderer.effects.DebandEffect();
+        } else {
+            debandEffect = null;
+        }
+        renderer.xServerView.requestRender();
     }
 
     // A spatial upscaler is engaged only when a spatial mode (3/4/5) selected one of the
@@ -424,9 +484,14 @@ public class EffectComposer {
         }
 
         // 4. Composite the final image to the screen, then draw the cursor full-res on top.
+        //    A terminal deband pass dithers readBuffer -> screen instead of a plain blit.
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
         GLES20.glViewport(0, 0, sw, sh);
-        blitReadBufferTo(0);
+        if (hasDeband()) {
+            renderDeband(0);
+        } else {
+            blitReadBufferTo(0);
+        }
         renderer.drawCursorFullRes();
     }
 
