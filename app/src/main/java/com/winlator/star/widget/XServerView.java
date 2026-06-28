@@ -185,9 +185,17 @@ public class XServerView extends FrameLayout {
         Surface surface = holder.getSurface();
         if (surface == null || !surface.isValid()) return;
         try {
-            if (Build.VERSION.SDK_INT >= 31 && FRAME_RATE_SEAMLESS_ONLY) {
-                surface.setFrameRate(fps, compatibility, Surface.CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS);
+            if (Build.VERSION.SDK_INT >= 31) {
+                // The 2-arg setFrameRate() defaults to CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS, which a
+                // peak-refresh panel (e.g. locked at 144) ignores — it won't drop to the cap. To make the
+                // refresh rate actually follow the FPS we pass the strategy explicitly: ALWAYS (force the
+                // switch, brief flash OK) unless FRAME_RATE_SEAMLESS_ONLY opts into seamless-only.
+                int strategy = FRAME_RATE_SEAMLESS_ONLY
+                        ? Surface.CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS
+                        : Surface.CHANGE_FRAME_RATE_ALWAYS;
+                surface.setFrameRate(fps, compatibility, strategy);
             } else {
+                // API 30 only has the 2-arg overload (no strategy parameter).
                 surface.setFrameRate(fps, compatibility);
             }
         } catch (IllegalArgumentException | IllegalStateException e) {
