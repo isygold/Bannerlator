@@ -2,6 +2,25 @@
 
 ---
 
+## 2026-06-28 (s4) — ✅ VULKAN RETEST PASSED on new AIO torture cards → `feat/deband-nis` CLEARED TO MERGE
+
+User built the AIO Graphics Test with the Banding scene + new "Scaling Tests >" sub-page (builder used the
+exact scene ids from the brief: scaletest_combo/zoneplate/wedge/grid/checker/edges). Switched the AIO shortcut
+to the **Vulkan** renderer (1280x720→1080p upscale) and drove it on-device:
+- **Debanding (banding card, dark 0..16/255 ramp):** OFF = ~12 hard stair-step bands; ON = bands dissolved into
+  fine dither grain. Max diff exactly 1/255, mean diff ~3x the smooth Space scene. The visual proof we couldn't
+  get on Space/Nebula.
+- **Scaling modes (combo card, grid patch sharpness std-dev):** none=linear 0.0590 (identical → None≡Linear
+  label quirk), sgsr 0.0689, fsr 0.0693, **NIS 0.0757 (sharpest clean upscaler)**, nearest 0.0936 (blocky
+  aliasing). All live-switch, all distinct; SGSR/FSR/NIS reconstruct cleanly above Linear.
+- Host compositor confirmed Vulkan via drawer layout (CAS/Debanding). NOTE: AIO HUD "Renderer" line mislabels
+  (showed "OpenGL" on the combo) — trust the container renderer, not that label.
+
+**BOTH gate halves PASSED on Vulkan → `feat/deband-nis` is cleared to merge (awaiting user go-ahead).** Then
+STEP 2 = VRR. Optional cleanup: None≡Linear label + CAS/Sharpen slider-snapping.
+
+---
+
 ## 2026-06-28 — 🎨 `feat/deband-nis` FULLY DEVICE-PROVEN (NIS both renderers + Debanding) → MERGE-READY
 
 **Branch `feat/deband-nis` (tip `cc3361f`, off main, PUSHED, NOT merged).** Detail memory =
