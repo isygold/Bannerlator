@@ -4,8 +4,9 @@
 
 ## 2026-06-27 — Implement open issues #22 (magnifier) + #20 (FEX Performance+TSO preset)
 
-gl-upscaler-parity merged to main (`6d5f75b`). New branch `fix/issues-22-magnifier-20-fextso`
-off main. NOT merged, NOT device-tested; CI build `28308479676`.
+gl-upscaler-parity merged to main (`6d5f75b`). Branch `fix/issues-22-magnifier-20-fextso` off
+main, CI build `28308479676` ✅ green. **User device-confirmed both work → MERGED to main (ff
+`6d5f75b..ecb8646`, branch deleted, no tag); GitHub auto-closed #22 and #20.**
 
 **#22 magnifier (`d7a736e`):** `showMagnifierOverlay()` cast the renderer to `GLRenderer` and
 no-op'd the zoom callback for anything else → on the default Vulkan renderer the overlay opened
