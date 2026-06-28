@@ -2,6 +2,35 @@
 
 ---
 
+## 2026-06-27 — Open-issue triage + scopes (#22 magnifier, #20 FEX TSO preset) — QUEUED
+
+Scoped while the gl-upscaler-parity slider CI built. To be implemented on a **fresh branch off
+main AFTER the gl-parity sliders device-test + merge** (user: "after we device test we will
+tackle them both").
+
+**#22 — magnifier doesn't work / zoom — ROOT CAUSE FOUND (high confidence):**
+`XServerDisplayActivity.showMagnifierOverlay()` (~line 3339) casts the renderer to
+**GLRenderer only** and the zoom callback early-returns when it's not GL. The **default
+renderer is Vulkan**, so the Magnifier overlay opens, shows 100%, and the +/− buttons are dead.
+Confirmed clean fix: `HostRenderer` interface already declares `get/setMagnifierZoom` (all 3
+renderers implement it) and `VulkanRenderer.setMagnifierZoom` calls `updateTransform()` → zoom
+applies live. **Fix = use the `HostRenderer` reference instead of the GLRenderer cast** (~3
+lines, 1 file). Optional: `ASurfaceRenderer.setMagnifierZoom` lacks a redraw trigger (add
+`updateScene()`). Device-test on Vulkan (can fold into the slider session).
+
+**#20 — Add FEX "Performance + TSO" preset:** the built-in PERFORMANCE preset sets
+`FEX_TSOENABLED=0`; many games need TSO. **Fix = add a new "Performance (TSO)" built-in preset**
+(Performance base + the 4 TSO flags on: TSOENABLED/VECTORTSOENABLED/MEMCPYSETTSOENABLED/
+HALFBARRIERTSOENABLED=1, X87REDUCEDPRECISION=1, MULTIBLOCK=1) across `FEXCorePreset.java` +
+`FEXCorePresetManager.java` (getEnvVars + getPresets) + `strings.xml`. No DB migration (presets
+stored by id). Verify exact flags vs the reporter's screenshot.
+
+**Also noted:** #18 (bundle brunodev Winlator turnip 26.1.0 for A10/SD845 — packaging easy but
+adrenotools load may need A11; needs an A10 device) and PR #24 (bounded strlcpy/snprintf in
+android_sysvshm.c — review + merge candidate).
+
+---
+
 ## 2026-06-27 — GL upscaler parity: device-test, inverted-slider fix, sharpness-range tuning
 
 **Branch:** `feat/gl-upscaler-parity` (off main `ec3bcb0`). Phase 1 (SGSR/FSR/Sharpen on the
