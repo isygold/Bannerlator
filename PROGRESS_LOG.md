@@ -39,9 +39,16 @@ gain is real but sub-perceptual on THIS content (will matter on real games w/ he
 Build is dither-only on 8-bit chain (precision-bump step deferred). Note: whole-frame RMSE is meaningless here
 (drawer changes between shots) — always crop to game area x>900.
 
-**▶️ NEXT:** (a) MERGE `feat/deband-nis` to main (FULLY device-proven, no tests outstanding), then
-(b) START STEP 2 = VRR / refresh-rate matching (plan in detail memory). Optional: precision-bump (10-bit/R16F
-intermediate) would make debanding visibly stronger — revisit only if a real game shows banding.
+**▶️ NEXT — ⛔ MERGE ON HOLD (user decision 2026-06-28):** do NOT merge `feat/deband-nis` yet. All prior
+tests ran on AIO Space/Nebula scenes, which don't visibly band and barely separate upscalers (smooth content)
+→ only proved debanding/scaling mathematically, not visually. GATE before merge: (1) AIO Graphics Test gets
+its Banding scene (already built, commit `881f39e`, 1 past v1.6.0 — needs push+build+install) + new
+Scaling-Test scenes (spec'd, not built — briefs in /sdcard/Download/SCALING_TESTS_BUILD_BRIEF.md +
+BANDING_SCENE_FINDINGS.md) → (2) install new AIO binary → (3) **retest on the VULKAN renderer** with real
+torture content (debanding on the dark 0..16/255 ramp, in-app dither OFF, scaling=None/1:1;
+NIS/SGSR/FSR/FSR-Fit on zone-plate/wedge/grid at sub-native render-res). THEN merge if it passes → THEN STEP 2
+= VRR. Optional: precision-bump (10-bit/R16F intermediate) would make debanding visibly stronger — revisit
+only if a real game shows banding.
 
 ---
 
