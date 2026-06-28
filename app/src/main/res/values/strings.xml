@@ -175,6 +175,7 @@
     <string name="compatibility">Compatibility</string>
     <string name="intermediate">Intermediate</string>
     <string name="performance">Performance</string>
+    <string name="performance_tso">Performance (TSO)</string>
     <string name="performance_mali">Performance (Mali)</string>
     <string name="extreme">Extreme</string>
     <string name="unity">Unity</string>
