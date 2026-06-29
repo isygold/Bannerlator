@@ -1322,7 +1322,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 if (paramJson != null && paramJson.has(p.name)) {
                     value = (float) paramJson.optDouble(p.name, value);
                 }
-                sb.append(formatUniformLine(p, value));
+                sb.append(formatUniformLine(effectKey, p, value));
             }
 
             sb.append("toggleKey = Home\n");
@@ -1358,15 +1358,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     // Single source of truth for how a reflected uniform value is written into vkBasalt.conf.
-    private String formatUniformLine(com.winlator.star.reshade.ReshadeManager.ReshadeParam p, float value) {
+    // Our patched libvkbasalt (patches/vkbasalt-reshade-livereload.patch) reads per-uniform overrides
+    // under the key "<effectKey>_<uniform>" (the same effectKey used in `effects = <effectKey>`), so the
+    // value lands in the live UBO. Key form is device-verified against that patch.
+    private String formatUniformLine(String effectKey, com.winlator.star.reshade.ReshadeManager.ReshadeParam p, float value) {
+        String key = effectKey + "_" + p.name;
         switch (p.type) {
             case BOOL:
-                return p.name + " = " + (value >= 0.5f ? "1" : "0") + "\n";
+                return key + " = " + (value >= 0.5f ? "1" : "0") + "\n";
             case INT:
-                return p.name + " = " + Math.round(value) + "\n";
+                return key + " = " + Math.round(value) + "\n";
             case FLOAT:
             default:
-                return p.name + " = " + String.format(java.util.Locale.US, "%.4f", value) + "\n";
+                return key + " = " + String.format(java.util.Locale.US, "%.4f", value) + "\n";
         }
     }
 
