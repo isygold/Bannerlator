@@ -2,6 +2,61 @@
 
 ---
 
+## 2026-06-29 — ▶️ RESUME HERE: STEP 3 ReShade effects — BUILT end-to-end, one device test from done
+
+**TL;DR:** In-game ReShade `.fx` effects via the bundled vkBasalt layer. App feature + a patched live-reload
+vkBasalt layer are BOTH built and CI-green; integrated build is compiling. **Only the on-hardware device test
+remains.** Design doc: `docs/RESHADE_STEP3_PLAN.md`.
+
+### Branches (all pushed to origin)
+- `feat/reshade-step3` — app-side feature (5 commits). CI `28401038692` ✅ GREEN.
+- `feat/reshade-vkbasalt-build` — patched libvkbasalt.so source/patch/workflow. CI `28401364441` ✅ GREEN.
+- **`feat/reshade-integrated`** — `step3` ⊕ `vkbasalt-build` + integration commit (patched .so repacked into
+  `extra_libs.tzst` + uniform-key fix). **THIS is the branch to install/test.** Combined CI `28402115564`
+  (workflow "CI Build (artifacts only)") — was IN PROGRESS at handoff; check it on resume.
+
+### What was proven / built this session
+1. **Spike DEVICE-PROVEN:** hardcoded sepia `.fx` compiled on-device (vkBasalt reshadefx→SPIR-V→Turnip) and
+   applied to a live DXVK game (The Saboteur) → screen went sepia. ReShade `.fx` on Adreno = real. Blockers
+   #1 (language) + #2 (Adreno compile) empirically dead. (Depth effects still STEP 4.)
+2. **Two infra bugs found + fixed:** (a) `extra_libs.tzst` (carries libvkbasalt.so) only extracted on container
+   `firstTimeBoot` → existing containers never got the layer (silent no-op). Fixed: extract whenever the .so is
+   absent. (b) the SHIPPED libvkbasalt.so has its key-detection compiled out (`isKeyPressedX11`→return false) +
+   no uniform-override path → its HOME toggle is dead for ALL inputs and it can't do live sliders. ⇒ any live
+   control REQUIRES a rebuilt layer (the X11-Home-inject "free toggle" idea is DEAD — dropped).
+3. **App-side Phase 1** (android-app-engineer): `reshade/ReshadeManager.java` (drop-in folder scan +
+   `.fx` ui_* param regex reflection, scalar float/int/bool); `Container.java` persists `reshadeEffect`/
+   `reshadeParams`; `XServerDisplayActivity.java` extraction-gate fix + `writeVkBasaltConfig()` (merged with CAS
+   into one `effects = <effect>:cas` chain) + `applyReshadeLive()` seam; in-game drawer ReShade section
+   (`XServerDialogState.kt`/`XServerDrawer.kt`); effect pickers in shortcut + container editors.
+   Drop-in folder = `getExternalFilesDir(null)/ReShade/` (one subfolder per effect; copied into guest HOME
+   `.config/vkBasalt/effects/<name>/` at launch for host-absolute paths). Gated to DXVK/VKD3D.
+4. **Patched vkBasalt** (graphics-vulkan-engineer): `patches/vkbasalt-reshade-livereload.patch` vs upstream
+   `DadSchoorse/vkBasalt@4f97f09` (submodule `app/src/main/cpp/vkbasalt`), built via new `build-vkbasalt.yml`
+   (meson Android cross, NDK r27c, arm64-v8a/android-24, X11-free). **Part A** = live on/off (Config remembers
+   opened path; present-hook mtime-watch re-reads conf → flips `presentEffect` from `enableOnLaunch`; lsfg-mirror,
+   no swapchain recreate). **Part B** = live sliders (codegen uniforms-to-spec-constants=FALSE → ui_* uniforms in
+   UBO; new `GenericUniform` + `ReshadeEffect::updateUniformsFromConfig()` overrides from conf key
+   `"<effect>_<uniform>"` → next-frame memcpy, no recompile). CI-green + binary-symbol-verified.
+5. **Integration:** patched .so (stripped 1.85MB) repacked into `extra_libs.tzst`; `formatUniformLine()` aligned
+   to emit `<effectKey>_<uniform>` to match the patch's read key.
+
+### ▶️ NEXT (on resume, when home / Wi-Fi back)
+1. Check combined CI `28402115564` (branch `feat/reshade-integrated`); if green, grab the APK artifact.
+2. **DEVICE TEST on The Saboteur (DXVK)** — the unproven gate (all green/binary-verified, Part A+B untested on
+   hardware): install integrated APK → use a **FRESH container** (old `xuser-4` has `libvkbasalt.so.disabled`
+   from the spike sepia-cleanup; extraction-heal/new container installs the patched .so) → pick a ReShade effect
+   → verify (a) effect renders CORRECTLY [Part B UBO change didn't break render], (b) drawer ReShade on/off
+   toggles LIVE [Part A], (c) sliders move the image LIVE [Part B + key syntax]. ⚠️ uniform-override key form is
+   the most likely thing to need a tweak — centralized in `formatUniformLine()`.
+3. If green on device → tidy (strip note, drop the throwaway `spike/vkbasalt-reshade`), then decide merge to main.
+   Live SLIDERS depend entirely on the patched .so working; if Part B misbehaves on device, on/off (Part A) is the
+   lower-risk fallback to ship first.
+
+⚠️ Memory file `project_bannerlator_step3_shader_loader_reshade` has the full detail + every commit/run id.
+
+---
+
 ## 2026-06-28 (s4) — ▶️ RESUME / CURRENT STATUS: VRR + manual picker built & verified; pacing tweak pending
 
 **Where things stand on the graphics roadmap:**
