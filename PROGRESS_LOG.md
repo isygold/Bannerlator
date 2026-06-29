@@ -2130,3 +2130,19 @@ Last CI: `24577265773` ✅ green
 **Proven:** plain unlabeled test issue #35 ("Native Rendering+") auto-answered in ~1–2 min with accurate citations (`XServerDisplayActivity.java:1936-2007`, `XServerDrawer.kt:633`) and got `answered`; closed as test. Also confirmed `OPENCODE_AUTH` secret is set and #34 answered correctly. No stale "No answer generated" comments remain on #32–#35.
 
 **Commits:** form fix `62a223e`, workflow `035ef08`, README `a394c2b` — all on `main` via API.
+
+---
+
+## 2026-06-29 — 2.1 stable cut + GL Native Rendering P0 (scanout extraction)
+
+### ✅ 2.1 STABLE released
+Cut `2.1` (versionCode 33, plain tag, `prerelease:false`/`make_latest:true`, releases/latest→2.1). Bumped `app/build.gradle` first (`282a674`) since `release.yml` reads version FROM there. Successful run `28341709108`; 3 APKs + `update.json` vc33 attached. Shipped: **VRR / refresh-rate matching** (Auto match-FPS + manual 60/90/120/144 snap slider, all 3 renderers), **NIS** upscaler (NVScaler mode 7, Vulkan), **debanding** (Vulkan compositor, strength slider), **Task Manager Vulkan/ASR fix**, **install-progress 98%→100% fix**, AIO Graphics Test v1.6.1 bundled.
+- ⚠️ **Release-notes trap (recurring):** first dispatch `28341637256` had a literal `"` in the notes → would break `release.yml`'s `NOTES="${{ inputs.release_notes }}"` bash line (the 1.9.2 failure). CANCELLED before the build finished (no tag leaked), re-dispatched with curly-quote-safe notes. **Lesson: pass release notes via a file / no straight `"`.** Final body replaced post-publish via `gh release edit --notes-file` for the clean 2.0-style layout.
+- README "What's New in 2.0"→"in 2.1" rewritten + Full Features updated (NIS/deband/VRR) — `d019bc3`. Verified each feature is real in renderer code before writing (deband `setDeband`, NIS NVScaler mode 7, `matchRefreshRate`).
+
+### ▶️ GL Native Rendering — P0 (renderer-neutral scanout extraction) — CI-GREEN, device-test owed
+Goal: bring **Native Rendering** (direct scanout via `SurfaceControl`→HWC overlay) to the **OpenGL** renderer (Vulkan-only today). Plan committed `docs/GL_DIRECT_SCANOUT_PLAN.md` (`228319f`). Phased P0–P6.
+
+**P0 (delegated to graphics-vulkan-engineer, branch `feat/p0-scanout-extract`, off main, pushed, NOT merged):** behavior-preserving extraction of the scanout impl into a standalone renderer-neutral `app/src/main/cpp/scanout/ScanoutContext.{h,cpp}` (zero Vulkan/GL/EGL). Methods moved (initScanout→initFromWindow, scanoutSetBuffer→setBuffer, applyScanoutBuffer→applyPendingCursor, dst/cursor setters) + state + SC_CREATE/ST_* macros + 9 dlsym fn ptrs. **Cursor threading split:** ScanoutContext gets pure setters + `applyPendingCursor()`; `needsRender`/`dirtyCV`/`cursorMoved` STAY in VulkanRendererContext, render loop calls `scanout.applyPendingCursor()` at `VulkanRendererContext.cpp:1485`. `VulkanRendererScanout.cpp` → thin forwarders. **`vulkan_jni.cpp` UNCHANGED → libvulkan_renderer ABI preserved.** Dropped 3 dead members; 1 log-only line touched. **CI run `28342956403` GREEN all 3 flavors.** CI-green only — NOT device-proven.
+
+**RESUME POINT / NEXT ACTION (user is about to test):** **P0 GATE = Vulkan-native REGRESSION device test.** Install the `feat/p0-scanout-extract` build (CI `28342956403`, release_number `p0-scanout`), open a **VULKAN** container with **Native Rendering ON**, run a DXVK game (AIO DX11 SPACE scene = known-good). Confirm UNCHANGED vs before: presents correctly, colors right, cursor right (pos/hotspot, not double-drawn), no black screen, clean teardown on rotate/background. **This must pass before P1.** Then P1 = new `libdirect_scanout.so` + `DirectScanout.java` (dormant, no wiring). Project memory: `project_bannerlator_gl_native_rendering.md`.
