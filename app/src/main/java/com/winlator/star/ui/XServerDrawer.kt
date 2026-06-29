@@ -54,6 +54,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -401,6 +402,11 @@ private fun GraphicsContent(state: XServerDrawerState) {
 
     // Frame Generation pinned to the top of the Graphics tab.
     FrameGenSection(state)
+
+    HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
+
+    // ReShade (vkBasalt) — renderer-agnostic, gated to DXVK/VKD3D games (reshadeSupported).
+    ReshadeSection()
 
     HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
 
@@ -778,6 +784,74 @@ private fun FgMultiplierButtons(selected: Int, onSelect: (Int) -> Unit) {
 
 private fun pushSgsrUpdate(enabled: Boolean, sharpness: Int, hdr: Boolean) {
     XServerDialogState.onSgsrUpdate?.invoke(enabled, sharpness, hdr)
+}
+
+// ───── ReShade section (Graphics tab) ─────
+// Active effect name + master on/off (frame-gen-style) + one slider/switch per uniform reflected
+// from the .fx. Hidden on non-DXVK/VKD3D games (reshadeSupported false). Effect SELECTION is
+// pre-launch (shortcut/container editor); this only tunes the loaded effect. Until the live config-
+// watch / X11-inject mechanism lands, the toggle/sliders write the config and take effect on the
+// next launch — all behind the single onReshadeApply seam (-> applyReshadeLive in the activity).
+@Composable
+private fun ReshadeSection() {
+    val supported by XServerDialogState.reshadeSupported.collectAsState()
+    if (!supported) return  // gated like SGSR/HDR — DXVK/VKD3D (Vulkan) games only
+
+    val effectName by XServerDialogState.reshadeEffectName.collectAsState()
+    val params by XServerDialogState.reshadeParams.collectAsState()
+    val initEnabled by XServerDialogState.reshadeEnabled.collectAsState()
+    val initValues by XServerDialogState.reshadeValues.collectAsState()
+
+    Text("ReShade", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Spacer(Modifier.height(4.dp))
+
+    if (effectName == "None" || effectName.isEmpty()) {
+        Text(
+            "No ReShade effect selected. Pick one in this game's settings (or the container's) to tune it here.",
+            color = DimWhite.copy(alpha = 0.5f),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(start = 4.dp, top = 2.dp)
+        )
+        return
+    }
+
+    // Keyed on the live config so the controls reflect the seeded/launch values and don't drift.
+    var enabled by remember(initEnabled) { mutableStateOf(initEnabled) }
+    val values = remember(initValues) { mutableStateMapOf<String, Float>().apply { putAll(initValues) } }
+
+    fun apply() {
+        XServerDialogState.setReshadeEnabled(enabled)
+        XServerDialogState.setReshadeValues(values.toMap())
+        XServerDialogState.onReshadeApply?.invoke(enabled, values.toMap())
+    }
+
+    Text(effectName, color = DimWhite, fontSize = 12.sp, modifier = Modifier.padding(start = 4.dp))
+    ToggleRow("Effect", enabled, true) { enabled = it; apply() }
+
+    if (enabled) {
+        params.forEach { p ->
+            val v = values[p.name] ?: p.defaultValue
+            when (p.type) {
+                com.winlator.star.reshade.ReshadeManager.ParamType.BOOL -> {
+                    ToggleRow(p.label, v >= 0.5f, true) {
+                        values[p.name] = if (it) 1f else 0f; apply()
+                    }
+                }
+                else -> {
+                    Spacer(Modifier.height(4.dp))
+                    LabeledSlider(
+                        p.label, v, p.min..p.max,
+                        { values[p.name] = it },
+                        { apply() },
+                        format = {
+                            if (p.type == com.winlator.star.reshade.ReshadeManager.ParamType.INT)
+                                it.toInt().toString() else "%.2f".format(it)
+                        }
+                    )
+                }
+            }
+        }
+    }
 }
 
 // Scaling-mode picker: 7 options (0=None 1=Linear 2=Nearest 3=SGSR 4=FSR 5=FSR Fit
