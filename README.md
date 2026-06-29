@@ -57,32 +57,27 @@
 
 ---
 
-## 🆕 What's New in 2.0
+## 🆕 What's New in 2.1
 
-The graphics-enhancement program is now **complete across both renderers**, plus a redesigned game/container UI, a few quality-of-life features, and broader device support. 1.9.2 brought real spatial upscaling and the full effect chain to the **Vulkan** renderer; **2.0 brings the same upscaler suite to the OpenGL renderer**, retunes every sharpness slider, fixes the magnifier, redesigns the game and container cards, auto-closes a session when the game quits, adds a FEXCore TSO preset, and **adds Turnip support for Android 10 / older devices**.
+2.1 is a **smoothness & polish** release. The headline is **VRR / refresh-rate matching** — your screen's refresh rate can now follow your in-game frame rate for smoother, less-torn, lower-power gameplay — joined by a new **NIS** upscaler and a **debanding** pass on the Vulkan compositor, plus two notable fixes: the in-game **Task Manager** now works on the Vulkan renderer, and the install progress bar no longer hangs at 98%.
 
-**🖼️ OpenGL renderer upscalers (new) — full parity with Vulkan.** The same **Scaling mode** picker is now live in the in-game drawer on the **OpenGL** renderer too: **SGSR**, **FSR** / **FSR-Fit**, **Sharpen**, plus **Linear** / **Nearest**. The OpenGL path renders the scene at a reduced internal resolution and reconstructs it back up — so you can get a sharper image *and* a performance headroom on the OpenGL renderer, not just Vulkan.
+**🏎️ Match refresh rate to FPS (VRR) — new.** Your display's refresh rate can now **track your frame rate** instead of staying locked at the panel's maximum. Turn on **Auto (match FPS)** to have the panel follow whatever the game is running at, or use the **manual refresh-rate slider** to pin a fixed rate that snaps to your panel's supported modes — **Off / 60 / 90 / 120 / 144 Hz** — with a live readout of the rate the display actually settled on. It's available in both the **in-game drawer** and the **container settings editor**, greys out automatically on displays without variable-refresh support, and works on **all three host renderers** (Vulkan, OpenGL, SurfaceFlinger). The payoff: smoother motion, less tearing, and lower power draw whenever a game runs below your panel's max refresh.
 
-**🎚️ Retuned sharpness sliders (both renderers).** Every sharpness slider now spans a clean, useful range — **0 = off (no sharpening at all)** through **100 = maximum**:
-- **SGSR** sharpness range **doubled** for a much stronger effect at the top end.
-- **FSR / Sharpen** now pass through completely untouched at 0 (previously they always added a little sharpening).
-- The **Sharpen** mode snaps to **5 clear steps** (0 / 25 / 50 / 75 / 100), since its sharpening has five discrete levels — no more dead slider travel.
+> 🎮 **Handheld note (AYANEO / AYASpace and similar):** set the system **Refresh Rate** to **Auto** in the device's own settings so the app is allowed to drive the panel — a fixed system rate will override it.
 
-**🛠️ OpenGL renderer plumbing.** The **filter mode** (Nearest / Linear) is now a real, live setting on the OpenGL renderer — the in-game cursor stays sharp under Nearest — and trivial copy stages use a faster `glBlitFramebuffer` path.
+**🟩 NIS upscaler — new scaling mode.** **NVIDIA Image Scaling (NVScaler)** joins **SGSR** and **FSR** in the in-game **Scaling mode** picker on the Vulkan renderer — a single-pass, aspect-fit upscaler with its own **sharpness** slider, giving you another option when a game renders below display resolution.
 
-**🃏 Redesigned game & container cards.** The **Games** list and **Containers** list now share a cleaner, consistent card design: a primary row of chips (renderer · DXVK · frame-gen) over a muted secondary line (driver · VKD3D · backend), with the resolution in the subtitle. This also fixes long driver / component names crowding out or blanking the game title and pushing the ⋮ menu off-screen.
+**🎨 Debanding — smoother gradients.** A new **debanding** pass on the Vulkan compositor dithers away the visible "stripes" you get in smooth gradients, skies, and dark scenes on 8-bit output. Switch it on with an adjustable **strength** slider; it runs as the very last step before the image reaches the screen, with no meaningful performance cost.
 
-**🚪 Auto-close on game exit.** When you launch a game from the library or a shortcut, the Wine session now **closes itself once the game quits** — no more black Wine desktop left behind. There's a per-container **"Close when game exits"** toggle (on by default) and a per-shortcut override.
+**🩹 In-game Task Manager fixed on Vulkan / ASR.** The in-game drawer's **Task Manager** — **End Process** and **Bring to Front** — was dead on the **default Vulkan renderer** (and the SurfaceFlinger / ASR path) and only worked on OpenGL. Both actions now work on every renderer, so you can kill a hung game from the drawer again.
 
-**🔍 Magnifier fixed.** The in-game **Magnifier** (zoom) overlay now works on the **default Vulkan renderer** (and the others) — previously its +/− buttons did nothing unless you were on OpenGL.
+**🩹 Install progress no longer hangs at 98%.** On a fresh first-launch setup — and on **Settings → Reinstall ImageFS** — the progress bar used to **freeze at 98%** while the **Proceed** button was already showing, leaving people unsure whether to keep waiting. It now correctly reaches **100% / Installation complete** at the true end of setup.
 
-**⚙️ FEXCore "Performance (TSO)" preset (new).** A new built-in FEXCore preset: Performance settings with **Total Store Ordering** enabled — for the many games that need correct memory ordering without paying the full TSO cost.
+**🧪 Updated AIO Graphics Test (v1.6.1).** New containers ship with **AIO Graphics Test v1.6.1**, adding dedicated **banding** and **scaling** test scenes for checking the debander and the upscalers on your own device.
 
-**📱 Turnip on Android 10 / older devices (new).** A new **`turnip-26.1.0`** graphics-driver option loads Mesa Turnip as a **direct system Vulkan ICD** instead of through the adrenotools hook, so it works on **Android versions below 11** (e.g. Snapdragon 845) where the hook-based drivers silently fall back to the system driver. The existing adrenotools drivers are unchanged; this is an additional option in the graphics-driver list.
+**💬 Ask the AI about Bannerlator (new — on GitHub).** You can now ask questions about how Bannerlator works straight from the repo: an AI reads the actual source code and replies with file references. Hit the **Ask the AI** badge at the top of this page. *(This is a repo/community feature — it isn't part of the app.)*
 
-> ⚠️ **Updating from a previous release? Reinstall imageFS to get the new Turnip driver.** The `turnip-26.1.0` driver is installed into imageFS, so a plain app update won't add it on its own. Open the app's **Settings → scroll to the bottom → Reinstall ImageFS**. (A **fresh** install of 2.0 already includes it — no action needed.)
-
-> ℹ️ The OpenGL upscalers reuse the same SGSR (BSD-3, Qualcomm) and FSR / CAS (MIT, AMD GPUOpen) shader code as the Vulkan path, ported to the GLES effect pipeline. The Android-10 Turnip driver is Mesa's open-source **Turnip 26.1.0** (Freedreno team), packaged in the same direct-ICD form Winlator ships. See [Credits](#-credits).
+> ℹ️ **NIS** is NVIDIA's open-source Image Scaling (MIT); **debanding** uses a terminal TPDF/IGN dither pass before the 8-bit swapchain; the **VRR** work votes the display's refresh rate through Android's `Surface.setFrameRate` / `SurfaceControl` APIs. See [Credits](#-credits).
 
 ---
 
@@ -109,9 +104,11 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 - Multiple host renderers — **Vulkan**, **OpenGL**, and **VirGL**.
 - > ℹ️ The **Vulkan host renderer** uses the rendering path from **[StevenMXZ](https://github.com/StevenMXZ/Winlator-Ludashi)** (Winlator-Ludashi); its `AHardwareBuffer` present path — what makes Vulkan / DXVK / VKD3D content actually display correctly — was ported from / cross-examined against **[GameNative](https://github.com/utkarshdalal/GameNative)**. See [Credits](#-credits).
 - **Native Rendering+** — low-latency direct-scanout presentation on the Vulkan renderer (mutually exclusive with the Vulkan post-processing presets below, since it bypasses the compositor).
-- **Spatial upscalers on *both* the Vulkan *and* OpenGL renderers** — **SGSR** (Snapdragon GSR 1.0) and **FSR / FSR-Fit** (AMD FidelityFX Super Resolution 1.0), plus a **Sharpen** (RCAS) mode and Linear / Nearest, all switchable live in the in-game drawer. On Vulkan it engages when a game renders below display resolution; on OpenGL it renders the scene at a reduced internal resolution and reconstructs it back up. Every sharpness slider runs 0 (off) → 100 (max).
+- **Spatial upscalers on *both* the Vulkan *and* OpenGL renderers** — **SGSR** (Snapdragon GSR 1.0) and **FSR / FSR-Fit** (AMD FidelityFX Super Resolution 1.0), plus **NIS** (NVIDIA Image Scaling, Vulkan), a **Sharpen** (RCAS) mode and Linear / Nearest, all switchable live in the in-game drawer. On Vulkan it engages when a game renders below display resolution; on OpenGL it renders the scene at a reduced internal resolution and reconstructs it back up. Every sharpness slider runs 0 (off) → 100 (max).
 - **Supersampling (Render scale)** — render above display resolution (1.25× / 1.5× / 2×) and downsample with a Lanczos-2 filter for DSR / OGSSAA-style anti-aliasing; set per container / per shortcut.
 - **Screen effects on both the OpenGL *and* Vulkan renderers** — FXAA, Toon, CRT, NTSC, Color grading, **CAS** sharpening, and fake-HDR (the Vulkan path runs them through a new post-processing pipeline; previously they were OpenGL-only).
+- **Debanding (Vulkan)** — an optional terminal dither pass that removes the visible banding from smooth gradients, skies, and dark scenes on 8-bit output, with an adjustable strength.
+- **Match refresh rate to FPS (VRR)** — the display's refresh rate can follow your frame rate: an **Auto (match FPS)** toggle or a manual **60 / 90 / 120 / 144 Hz** slider, on all three host renderers, auto-disabled on displays that don't support variable refresh.
 - Adjustable resolution and frame-rate limit.
 
 ### 🎞️ Frame generation & pacing
