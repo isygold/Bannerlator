@@ -2105,3 +2105,28 @@ Last CI: `24577265773` ✅ green
 **UPDATE 2026-06-28 (later):** ✅ OpenGL NIS DEVICE-PROVEN — user: "it worked like vulkan". Adreno GL shader-compile risk CLEARED. NIS now proven on BOTH renderers, matching looks. (Install: NIS vc32 needed `pm install -r -d` over the bionic-fg vc33 build via root bridge.) NIS feature merge-ready; debanding (other half of branch) may want a quick dark-gradient check before merge.
 
 **RESUME POINT (2026-06-28, user driving home):** Step 1 NIS = DONE, device-proven both renderers. NEXT SESSION = **Step 2: VRR / refresh-rate matching** (full plan in roadmap memory file). Open optional threads to fold in: (a) debanding dark-gradient check + merge `feat/deband-nis` to main; (b) CAS/Sharpen snapping cleanup (GL 5-notch vs VK continuous). Branch tip `cc3361f`, pushed, unmerged.
+
+---
+
+## 2026-06-28 — AMA bot: fix question form + switch to auto-answer-every-issue
+
+**Context:** User reported a friend submitted a test question but it never got answered — came in with no label, and manually adding `ama-request` after the fact did nothing.
+
+**Root causes found (two):**
+1. **Form template broken since day one.** `.github/ISSUE_TEMPLATE/ask-the-ai.yml` used the singular key `validation:` instead of GitHub's schema key `validations:`. GitHub strict-rejects invalid form templates → the `?template=ask-the-ai.yml` link silently fell back to the BLANK "Create new issue" page (no `Q:` title, "No labels") → submissions carried no `ama-request` → bot never fired. Fixed singular→plural (`62a223e`). Template now parses clean (verified with js-yaml).
+2. **After-the-fact labeling is a no-op.** The `labeled` trigger only listens for the `question` label, not `ama-request` — so manually adding `ama-request` later never triggers anything. (Adding `question` does — used it to force-answer the friend's #34.)
+
+**Decision (user chose): drop the fragile form/label dependency entirely → auto-answer EVERY new issue.** GitHub's new mobile issue-creation UI made the form/chooser unreliable across devices, so relying on it was the real friction.
+
+**Workflow change (`035ef08`):**
+- Trigger: job now runs on ANY `issues:[opened]` (skips bot-opened + already-`answered`); `labeled`+`question` kept as a maintainer force-rerun on older issues.
+- Per-user daily counter rewritten to count `label:answered author:X created:>=dayAgo` with `>=` (new issues no longer carry `ama-request`, so the old counter would never fire).
+- Now prepends the issue **Title** to the question (bug reports often put the ask in the title with an empty body).
+- Rate limits unchanged: 5/user/day (maintainers exempt) + 200/month.
+- Side effect (user accepted): bot now also answers bug reports / feature requests, not just questions.
+
+**Docs (`a394c2b`):** README badge + 3-steps now point to plain `/issues/new` ("Open an issue"); maintainer notes drop the form-only/`ama-request` wording (only `answered`+`question` labels needed now).
+
+**Proven:** plain unlabeled test issue #35 ("Native Rendering+") auto-answered in ~1–2 min with accurate citations (`XServerDisplayActivity.java:1936-2007`, `XServerDrawer.kt:633`) and got `answered`; closed as test. Also confirmed `OPENCODE_AUTH` secret is set and #34 answered correctly. No stale "No answer generated" comments remain on #32–#35.
+
+**Commits:** form fix `62a223e`, workflow `035ef08`, README `a394c2b` — all on `main` via API.
