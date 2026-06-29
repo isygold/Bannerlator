@@ -64,12 +64,18 @@ jobs:
           ninja --version
           glslangValidator --version | head -1 || true
 
-      - name: Fetch Vulkan-Headers (vulkan.h + vk_layer.h)
+      - name: Fetch Vulkan-Headers + SPIRV-Headers
         run: |
+          # vulkan.h + vk_layer.h (not in the NDK sysroot)
           git clone --depth 1 --branch "${VULKAN_HEADERS_TAG}" \
             https://github.com/KhronosGroup/Vulkan-Headers.git "$RUNNER_TEMP/Vulkan-Headers"
           test -f "$RUNNER_TEMP/Vulkan-Headers/include/vulkan/vk_layer.h"
           echo "VK_HEADERS_INC=$RUNNER_TEMP/Vulkan-Headers/include" >> $GITHUB_ENV
+          # spirv/unified1/spirv.hpp — needed by vkBasalt's embedded reshade SPIR-V codegen
+          git clone --depth 1 --branch "${VULKAN_HEADERS_TAG}" \
+            https://github.com/KhronosGroup/SPIRV-Headers.git "$RUNNER_TEMP/SPIRV-Headers"
+          test -f "$RUNNER_TEMP/SPIRV-Headers/include/spirv/unified1/spirv.hpp"
+          echo "SPIRV_HEADERS_INC=$RUNNER_TEMP/SPIRV-Headers/include" >> $GITHUB_ENV
 
       - name: Apply Bannerlator ReShade live-reload patch to vkBasalt
         run: |
@@ -97,8 +103,8 @@ jobs:
             --cross-file "$RUNNER_TEMP/vkbasalt-arm64.cross" \
             --buildtype release \
             -Dwith_json=true \
-            -Dc_args="-I${VK_HEADERS_INC}" \
-            -Dcpp_args="-I${VK_HEADERS_INC}"
+            -Dc_args="-I${VK_HEADERS_INC} -I${SPIRV_HEADERS_INC}" \
+            -Dcpp_args="-I${VK_HEADERS_INC} -I${SPIRV_HEADERS_INC}"
 
       - name: Build
         run: ninja -C build/vkbasalt -v
