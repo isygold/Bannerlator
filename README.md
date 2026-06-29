@@ -181,22 +181,21 @@ actual source code and answers with the exact file names and line numbers, so yo
 can check it yourself. It never guesses — if the answer isn't in the code, it says so.
 
 <p align="center">
-  <a href="https://github.com/The412Banner/Bannerlator/issues/new?template=ask-the-ai.yml">
-    <img src="https://img.shields.io/badge/💬%20Ask%20a%20Question-Open%20the%20form-7b2ff7?style=for-the-badge&logo=claude&logoColor=white" alt="Ask a Question">
+  <a href="https://github.com/The412Banner/Bannerlator/issues/new">
+    <img src="https://img.shields.io/badge/💬%20Ask%20a%20Question-Open%20an%20issue-7b2ff7?style=for-the-badge&logo=claude&logoColor=white" alt="Ask a Question">
   </a>
 </p>
 
 **It's three steps:**
 
-1. **[Open the question form](https://github.com/The412Banner/Bannerlator/issues/new?template=ask-the-ai.yml)** (you'll need a free GitHub account).
+1. **[Open an issue](https://github.com/The412Banner/Bannerlator/issues/new)** (you'll need a free GitHub account).
 2. Type your question — be specific, and name a feature, setting, or file.
 3. Submit. The AI replies in a comment on your issue, usually within **1–2 minutes**.
 
-That's it — no approval step, nothing else to do.
+That's it — no form, no approval step, nothing else to do.
 
-> ℹ️ Only questions sent through the form get answered (not bug reports or feature
-> requests). A few questions per person per day are free; past that, the AI will
-> ask you to try again later.
+> ℹ️ The AI replies to **every** new issue automatically. A few per person per day
+> are free; past that, it will ask you to try again later.
 
 **Good things to ask:**
 
@@ -228,14 +227,14 @@ The bot runs on the **opencode/big-pickle** model via your opencode credentials
 1. Locally run `cat ~/.local/share/opencode/auth.json` and copy the whole JSON.
 2. Add it as a repository secret named **`OPENCODE_AUTH`** under
    **Settings → Secrets and variables → Actions**.
-3. Make sure the `ama-request`, `answered`, and `question` labels exist.
+3. Make sure the `answered` and `question` labels exist.
 
-Questions sent through the form (labeled `ama-request`) are answered
-automatically, bounded by a per-user daily limit and a monthly cap — tune both
-at the top of `.github/workflows/ama-answer.yml` (`PER_USER_PER_DAY`,
-`MONTHLY_CAP`; maintainers are exempt from the daily limit). You can also force a
-run on any issue by adding the **`question`** label. Without the secret, the bot
-posts a notice explaining what's missing.
+Every newly opened issue is answered automatically, bounded by a per-user daily
+limit and a monthly cap — tune both at the top of
+`.github/workflows/ama-answer.yml` (`PER_USER_PER_DAY`, `MONTHLY_CAP`;
+maintainers are exempt from the daily limit). You can also force a re-run on an
+older issue by adding the **`question`** label. Without the secret, the bot posts
+a notice explaining what's missing.
 </details>
 
 ---
