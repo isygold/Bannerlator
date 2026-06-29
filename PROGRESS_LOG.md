@@ -2291,3 +2291,25 @@ Ran the upstream reference (GameHub 5.3.5, pkg `com.tencent.ig`/`com.xj.winemu.W
 
 **▶️ To make GameHub a decisive reference: re-run it with a BORDERLESS FULLSCREEN game (no taskbar/title bar).** If fullscreen GameHub promotes → confirms fullscreen+standalone-surface is the recipe (supports fix (a)). If even fullscreen GameHub stays CLIENT on this device → this Adreno750/Android build may be stingy about overlays generally (re-scope expectations). Meanwhile fix (a) is still well-founded on our own Vulkan A/B (the clean fullscreen proof that this geometry promotes on this device).
 ⚠️ Left GameHub with Native Rendering+ = Force Enable; may have toggled "RTS Touch Controls" on the Controls page (harmless, cosmetic).
+
+---
+
+## 🚨 GAMEHUB 5.3.5 FULLSCREEN Native-ON DEVICE-TESTED 2026-06-29 — STILL CLIENT even fullscreen+base-dropped. Blocker looks DEVICE-LEVEL (rotated non-UBWC buffer), not our GLSurfaceView.
+
+Re-ran GameHub as a BORDERLESS FULLSCREEN game (no taskbar/title bar — confirmed via screenshot, cube fills screen + horizontal top HUD bar "DXVK+"), Native Rendering+ = Force Enable, drawer closed. SAME Adreno750/SD8Gen3.
+- **The base WineActivity SurfaceView is GONE from the active HWC set** (in fullscreen GameHub DID drop its base — unlike windowed-desktop where it stayed). Game buffer is now z:0 (bottom).
+- **Yet STILL no promotion — ALL `DEVICE/CLIENT`:** `AHardwareBuffer pid[32674]` z0 (game, RGBA_8888, **transform 90**), `bbq-adapter#1` z1 (RGBA_8888, **transform 90**), `VRI[WineActivity]` z2 (RGBA_8888_UBWC, transform 0). HWC requested overlay, rejected every layer to GPU.
+
+**🔑 PATTERN across EVERY capture today (sharp):**
+- Layers that PROMOTE (`DEVICE/DEVICE`): `RGBX/RGBA_8888_UBWC`, **transform 0**. (GameHub OFF baseline base SurfaceView; our Native-OFF GL base.)
+- Layers that get REJECTED (`DEVICE/CLIENT`): `RGBA_8888` NON-UBWC, **transform 90** (ROT_90). (our GL game AHB; GameHub game AHB windowed AND fullscreen.)
+→ Strongly suggests a **device/DPU limitation: this Adreno display controller won't HWC-overlay a ROTATED, non-UBWC AHardwareBuffer** (Adreno rotator typically requires UBWC; a transform-90 linear buffer is overlay-ineligible → forced CLIENT, and one ineligible layer drags the whole frame to CLIENT). The landscape-game→portrait-panel 90° rotation is the likely poison.
+
+**⚠️ THIS WEAKENS "just do fix (a)":** fix (a) = reparent scanout SCs off the GLSurfaceView + drop the base. But GameHub fullscreen ALREADY effectively does that (base dropped, standalone game buffer) and STILL doesn't promote. So dropping the competing base is necessary-but-NOT-sufficient on this device — the rotated non-UBWC buffer itself is rejected.
+
+**🎯 THE NOW-DECISIVE TEST (no longer redundant): capture OUR Bannerlator VULKAN native-ON game buffer's composition + TRANSFORM + FORMAT on this device.** Our P0 gate recorded Vulkan promotes to `DEVICE` (BGRA_8888) but did NOT record the transform. Two outcomes:
+- If Vulkan promotes with transform 90 + non-UBWC → then GameHub/GL rejection is something else (layer count? a GameHub quirk?) and the rotation theory is wrong — re-examine.
+- If Vulkan's promoting buffer is transform 0 (pre-rotated content) or UBWC → THAT is the recipe: the GL/native path must deliver a pre-rotated and/or UBWC buffer so the DPU can overlay it. Fix shifts from "reparent" to "fix the buffer orientation/format."
+(Earlier I called the Vulkan capture redundant — this GameHub result makes it the key missing measurement.)
+
+⚠️ Left GameHub fullscreen + Native+=Force Enable.
