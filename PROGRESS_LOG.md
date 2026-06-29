@@ -2376,3 +2376,25 @@ Per user direction ("give me P4 and P5 with a solid explanation for the next rel
 - **NOT cutting a release** (per versioning rule — no tag/make_latest without explicit say-so). Release notes prepared at `docs/release_notes/gl_native_rendering.md` (paste-ready, honest: latency feature, effects mutually exclusive, power/overlay win is device/orientation-dependent).
 - Dropped (NOT merged, stay on branch `feat/gl-scanout-overlay-fix`): overlay-fix #1 idle base (`b418e53`), overlay-fix #2 translucent (`e036124`) — both chase the unattainable C-win.
 - ▶️ NEXT: CI build to confirm green on main; (optional, when available) confirm the overlay/power win on a landscape-native device (AYANEO).
+
+---
+
+## 🔬 PRE-ROTATION FEASIBILITY (graphics-vulkan-engineer, 2026-06-29) — reframes "rotation is THE blocker" as CONFOUNDED; cheap diagnostic experiment identified.
+
+**Key correction (to my own conclusion):** "transform-0 promotes / transform-90 rejects → rotation is the blocker" is CONFOUNDED. The only transform-0 layer ever seen promoting is the BASE SurfaceView, which differs from the rejected game AHB in FOUR ways at once:
+| | promoting base | rejected game AHB |
+|---|---|---|
+| transform | 0 | 90 |
+| tiling | UBWC | non-UBWC/linear |
+| usage | composer/scanout-grade | lacks COMPOSER_OVERLAY |
+| geometry | full-screen 1:1 | scaled 1280×702→1080×1920 |
+Rotation is ONE suspect; **non-UBWC + missing COMPOSER_OVERLAY usage is an independent, very-likely-decisive co-blocker that pre-rotation would NOT fix** (and is renderer-agnostic → would explain why Vulkan also fails).
+
+**Where ROT_90 comes from (Q1): NOT our code.** Every scanout `setGeometry` passes transform 0 (`ScanoutContext.cpp:196` game, `:256` cursor; ASR `:246,383`). No `ASurfaceTransaction_setBufferTransform` anywhere in the scanout path (symbol only loaded by ASR `ASurfaceRendererContext.cpp:120`, unused). The ROT_90 is **SurfaceFlinger folding the display/window orientation** onto the layer: a landscape container runs the activity landscape on a portrait-native 1080×1920 panel (`XServerDisplayActivity.java:1015-1019` only locks PORTRAIT for portrait containers), so SF must rotate the game child-SC's fixed landscape guest buffer 90° to reach the panel.
+
+**Critical wrinkle:** the game scanout buffer is **GUEST-allocated (Mesa/turnip Android WSI export), received zero-copy over socket** (`DRI3Extension.java:154-156`→`GPUImage(fd)`→`AHardwareBuffer_recvHandleFromUnixSocket` `gpu_image.c:81`). The host `createHardwareBuffer` (`gpu_image.c:88-97`, lacks COMPOSER_OVERLAY, CPU_WRITE_OFTEN/BGRA→linear) is only the CPU/SHM fallback, NOT game frames. So we do NOT control the game buffer's tiling/usage/format host-side without COPYING.
+
+**Pre-rotation verdict (Q2-Q4):** Option (a) — render the guest frame via a GL pass into a HOST AHB allocated COMPOSER_OVERLAY+UBWC-friendly at panel res — is feasible and fixes 3 of 4 differences at once (transform, usage/tiling, scale). BUT re-introduces a per-frame GPU blit → "zero-GPU" dream gone; remaining win = direct HWC scanout + lower latency, MODEST over today's GL compositor. Option (b) just-force-transform-0 = sideways image (we don't set ROT_90; forcing it 0 without rotating pixels mis-orients). Option (c) patch guest WSI to allocate scanout-grade buffers = no host copy but Mesa/turnip change (wine-compat), risky, leaves rotation. Honest promotion odds even with pre-rotation: MODERATE — usage/UBWC, the scale, BGRA, and plane budget could each independently block.
+
+**▶️ RECOMMENDED EXPERIMENT A (cheapest, isolates the most-likely + unexamined blocker, host-only ~40-60 lines GL):** in `GLRenderer.presentScanout`, blit the guest GPUImage into a host AHB allocated `GPU_SAMPLED_IMAGE|COMPOSER_OVERLAY` RGBA_8888 (reuse cursor alloc pattern `ScanoutContext.cpp:279-285`), KEEPING transform 90 + scale, present THAT. dumpsys: if game flips CLIENT→DEVICE at transform 90 → rotation was a red herring, blocker was usage/UBWC (renderer-agnostic, ~done). If still CLIENT → rotation implicated → Experiment B (add 90° rotate + render at exact 1080×1920 + lock portrait for the probe, accept wrong cursor/HUD). 
+Key files: `ScanoutContext.cpp:185-196,256,279-285`, `gpu_image.c:81,88-97`, `GPUImage.java:18-38`, `DRI3Extension.java:154-156`, `GLRenderer.java presentScanout ~:725`, `XServerDisplayActivity.java:1015-1019`.
