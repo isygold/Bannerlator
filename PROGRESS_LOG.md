@@ -2169,3 +2169,11 @@ Goal: bring **Native Rendering** (direct scanout via `SurfaceControl`→HWC over
 - Touches: `Binding.java`, `ControlsProfile.java`, `InputControlsScreen.kt`.
 - Build: manual "Any branch compilation" run `28365146389` GREEN (all 3 flavors). User device-tested → working.
 - No release cut (still 2.1 stable). Branch `fix/odin2-controller-bindings` can be deleted.
+
+---
+
+## 2026-06-29 — GL Native Rendering P2 MERGED, P3 started
+
+**P2 MERGED** to main (merge `460725f`, no-ff; branch `feat/p2-gl-surfacecontrol` deleted local+remote). One file: `XServerView.getSurfaceControl()` now also returns `glSurfaceView.getSurfaceControl()` (GLSurfaceView extends SurfaceView → inherits it, API29+). Behavior-neutral (only Vulkan path calls it today). CI run `28345217160` was green.
+
+**P3 STARTED** — delegated to graphics-vulkan-engineer. Scope = GLRenderer scanout LIFECYCLE only (no per-frame push, that's P4): `nativeMode`/`setNativeMode`/`setInitialNativeMode`, `DirectScanout.enable/disable`, dst + cursor SCs, implement `setRenderingEnabled`→`xServer`, toggle wiring §4 (activity + drawer). Goal: enabling GL native builds the child SCs + shows cursor SC; game still GL-composited. **P3 = first real GL device validation** (cursor SC composites ABOVE GL content). Plan `docs/GL_DIRECT_SCANOUT_PLAN.md`.
