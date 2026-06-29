@@ -2212,3 +2212,25 @@ Driven via root bridge (toggle in-drawer, dumpsys OFF vs ON, drawer open vs clos
 Corrected an earlier overstatement ("pointless/regression"): B is a legitimate benefit on its own; C is the additional win still missing. **To verify C specifically: compare GPU load/power/temp at CAPPED equal FPS (e.g. lock 60) OFF vs ON — only C drops GPU load meaningfully; FPS alone is downstream of B and will differ regardless.** The `dumpsys` DEVICE-vs-CLIENT line is the authoritative overlay readout.
 
 **TEST QUEUED (after blocker-#2 build finishes):** blocker #2 fix is building on `feat/gl-scanout-overlay-fix` (agent a1c4b9fd82603ed55, eliminate SC-level rotate+scale). When green → device-test the full thing: (1) dumpsys winlator_game_buf CLIENT→DEVICE (the gate), (2) game still correct orientation/fit/colors, (3) capped-FPS GPU/power A/B to quantify C, (4) cursor/HUD/lifecycle.
+
+---
+
+## ⏸️ RESUME-HERE CHECKPOINT (2026-06-29, before user device reboot)
+
+**Active task: GL Native Rendering — overlay-promotion fix.** Session runs on the device → reboot kills it + the background CI watch (CI continues server-side).
+
+**MERGED to main:** P0 (scanout extract) + P1 (libdirect_scanout) + P2 (GL getSurfaceControl) + P3 (GL scanout lifecycle). main tip = `7aaacaf` (docs only after the P3 merge `2fe3f10`).
+
+**NOT merged — all on branch `feat/gl-scanout-overlay-fix` (tip `e036124`):** stacked P4 (`d44b560` per-frame push) → P5 (`64b7cfb` effect/scaling grey-out) → overlay-fix#1 (`b418e53` idle base) → overlay-fix#2 (`e036124` TRANSLUCENT base). ⚠️ Agent also committed PROGRESS_LOG.md ON this branch (+36) → diverges from main's PROGRESS_LOG; reconcile (keep main's) on eventual merge.
+
+**Build in flight:** CI run **`28378890898`** for `e036124` (translucent base) — was BUILDING at checkpoint, status NOT yet confirmed. ON RESUME: `gh run view 28378890898 --json status,conclusion`; if green, artifacts = `Bannerlator-glscanout-overlayfix-{standard,ludashi,pubg}`.
+
+**DEVICE-PROVEN SO FAR (Adreno 750/SD8Gen3, GL|DXVK, AIO DX11 cube):** P4 functional (game flows through scanout, renders correct, swapRB ok, cursor own SC), P5 grey-out works. ❌ Overlay NOT promoting: every Native-ON test shows `winlator_game_buf = CLIENT` (raw `composition: DEVICE/CLIENT` = HWC rejected). fix#1 (idle OPAQUE base) tested INSUFFICIENT. fix#2 (translucent base) = current build, UNTESTED.
+
+**KEY FINDING (agent, code-read):** the game-SC geometry (src 1280×702→dst fullscreen + ROT_90=global display orientation) is BYTE-FOR-BYTE the same as the Vulkan native path, which DOES promote to DEVICE on this device → so rotate+scale is NOT the GL-specific blocker (my earlier blocker-#2 hypothesis likely WRONG). The GL-specific difference = GLSurfaceView base is OPAQUE & composited (CLIENT) even when idle, starving the game overlay's HWC plane. fix#2 makes it TRANSLUCENT so SF can skip it (Vulkan base = idle swapchain, ASR = bufferless — both non-competing).
+
+**NEXT ACTION ON RESUME:** 1) confirm CI `28378890898` green. 2) Device-test translucent build (GL container, Native ON, DX11 scene, drawer closed): **THE GATE = dumpsys `winlator_game_buf` composition type CLIENT→DEVICE** + game still correct (orientation/fit/colors/no-black). 3) If promoted → quantify the win: capped-60 GPU/power/temp A/B (off vs on). 4) If STILL CLIENT → deeper dig: why does identical-geometry Vulkan promote but GL not (plane budget? layer count? the extra activity/decor layers? try fewer layers / check HWC plane caps). 5) If promotes + correct → merge `feat/gl-scanout-overlay-fix` chain to main (reconcile PROGRESS_LOG), then P6 optional. If unfixable → gate GL-native experimental (plan §3 fallback).
+
+**Interpretation reminder (A/B/C):** user feels a real latency/FPS diff Native ON vs OFF = the **B** win (GL compositor pass skipped) which happens regardless of overlay; **C** (the DEVICE overlay) is the missing big win. Verify C via capped-FPS GPU/power, NOT raw FPS. dumpsys DEVICE/CLIENT = authoritative.
+
+**Bridge test recipe (from this session):** `getlog --exec` (PATH +=/data/data/com.termux/files/usr/bin). Graphics tab icon tap (70,138); Native Rendering toggle (765,968); close drawer keyevent 4; dumpsys → `/sdcard/Download/_x.txt`; check `grep -iE "HWC layers" -A18 | grep -iE "winlator_game|SurfaceView\[com.winlator|DEVICE|CLIENT"`; SCcount `grep -icE "winlator_game|winlator_cursor"` (0=native off, ~14=on). Foreground session: `monkey -p com.termux -c android.intent.category.LAUNCHER 1`. ⚠️ Native left toggled ON on test container (container 2 / the AIO test container).
