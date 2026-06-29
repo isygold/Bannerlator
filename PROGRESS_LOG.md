@@ -2158,3 +2158,14 @@ Goal: bring **Native Rendering** (direct scanout via `SurfaceControl`→HWC over
 - **P1 DONE + CI-green + MERGED** (graphics-vulkan-engineer; CI `28344514069`; merge `51ccb3a`, branch deleted). New **`libdirect_scanout.so`** (CMake target `direct_scanout`: `scanout/directscanout_jni.cpp` + `ScanoutContext.cpp`, links **log/android/dl/atomic only — NO vulkan/adreno**; ScanoutContext.cpp object-duplicated across this + vulkan_renderer, intended). JNI = heap `ScanoutContext*` as jlong, 1:1 forwarders; cursor applied **inline** (GL model, no needsRender/dirtyCV). New **`DirectScanout.java`** — lifted child-SC builder/teardown/`applyScanoutSwapTransform`(R/B-swap)/`releaseScanoutSurfaces` from `VulkanRenderer.java:614-679`/`:168-300`, generalized `enable(SurfaceControl parent,...)` to take parent SC as arg. **VulkanRenderer.java byte-for-byte unchanged; nothing wires DirectScanout yet → behavior-neutral, no device test needed.**
 - **P2 IN PROGRESS** (main session, one-liner): `XServerView.getSurfaceControl()` (`:153`) now returns `glSurfaceView.getSurfaceControl()` for GL too (was null; GLSurfaceView extends SurfaceView → inherits it, API29+). Vulkan return unchanged. **Behavior-neutral now** — only callers are `VulkanRenderer.java:173`/`:623` (Vulkan-only path); no GL path calls it until P3, so the "non-null SC on GL" device check lands at P3. Branch `feat/p2-gl-surfacecontrol`, CI run `28345217160` building, NOT merged.
 - **NEXT: P2 CI-green → merge → P3** = GLRenderer scanout lifecycle (`nativeMode`/`setNativeMode`/`setInitialNativeMode`, `DirectScanout.enable/disable`, dst + cursor, implement GL `setRenderingEnabled`→`xServer`; toggle wiring §4 activity+drawer). **P3 = first GL device validation** (§3: non-null GL SC + cursor SC composites ABOVE GL content). P4 = per-frame game push (feature lights up). Delegate P3 to graphics-vulkan-engineer.
+
+---
+
+## 2026-06-29 — Controller bindings persistence + scrollable profiles (#37) MERGED
+
+**✅ DEVICE-PROVEN (Odin 2) + MERGED to main** (merge `d3ee2d5`, no-ff).
+- `2f5cf0a` persist controller bindings + harden profile import (issue #37)
+- `4867789` make the Download Profiles list scrollable
+- Touches: `Binding.java`, `ControlsProfile.java`, `InputControlsScreen.kt`.
+- Build: manual "Any branch compilation" run `28365146389` GREEN (all 3 flavors). User device-tested → working.
+- No release cut (still 2.1 stable). Branch `fix/odin2-controller-bindings` can be deleted.
