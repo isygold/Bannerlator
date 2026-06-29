@@ -2313,3 +2313,38 @@ Re-ran GameHub as a BORDERLESS FULLSCREEN game (no taskbar/title bar — confirm
 (Earlier I called the Vulkan capture redundant — this GameHub result makes it the key missing measurement.)
 
 ⚠️ Left GameHub fullscreen + Native+=Force Enable.
+
+---
+
+## 🚨🚨 BOMBSHELL 2026-06-29 — OUR VULKAN NATIVE ALSO DOES NOT PROMOTE ON THIS DEVICE. The whole "Vulkan promotes / GL doesn't" premise is FALSE. Blocker = the 90° rotation (landscape game → portrait panel), device-level, renderer-agnostic.
+
+Captured OUR Bannerlator **Vulkan|DXVK** native-ON dumpsys (same Adreno750/SD8Gen3, same AIO cube, Native ON confirmed via screenshot — Renderer: Vulkan|DXVK, P5 grey-out active, 564fps/GPU20%):
+- `SurfaceView[com.winlator.banner/…XServerDisplayActivity]#2` z0 = `DEVICE/CLIENT` ❌ (RGBA_8888_UBWC, **transform 90**)
+- `AHardwareBuffer pid[5980]` z1 = `DEVICE/CLIENT` ❌ (BGRA_8888, **transform 90**) = the game buffer
+- `VRI[XServerDisplayActivity]` z2 = `DEVICE/CLIENT` ❌ (RGBA_8888_UBWC, transform 0)
+- HWC layers table shows winlator_game_buf actual = **CLIENT**; active `---------client target---------` = full GPU composition. **NO overlay.**
+
+**⛔ This means our Vulkan native NEVER actually promoted on this device.** The P0 gate's "winlator_game_buf composition type=DEVICE = HWC overlay confirmed" was a **MISREAD of the REQUESTED composition type** (the HWC hint column says DEVICE = "SF asked for overlay") **not the ACTUAL** (post-validateDisplay = CLIENT = HWC rejected → GPU). Every native-render path requests DEVICE; this device rejects them all.
+
+**🔑 NOW the picture is consistent across ALL FOUR captures today:**
+| Path | game buf | result |
+|---|---|---|
+| Bannerlator Vulkan native ON | BGRA_8888, ROT_90 | DEVICE/**CLIENT** ❌ |
+| Bannerlator GL native ON | BGRA/RGBA, ROT_90 | DEVICE/**CLIENT** ❌ |
+| GameHub native ON (windowed) | RGBA_8888, ROT_90 | DEVICE/**CLIENT** ❌ |
+| GameHub native ON (fullscreen, base dropped) | RGBA_8888, ROT_90 | DEVICE/**CLIENT** ❌ |
+| (any renderer) Native OFF baseline | UBWC, **transform 0** | DEVICE/**DEVICE** ✅ |
+
+**ROOT CAUSE = the 90° rotation.** This is a PORTRAIT-NATIVE panel (SF display 1080×1920); the game runs landscape and the direct-scanout buffer is handed to SurfaceFlinger with **transform=ROT_90** so the DPU must rotate it for display. This Adreno DPU/HWC will NOT take a rotated layer as an overlay (rotation on the overlay path is unsupported / disqualifying here) → falls back to GPU/CLIENT for the whole frame. In the Native-OFF baseline the app's own compositor bakes the rotation into a transform-0 UBWC surface, which DOES promote. So: rotation baked-in (OFF) = overlayable; rotation requested on the scanout layer (ON) = rejected.
+
+## ⛳ STRATEGIC CONSEQUENCES (big)
+1. **The "C win" (true HWC hardware overlay, GPU idle) is NOT achievable on this portrait device for landscape content — for ANY renderer.** Not a GL bug, not a Vulkan win. It's a display-rotation/DPU limitation.
+2. **fix (a) / the whole GLSurfaceView-base theory is MOOT for overlay promotion** — Vulkan uses a plain SurfaceView and STILL doesn't promote. Dropping the GL base would not unlock the overlay. Stop the overlay-fix branch attempts (fix#1 idle, fix#2 translucent, proposed fix(a) reparent) — they chase an unattainable C on this device.
+3. **What native rendering DOES deliver here = the "B win"** (skip the app's own compositor blit + change present pacing → lower latency / the real feel the user reports). That is renderer-agnostic and ALREADY delivered by P4/P5. So GL native = latency PARITY with Vulkan; both get B, neither gets C on this device.
+4. **The C win likely WORKS on a LANDSCAPE-NATIVE panel** (game buffer arrives transform 0, no DPU rotation needed) — e.g. AYANEO/landscape handhelds. The feature isn't useless; its overlay benefit is display-orientation-dependent.
+
+## ▶️ RECOMMENDED NEW DIRECTION
+- **Re-scope native rendering = a latency/pacing feature (B), not an overlay feature (C)**, on portrait devices. Document that HWC-overlay promotion needs a transform-0 (landscape-native) path.
+- **Salvage the GL work:** merge P4+P5 (the functional per-frame push + effect grey-out) as "GL native rendering (latency parity)", DROP the failed overlay-fix commits (#1 idle, #2 translucent) — they targeted C. Reconcile branch PROGRESS_LOG.
+- **Two confirmations worth doing (cheap):** (1) capture native-ON on a **landscape-native device** (AYANEO) — if game buf = transform 0 → DEVICE, the rotation theory is proven and C works there. (2) optional: try forcing this container/display to landscape-native orientation and re-capture — if it promotes, we have a per-device path.
+⚠️ Vulkan container left Native ON.
