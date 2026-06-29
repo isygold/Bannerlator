@@ -1,0 +1,145 @@
+name: "🤖 AMA — Answer the AI"
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  answer:
+    if: contains(github.event.issue.labels.*.name, 'question')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+    - name: Check out repo
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 100
+
+    - name: Extract question from issue
+      id: question
+      run: |
+        BODY="${{ github.event.issue.body }}"
+        QUESTION=$(echo "$BODY" | sed -n '/### Your question/,/^###/p' | tail -n +2 | head -n -1 || echo "$BODY")
+        QUESTION=$(echo "$QUESTION" | head -500)
+        echo "q<<__EOF__" >> $GITHUB_OUTPUT
+        echo "$QUESTION" >> $GITHUB_OUTPUT
+        echo "__EOF__" >> $GITHUB_OUTPUT
+
+    - name: Install opencode
+      run: |
+        npm install -g opencode@latest 2>&1 | tail -3
+
+    - name: Configure opencode credentials
+      env:
+        OPENCODE_AUTH: ${{ secrets.OPENCODE_AUTH }}
+      run: |
+        if [ -z "$OPENCODE_AUTH" ]; then
+          echo "no-auth" >> /tmp/ama-status
+          echo "⚠️ OPENCODE_AUTH secret not configured" >&2
+          exit 0
+        fi
+        mkdir -p ~/.local/share/opencode
+        echo "$OPENCODE_AUTH" > ~/.local/share/opencode/auth.json
+        echo "auth-ok" >> /tmp/ama-status
+
+    - name: Answer via opencode big-pickle
+      id: answer
+      run: |
+        if [ "$(cat /tmp/ama-status)" = "no-auth" ]; then
+          echo "ans=⚠️ **OPENCODE_AUTH** is not configured." >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        Q='${{ steps.question.outputs.q }}'
+
+        OUTPUT=$(opencode run "$Q" \
+          --agent ama-agent \
+          --model opencode/big-pickle \
+          --format json \
+          --pure \
+          2>/dev/null)
+
+        ANSWER=$(echo "$OUTPUT" | jq -s '
+          [.[] | select(.type == "text" and .part.type == "text") | .part.text]
+          | join("\n\n")
+        ' --raw-output)
+
+        if [ -z "$ANSWER" ] || [ "$ANSWER" = "null" ]; then
+          echo "ans=⚠️ **No answer generated.** The AI may have timed out or hit an error." >> $GITHUB_OUTPUT
+        else
+          echo "ans<<__ANS_EOF__" >> $GITHUB_OUTPUT
+          echo "$ANSWER" >> $GITHUB_OUTPUT
+          echo "__ANS_EOF__" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Post answer as comment
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const answer = `${{ steps.answer.outputs.ans }}`;
+
+          if (answer.includes('OPENCODE_AUTH')) {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `## 🤖 Bannerlator AI
+
+              ⚠️ The **OPENCODE_AUTH** secret hasn't been configured yet.
+
+              **For the repo owner:**
+              1. Run this on your local machine: \`cat ~/.local/share/opencode/auth.json\`
+              2. Copy the entire JSON object
+              3. Go to **Settings → Secrets and variables → Actions**
+              4. Add a repository secret named \`OPENCODE_AUTH\` with the copied JSON
+
+              The JSON looks like:
+              \`\`\`json
+              {
+                "opencode": {
+                  "type": "api",
+                  "key": "sk-..."
+                }
+              }
+              \`\`\`
+
+              Once set, close and reopen this issue or edit the question to trigger an answer.`
+            });
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              name: 'question'
+            });
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['ama-unconfigured']
+            });
+            return;
+          }
+
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            body: `## 🤖 Bannerlator AI
+
+${answer}
+
+---
+_Cited from the [Bannerlator codebase](https://github.com/${{ github.repository }}). Ask a follow-up in the comments — the AI will re-answer with new context._`
+          });
+
+          await github.rest.issues.addLabels({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            labels: ['answered']
+          });

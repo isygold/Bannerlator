@@ -1,0 +1,22 @@
+name: "🤖 Ask the AI"
+description: "Ask any question about Bannerlator — how it works, where a feature lives, what a setting does, or why something behaves a certain way. The AI searches the actual codebase and answers with file paths and line numbers."
+title: "Q: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ask anything about Bannerlator. Every answer is verified against the
+        source code, docs, configs, and commit history of this repo.
+
+        If you have a follow-up, just reply in the comments — the AI will
+        re-answer with your new context.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: "Your question"
+      description: "Be specific — mention feature names, settings, files, or behaviors you're asking about."
+      placeholder: "How does the FPS limiter work? Which files implement GOG store support? What does the Native Rendering+ setting do?"
+    validation:
+      required: true

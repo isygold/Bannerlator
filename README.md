@@ -9,6 +9,7 @@
   <img src="https://img.shields.io/github/downloads/The412Banner/Bannerlator/total?style=for-the-badge&label=Downloads&color=ff2d9b" alt="Total Downloads">
   <img src="https://img.shields.io/badge/Platform-Android%208.0%2B-7a4cff?style=for-the-badge" alt="Platform">
   <img src="https://img.shields.io/badge/License-GPL--3.0-2d9bff?style=for-the-badge" alt="License">
+  <a href="#-ask-me-anything"><img src="https://img.shields.io/badge/Ask%20AI-7b2ff7?style=for-the-badge&logo=claude&logoColor=white" alt="Ask AI"></a>
 </p>
 
 <p align="center">
@@ -18,6 +19,7 @@
 </p>
 
 <p align="center">
+  <a href="#-ask-me-anything">Ask AI</a> •
   <a href="https://github.com/The412Banner/Bannerlator/releases/latest">Download</a> •
   <a href="https://discord.gg/n8S4G2WZQ4">Discord</a> •
   <a href="https://t.me/The412BannerGaming">Telegram</a> •
@@ -172,6 +174,55 @@ This project is built via **GitHub Actions only** — local builds are not suppo
 
 - **Action builds** — every fix is compiled and published as a downloadable workflow artifact.
 - **Releases** — tagged stable builds are published as GitHub Releases.
+
+---
+
+## 🤖 Ask Me Anything
+
+Got a question about Bannerlator? **Ask the codebase directly** and get an answer
+from an AI that searches the actual source code, docs, configs, and commit history —
+every answer includes file paths and line numbers so you can verify it yourself.
+
+### Live dialogue box (GitHub Issues)
+
+[Open a new question](https://github.com/The412Banner/Bannerlator/issues/new?template=ask-the-ai.yml)
+→ type your question into the form → submit. A bot reads the codebase and posts
+the answer as a comment on your issue. You can follow up with more questions in
+the same thread.
+
+> ⚙️ **One-time setup:** The repo owner needs to add their opencode auth as a
+> secret. Run `cat ~/.local/share/opencode/auth.json` locally, copy the entire
+> JSON object, and add it as `OPENCODE_AUTH` in **Settings → Secrets and
+> variables → Actions**. This uses the same **opencode/big-pickle** model
+> powering this session — your existing opencode credentials, not a separate
+> API key. Without it, the bot will post a notice explaining what's needed.
+
+### CLI (opencode)
+
+If you have [opencode](https://github.com/anomalyco/opencode) set up locally,
+you can run the agent directly:
+
+```
+opencode run "your question" --agent ama-agent --model opencode/big-pickle
+```
+
+The agent searches the full repo and answers with file-cited facts.
+
+### What you can ask
+
+| Question | Example |
+|---|---|
+| How does a feature work? | *"How does the FPS limiter work?"* |
+| Where is X implemented? | *"Where is the GOG store integration implemented?"* |
+| What settings are available? | *"What valid values does the scaling mode picker accept?"* |
+| Which file controls Y? | *"Which file controls the container card layout?"* |
+| Build & release questions | *"How are release builds signed and distributed?"* |
+| Compatibility questions | *"Why does Turnip on Android 10 use a different driver path?"* |
+| What changed in version Z? | *"What changed between 1.9.2 and 2.0?"* |
+
+<p align="center">
+  <i>The AI never guesses. If the answer isn't in the codebase, it says so.</i>
+</p>
 
 ---
 
