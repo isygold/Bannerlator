@@ -2,6 +2,45 @@
 
 ---
 
+## 2026-06-30 — Theme + Drawer rebuild: plans reconciled, Phase 1 (drawer rebuild) building
+
+**TL;DR:** Merged the recolor-only theme-centralization plan with the new drawer-rebuild
+request into one plan (`docs/THEME_AND_DRAWER_REBUILD_PLAN.md`). User greenlit **Phase 1**
+(themed icons + button restyle of BOTH drawers). Phase 1 is compiling on branch
+`feat/drawer-rebuild-p1`. No device test yet — this is a checkpoint before that.
+
+### Decisions
+- **Default look may now CHANGE** for the drawers — user dropped the old byte-identical-to-2.1.1
+  rule. The rebuilt drawer look ships as the new default. (Other phases' app-screen recolor stays
+  visually conservative.)
+- **Restyle depth only** — icons + button styling + accent-driven states. NO wiring / structure /
+  tab-order / handler changes. End-Process / Bring-to-Front / Exit / Pause / launch / controller
+  paths untouched. Stores excluded.
+- **Typography ramp + light mode stay CUT** (keep close to original).
+
+### Combined plan = 5 phases
+- P0 foundation: Branch 1 in-game color centralization (device-proven) + follow-up `96ed50e`
+  (PrimaryDim→LocalAccentDim + Appearance nav entry), CI `28431784626` GREEN — not device-tested
+  in isolation; its only independent piece (Appearance nav entry) gets verified inside the P1 test.
+- **P1 (BUILDING)** = drawer rebuild: `AppDrawer.kt` (centralize local consts → colorScheme/
+  LocalAccentDim, add LIBRARY/SYSTEM/STORES section headers, fix icon gaps Games→distinct gamepad,
+  Appearance→`icon_palette`) + `XServerDrawer.kt` (Graphics rail → display icon, scaling/frame-gen/
+  toggle/HUD-chip buttons restyled to accent-fill states on the already-centralized colors) + new
+  drawables. Branch `feat/drawer-rebuild-p1` stacked off `feat/theme-centralize-drawer` (build =
+  base + P1). Worktree `/home/claude-user/wt-drawer-p1`.
+- P2 drawer dialogs (incl. native ContentDialogs needing Compose conversion) · P3 app-screen color
+  sweep (~336 literals, old Branch 2) · P4 native/legacy via `getCurrentAccentArgb()` · P5 optional
+  Midnight Cobalt + Phosphor presets.
+
+### Approved preview
+`bannerlator_drawer_rebuild_preview.html` (scratchpad + ~/Downloads + device /sdcard/Download) —
+both drawers, live preset + HSV switcher, Before/Rebuilt toggle. Signed off → became P1.
+
+### Next
+Agent finishes P1 → push → CI "Any branch compilation." green → **device test** (gate = looks right
++ wiring intact, NOT byte-identical). SAVE memory + this log + commit BEFORE that device test
+(same-device OOM rule).
+
 ## 2026-06-29 — bionic-fg: upstream MERGED our compat PR #6; fork synced; branch-landscape mapped for later
 
 **TL;DR:** Our Android wrapper-ICD compatibility fix was **merged into upstream bionic-fg**
