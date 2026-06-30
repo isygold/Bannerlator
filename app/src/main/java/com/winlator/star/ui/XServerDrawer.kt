@@ -41,6 +41,9 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -1761,18 +1764,11 @@ private fun TmContent() {
             Text("No processes", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
         }
     } else {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.surface)
-                .padding(4.dp)
-        ) {
+        // Each process is its own card (matching the app File Manager rows), not a flat
+        // divider-separated list; cards self-space via their vertical padding.
+        Column(modifier = Modifier.fillMaxWidth()) {
             processes.forEach { proc ->
                 TmProcessRow(proc)
-                if (proc != processes.last()) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(horizontal = 8.dp))
-                }
             }
         }
     }
@@ -1828,11 +1824,21 @@ private fun TmProcessRow(proc: XServerDialogState.TmProcess) {
     val accent = MaterialTheme.colorScheme.primary
     var menuExpanded by remember { mutableStateOf(false) }
 
-    Row(
+    // Card per process, matching the app File Manager item style (rounded surfaceContainer
+    // panel + outline border + vertical margin) instead of a flat divider-separated row.
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
+      Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
     ) {
         if (proc.icon != null) {
             Image(
@@ -1906,5 +1912,6 @@ private fun TmProcessRow(proc: XServerDialogState.TmProcess) {
                 )
             }
         }
+      }
     }
 }
