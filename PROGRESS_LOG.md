@@ -2,6 +2,60 @@
 
 ---
 
+## 2026-06-30 — Theme centralization: reroute hardcoded colors onto the live theme (branch 1 started)
+
+**TL;DR:** Starting a refactor so the existing theme engine actually paints everywhere — a
+preset/accent now recolors the **whole app AND the in-game drawer**, which it doesn't today.
+**Hard constraint from the user: the DEFAULT look must stay byte-identical to 2.1.1 (AMOLED,
+#0055FF on pure black).** New presets are opt-in; no surprise on update. Stores are out of scope —
+only the out-of-game Compose UI and the in-game side drawer + its submenus.
+
+### Why (recon on main 2.1.1)
+- `ui/theme/Color.kt`: `Primary`/`GlowPurple`/`AccentBlue` are **static consts** — a custom accent
+  never reaches code that uses them directly. Core bug.
+- `ui/XServerDrawer.kt` (the in-game drawer, 6 tabs: Graphics/HUD/ReShade/Controls/Advanced/Task Mgr):
+  wrapped in `WinlatorTheme` so it inherits fonts but reads `colorScheme` for **zero** colors — paints
+  from 6 local hardcoded constants (PureBlack/DarkSurface/…) + the static Primary/GlowPurple. ~37 literal
+  sites. So a red accent leaves the drawer blue-on-black.
+- Out-of-game: **336+ hardcoded literals** bypass the theme (worst: SettingsScreen 77, ContentsScreen 26,
+  InputControlsScreen 21).
+
+### Scope (user-trimmed: "close to original, no extreme complications")
+- **CUT** typography ramp (leave force-600) and light-mode revival (leave dead) — colors only.
+- Default stays **AMOLED**; existing users keep their saved preset (`AppThemeState` already persists).
+
+### Plan
+- **Branch 1 (this one) = steps 0-2:** (0) kill the static Primary/GlowPurple/AccentBlue aliases →
+  resolve from the live scheme; (1) make the **AMOLED** preset carry today's EXACT shades (incl. the
+  drawer's #000/#0D0D0D/#1A1A1A) so centralization is a visual no-op; (2) move `XServerDrawer.kt` fully
+  onto `MaterialTheme.colorScheme.*`. Delivers "in-game drawer follows theme."
+- Branch 2 = step 3: sweep the 336+ out-of-game literals, screen by screen (Settings first).
+- Branch 3 = step 4: add Midnight Cobalt + Phosphor as **optional** presets.
+- **Verify gate (every branch):** on-device before/after screenshot diff proving the default look is
+  unchanged. The only failure mode is shade drift.
+
+### Status (updated 2026-06-30)
+- Branch `feat/theme-centralize-drawer`. Step-2 edit DONE in `ui/XServerDrawer.kt` (color-only).
+- **Diff reviewed = color-only, verified safe:** no function signatures, no `onClick`/`winHandler`/lambda/
+  control-flow lines changed. Only color args swapped + 20 `val accent = MaterialTheme.colorScheme.primary`
+  and 1 `val surface = ...colorScheme.surface` locals added (pure theme reads). The 3 static imports
+  (`Primary`/`GlowPurple`/`PrimaryDim`) removed; `PrimaryDim` kept as a drawer-LOCAL `Color(0xFF002277)`.
+- **Drift-safety honored:** every accent site resolves to `colorScheme.primary` (= #0055FF under default
+  AMOLED → byte-identical); pure-black panel/rail bg → `colorScheme.surface` (= #000000 under AMOLED). All
+  neutral greys (`DarkSurface`/`DimWhite`/`MutedWhite`/toggle-off/#1A1A1A dividers/#4CAF50 green) left local.
+- **Known limitation (deliberate):** `PrimaryDim` sites (switch-ON track, AccentButton container,
+  selected-tab gradient bottom, HudChip selected bg) do NOT recolor for a CUSTOM accent — they stay
+  dark-blue. #002277 maps to no exact scheme slot, so routing it would drift the default. Revisit later if
+  we want those to follow the accent (accept a tiny default shift).
+- **Functional safety = the user's concern:** theme edit cannot alter wiring. App↔drawer, Wine/containers,
+  controller input (legacy `InputControlsView.java`, NOT touched), and all drawer buttons keep their exact
+  handlers. Verify gate = on-device functional pass (End Process / Bring to Front / Pause / Exit / Apply &
+  Close / ReShade toggle / controller drives game) + before/after color diff. **User drives the device tests.**
+- NEXT: commit + push → CI build → hand user the APK + test checklist.
+- Preview mock: `bannerlator_theme_preview_v2.html` (~/Downloads + /sdcard/Download).
+
+---
+
 ## 2026-06-29 — bionic-fg: upstream MERGED our compat PR #6; fork synced; branch-landscape mapped for later
 
 **TL;DR:** Our Android wrapper-ICD compatibility fix was **merged into upstream bionic-fg**

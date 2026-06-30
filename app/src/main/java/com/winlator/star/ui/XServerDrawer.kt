@@ -83,17 +83,22 @@ import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import com.winlator.star.R
 import com.winlator.star.reshade.ReshadeManager
-import com.winlator.star.ui.theme.GlowPurple
-import com.winlator.star.ui.theme.Primary
-import com.winlator.star.ui.theme.PrimaryDim
 import com.winlator.star.ui.theme.WinlatorTheme
 
+// Accent colors route to the live MaterialTheme.colorScheme (primary/surface) so the drawer
+// follows the user's theme preset / custom accent. The constants below have no exact scheme
+// slot under the default AMOLED preset, so they stay local to keep the default look identical.
+// PureBlack is kept only for spots that need a true literal black that must NOT theme (the
+// color-picker knob outline); panel/rail backgrounds route to colorScheme.surface instead.
 private val PureBlack = Color(0xFF000000)
 private val DarkSurface = Color(0xFF0D0D0D)
 private val DimWhite = Color(0xFFE8E8E8)
 private val MutedWhite = Color(0xFF999999)
 private val ToggleTrackOff = Color(0xFF333333)
 private val ToggleThumbOff = Color(0xFF666666)
+// Dim accent tint (#002277). No primary-derived value or scheme slot equals this exactly under
+// AMOLED, so it stays local to avoid drifting the default look (see report note on PrimaryDim).
+private val PrimaryDim = Color(0xFF002277)
 
 fun setupComposeView(view: ComposeView) {
     view.setContent {
@@ -109,12 +114,14 @@ fun XServerDrawer() {
     val selectedTab by state.selectedTab.collectAsState()
     val isPaused by state.isPaused.collectAsState()
     val pauseIcon = if (isPaused) R.drawable.icon_play else R.drawable.icon_pause
+    val accent = MaterialTheme.colorScheme.primary
+    val surface = MaterialTheme.colorScheme.surface
 
     Row(
         modifier = Modifier
             .fillMaxHeight()
             .width(380.dp)
-            .background(PureBlack)
+            .background(surface)
     ) {
         Column(
             modifier = Modifier
@@ -122,7 +129,7 @@ fun XServerDrawer() {
                 .fillMaxHeight()
                 .background(
                     Brush.verticalGradient(
-                        colors = listOf(PureBlack, DarkSurface, PureBlack),
+                        colors = listOf(surface, DarkSurface, surface),
                         startY = 0f,
                         endY = Float.POSITIVE_INFINITY
                     )
@@ -157,7 +164,7 @@ fun XServerDrawer() {
                 modifier = Modifier
                     .width(36.dp)
                     .height(2.dp)
-                    .background(GlowPurple, RoundedCornerShape(1.dp))
+                    .background(accent, RoundedCornerShape(1.dp))
             )
 
             Spacer(Modifier.height(10.dp))
@@ -205,12 +212,13 @@ private fun handleTabClick(tab: TabType, state: XServerDrawerState) {
 
 @Composable
 private fun TabIconButton(iconRes: Int, isSelected: Boolean, onClick: () -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
     val bgBrush = if (isSelected)
-        Brush.verticalGradient(listOf(PrimaryDim, Primary.copy(alpha = 0.3f)))
+        Brush.verticalGradient(listOf(PrimaryDim, accent.copy(alpha = 0.3f)))
     else
         Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
 
-    val borderColor = if (isSelected) GlowPurple.copy(alpha = 0.6f) else Color(0xFF333333)
+    val borderColor = if (isSelected) accent.copy(alpha = 0.6f) else Color(0xFF333333)
     val tintColor = if (isSelected) Color.White else MutedWhite
 
     Box(
@@ -226,7 +234,7 @@ private fun TabIconButton(iconRes: Int, isSelected: Boolean, onClick: () -> Unit
             Canvas(Modifier.size(44.dp)) {
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(GlowPurple.copy(alpha = 0.25f), Color.Transparent),
+                        colors = listOf(accent.copy(alpha = 0.25f), Color.Transparent),
                         radius = size.minDimension / 2f
                     ),
                     radius = size.minDimension / 2f
@@ -244,13 +252,14 @@ private fun TabIconButton(iconRes: Int, isSelected: Boolean, onClick: () -> Unit
 
 @Composable
 private fun FpsTabButton(isSelected: Boolean, onClick: () -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
     val bgBrush = if (isSelected)
-        Brush.verticalGradient(listOf(PrimaryDim, Primary.copy(alpha = 0.3f)))
+        Brush.verticalGradient(listOf(PrimaryDim, accent.copy(alpha = 0.3f)))
     else
         Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
 
-    val borderColor = if (isSelected) GlowPurple.copy(alpha = 0.6f) else Color(0xFF333333)
-    val textColor = if (isSelected) Color.White else Primary
+    val borderColor = if (isSelected) accent.copy(alpha = 0.6f) else Color(0xFF333333)
+    val textColor = if (isSelected) Color.White else accent
 
     Box(
         modifier = Modifier
@@ -265,7 +274,7 @@ private fun FpsTabButton(isSelected: Boolean, onClick: () -> Unit) {
             Canvas(Modifier.size(44.dp)) {
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(GlowPurple.copy(alpha = 0.25f), Color.Transparent),
+                        colors = listOf(accent.copy(alpha = 0.25f), Color.Transparent),
                         radius = size.minDimension / 2f
                     ),
                     radius = size.minDimension / 2f
@@ -285,6 +294,7 @@ private fun FpsTabButton(isSelected: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun SectionHeader(title: String) {
+    val accent = MaterialTheme.colorScheme.primary
     Column(modifier = Modifier.padding(bottom = 10.dp)) {
         Text(
             text = title,
@@ -297,7 +307,7 @@ private fun SectionHeader(title: String) {
                 .fillMaxWidth(0.4f)
                 .height(2.dp)
                 .background(
-                    Brush.horizontalGradient(listOf(GlowPurple, GlowPurple.copy(alpha = 0.1f))),
+                    Brush.horizontalGradient(listOf(accent, accent.copy(alpha = 0.1f))),
                     RoundedCornerShape(1.dp)
                 )
         )
@@ -308,6 +318,7 @@ private fun SectionHeader(title: String) {
 
 @Composable
 private fun ToggleRow(label: String, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -328,7 +339,7 @@ private fun ToggleRow(label: String, checked: Boolean, enabled: Boolean = true, 
             onCheckedChange = onCheckedChange,
             enabled = enabled,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = GlowPurple,
+                checkedThumbColor = accent,
                 checkedTrackColor = PrimaryDim,
                 uncheckedThumbColor = ToggleThumbOff,
                 uncheckedTrackColor = ToggleTrackOff,
@@ -350,6 +361,7 @@ private fun LabeledSlider(
     enabled: Boolean = true,
     format: (Float) -> String = { "%.0f".format(it) }
 ) {
+    val accent = MaterialTheme.colorScheme.primary
     Column(modifier = Modifier.padding(vertical = 4.dp).then(if (enabled) Modifier else Modifier.alpha(0.4f))) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -364,7 +376,7 @@ private fun LabeledSlider(
             Text(
                 text = format(value),
                 style = MaterialTheme.typography.bodySmall,
-                color = Primary,
+                color = accent,
                 fontWeight = FontWeight.Medium
             )
         }
@@ -376,8 +388,8 @@ private fun LabeledSlider(
             steps = steps,
             enabled = enabled,
             colors = SliderDefaults.colors(
-                thumbColor = GlowPurple,
-                activeTrackColor = Primary,
+                thumbColor = accent,
+                activeTrackColor = accent,
                 inactiveTrackColor = ToggleTrackOff,
                 activeTickColor = Color.Transparent,
                 inactiveTickColor = Color.Transparent,
@@ -409,6 +421,7 @@ private fun AccentButton(text: String, modifier: Modifier = Modifier, onClick: (
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GraphicsContent(state: XServerDrawerState) {
+    val accent = MaterialTheme.colorScheme.primary
     LaunchedEffect(Unit) {
         XServerDialogState.onInitGraphicsTab?.run()
     }
@@ -433,7 +446,7 @@ private fun GraphicsContent(state: XServerDrawerState) {
         Icon(
             painter = painterResource(R.drawable.icon_fullscreen),
             contentDescription = null,
-            tint = Primary,
+            tint = accent,
             modifier = Modifier.size(20.dp)
         )
     }
@@ -457,7 +470,7 @@ private fun GraphicsContent(state: XServerDrawerState) {
     // reset-on-enable mutual exclusion and stays interactive.)
     val nativeRenderingEnabled by state.nativeRenderingEnabled.collectAsState()
     val glEnabled = !nativeRenderingEnabled
-    val glHeaderColor = if (glEnabled) Primary else Primary.copy(alpha = 0.4f)
+    val glHeaderColor = if (glEnabled) accent else accent.copy(alpha = 0.4f)
 
     if (effectsSupported) {
         // ---- OpenGL: Scaling mode (real SGSR / FSR1 spatial upscalers; parity with the
@@ -557,7 +570,7 @@ private fun GraphicsContent(state: XServerDrawerState) {
         val initUpscalerMode by XServerDialogState.upscalerMode.collectAsState()
         var upscalerMode by remember(initUpscalerMode) { mutableIntStateOf(initUpscalerMode) }
 
-        Text("Scaling mode", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        Text("Scaling mode", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
         Spacer(Modifier.height(8.dp))
         UpscalerModeButtons(upscalerMode, true) {
             upscalerMode = it
@@ -608,7 +621,7 @@ private fun GraphicsContent(state: XServerDrawerState) {
         // ---- Screen Effects (GL EffectComposer parity, ported to the Vulkan post
         //      chain). Color grade is always-applied via the sliders (neutral = no-op);
         //      FXAA/Toon/CRT/NTSC are toggles. Drawer-only / session-live. ----
-        Text("Screen Effects", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        Text("Screen Effects", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
         Spacer(Modifier.height(4.dp))
 
         val initVkBrightness by XServerDialogState.vkBrightness.collectAsState()
@@ -666,6 +679,7 @@ private fun GraphicsContent(state: XServerDrawerState) {
 // Scale slider collapses while Off and expands when a multiplier is selected.
 @Composable
 private fun FrameGenSection(state: XServerDrawerState) {
+    val accent = MaterialTheme.colorScheme.primary
     val frameGenEnabled by state.frameGenEnabled.collectAsState()
     val initFgMult by state.frameGenMultiplier.collectAsState()
     val initFgFlow by state.frameGenFlowScale.collectAsState()
@@ -689,7 +703,7 @@ private fun FrameGenSection(state: XServerDrawerState) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("Frame Generation", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        Text("Frame Generation", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
@@ -756,9 +770,10 @@ private fun FrameGenSection(state: XServerDrawerState) {
     }
 }
 
-// Off / 2× / 3× / 4× segmented button row. mult values 0/2/3/4; selected = filled Primary.
+// Off / 2× / 3× / 4× segmented button row. mult values 0/2/3/4; selected = filled accent.
 @Composable
 private fun FgMultiplierButtons(selected: Int, onSelect: (Int) -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
     val options = listOf(0 to "Off", 2 to "2×", 3 to "3×", 4 to "4×")
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -772,10 +787,10 @@ private fun FgMultiplierButtons(selected: Int, onSelect: (Int) -> Unit) {
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(if (isSel) Primary else Color.Black)
+                    .background(if (isSel) accent else Color.Black)
                     .border(
                         width = 1.dp,
-                        color = if (isSel) Primary else PrimaryDim,
+                        color = if (isSel) accent else PrimaryDim,
                         shape = RoundedCornerShape(8.dp)
                     )
                     .clickable { onSelect(mult) }
@@ -783,7 +798,7 @@ private fun FgMultiplierButtons(selected: Int, onSelect: (Int) -> Unit) {
             ) {
                 Text(
                     label,
-                    color = if (isSel) Color.Black else Primary,
+                    color = if (isSel) Color.Black else accent,
                     fontSize = 13.sp,
                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
                 )
@@ -813,6 +828,7 @@ private fun ReshadeContent(state: XServerDrawerState) {
 // patched libvkbasalt's mtime-watch picks up live, and persists to Container/shortcut reshadeParams).
 @Composable
 private fun ReshadeSection() {
+    val accent = MaterialTheme.colorScheme.primary
     val supported by XServerDialogState.reshadeSupported.collectAsState()
     val effectName by XServerDialogState.reshadeEffectName.collectAsState()
     val params by XServerDialogState.reshadeParams.collectAsState()
@@ -856,7 +872,7 @@ private fun ReshadeSection() {
             modifier = Modifier.weight(1f).padding(start = 4.dp)
         )
         TextButton(onClick = { resetDefaults() }, enabled = params.isNotEmpty()) {
-            Text("Reset", color = Primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text("Reset", color = accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
     }
     ToggleRow("Effect", enabled, true) { enabled = it; apply() }
@@ -910,6 +926,7 @@ private fun ReshadeSection() {
 // COMBO/RADIO/LIST dropdown — shows the ui_items labels; reports the selected index.
 @Composable
 private fun ReshadeDropdown(label: String, options: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
     var expanded by remember { mutableStateOf(false) }
     Column(modifier = Modifier.padding(vertical = 4.dp)) {
         Text(label, style = MaterialTheme.typography.bodySmall, color = DimWhite)
@@ -925,7 +942,7 @@ private fun ReshadeDropdown(label: String, options: List<String>, selected: Int,
             ) {
                 Text(
                     options.getOrElse(selected) { options.firstOrNull() ?: "" },
-                    color = Primary, fontWeight = FontWeight.Medium, fontSize = 12.sp,
+                    color = accent, fontWeight = FontWeight.Medium, fontSize = 12.sp,
                     modifier = Modifier.weight(1f)
                 )
                 Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = MutedWhite)
@@ -1105,6 +1122,7 @@ private fun DebandControls(enabled: Boolean = true) {
 
 @Composable
 private fun UpscalerModeButtons(selected: Int, enabled: Boolean, onSelect: (Int) -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
     val options = listOf(
         0 to "None", 1 to "Linear", 2 to "Nearest",
         3 to "SGSR", 4 to "FSR", 5 to "FSR (Fit)", 6 to "Sharpen", 7 to "NIS"
@@ -1122,10 +1140,10 @@ private fun UpscalerModeButtons(selected: Int, enabled: Boolean, onSelect: (Int)
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(if (isSel && enabled) Primary else Color.Black)
+                            .background(if (isSel && enabled) accent else Color.Black)
                             .border(
                                 width = 1.dp,
-                                color = if (isSel && enabled) Primary else PrimaryDim,
+                                color = if (isSel && enabled) accent else PrimaryDim,
                                 shape = RoundedCornerShape(8.dp)
                             )
                             .clickable(enabled = enabled) { onSelect(mode) }
@@ -1136,7 +1154,7 @@ private fun UpscalerModeButtons(selected: Int, enabled: Boolean, onSelect: (Int)
                             color = when {
                                 !enabled -> DimWhite.copy(alpha = 0.4f)
                                 isSel    -> Color.Black
-                                else     -> Primary
+                                else     -> accent
                             },
                             fontSize = 12.sp,
                             fontWeight = if (isSel && enabled) FontWeight.Bold else FontWeight.Medium
@@ -1154,6 +1172,7 @@ private fun UpscalerModeButtons(selected: Int, enabled: Boolean, onSelect: (Int)
 // Greyed when disabled (Auto on or display not VRR-capable).
 @Composable
 private fun RefreshRateSlider(rates: List<Int>, selected: Int, enabled: Boolean, autoRate: Int, onSelect: (Int) -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
     val stops = remember(rates) { listOf(0) + rates }
     var idx by remember(selected, stops) { mutableStateOf(stops.indexOf(selected).coerceAtLeast(0)) }
     val dim = DimWhite.copy(alpha = 0.4f)
@@ -1175,7 +1194,7 @@ private fun RefreshRateSlider(rates: List<Int>, selected: Int, enabled: Boolean,
             Text(
                 rightText,
                 style = MaterialTheme.typography.bodySmall,
-                color = if (enabled || showAuto) Primary else dim,
+                color = if (enabled || showAuto) accent else dim,
                 fontWeight = FontWeight.Medium
             )
         }
@@ -1207,6 +1226,7 @@ private fun RefreshRateSlider(rates: List<Int>, selected: Int, enabled: Boolean,
 
 @Composable
 private fun IntSlider(label: String, value: Int, valueRange: IntRange, onValueChange: (Int) -> Unit, onValueChangeFinished: (() -> Unit)? = null, steps: Int = -1, enabled: Boolean = true) {
+    val accent = MaterialTheme.colorScheme.primary
     // steps < 0 -> continuous (one stop per integer); steps >= 0 -> snap to that many
     // interior stops (e.g. steps = 3 over 0..100 yields the 5 positions {0,25,50,75,100}).
     val sliderSteps = if (steps >= 0) steps else (valueRange.last - valueRange.first - 1)
@@ -1217,7 +1237,7 @@ private fun IntSlider(label: String, value: Int, valueRange: IntRange, onValueCh
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(text = label, style = MaterialTheme.typography.bodySmall, color = DimWhite)
-            Text(text = "$value", style = MaterialTheme.typography.bodySmall, color = Primary, fontWeight = FontWeight.Medium)
+            Text(text = "$value", style = MaterialTheme.typography.bodySmall, color = accent, fontWeight = FontWeight.Medium)
         }
         Slider(
             value = value.toFloat(),
@@ -1233,6 +1253,7 @@ private fun IntSlider(label: String, value: Int, valueRange: IntRange, onValueCh
 
 @Composable
 private fun SeShaderToggle(label: String, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -1247,7 +1268,7 @@ private fun SeShaderToggle(label: String, checked: Boolean, enabled: Boolean = t
             onCheckedChange = onCheckedChange,
             enabled = enabled,
             colors = CheckboxDefaults.colors(
-                checkedColor = Primary,
+                checkedColor = accent,
                 uncheckedColor = ToggleThumbOff,
                 checkmarkColor = Color.White
             )
@@ -1262,6 +1283,7 @@ private fun SeShaderToggle(label: String, checked: Boolean, enabled: Boolean = t
 
 @Composable
 private fun HudContent(state: XServerDrawerState) {
+    val accent = MaterialTheme.colorScheme.primary
     val fpsConfig by state.fpsConfig.collectAsState()
 
     // Re-read the live display refresh rate when this tab opens so the "Rate" readout is fresh on
@@ -1274,7 +1296,7 @@ private fun HudContent(state: XServerDrawerState) {
     val fpsLimiterEnabled by state.fpsLimiterEnabled.collectAsState()
     val initFpsLimit by state.fpsLimit.collectAsState()
 
-    Text("FPS Limiter", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Text("FPS Limiter", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
     Spacer(Modifier.height(4.dp))
 
     var limiterOn by remember(fpsLimiterEnabled) { mutableStateOf(fpsLimiterEnabled) }
@@ -1309,7 +1331,7 @@ private fun HudContent(state: XServerDrawerState) {
     val currentRefreshRate by state.currentRefreshRate.collectAsState()
     var matchRefreshOn by remember(matchRefreshRate) { mutableStateOf(matchRefreshRate) }
 
-    Text("Refresh rate", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Text("Refresh rate", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
     Spacer(Modifier.height(4.dp))
 
     // Auto (match FPS) == the existing VRR toggle; behavior unchanged.
@@ -1490,6 +1512,7 @@ private fun HudChipRow(label: String, options: List<String>, selected: Int, onSe
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ControlsContent(state: XServerDrawerState) {
+    val accent = MaterialTheme.colorScheme.primary
     val profiles by XServerDialogState.inputProfiles.collectAsState()
     val initProfileIdx by XServerDialogState.selectedProfileIdx.collectAsState()
     val initTouchscreen by XServerDialogState.showTouchscreen.collectAsState()
@@ -1511,7 +1534,7 @@ private fun ControlsContent(state: XServerDrawerState) {
     val allItems = listOf("-- Disabled --") + profiles
     var dropdownExpanded by remember { mutableStateOf(false) }
 
-    Text("Input Controls", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Text("Input Controls", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
     Spacer(Modifier.height(6.dp))
 
     ExposedDropdownMenuBox(expanded = dropdownExpanded, onExpandedChange = { dropdownExpanded = it }) {
@@ -1585,7 +1608,7 @@ private fun ControlsContent(state: XServerDrawerState) {
     HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
 
     // Mouse & Cursor section
-    Text("Mouse & Cursor", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Text("Mouse & Cursor", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
     Spacer(Modifier.height(4.dp))
 
     ToggleRow("Move Cursor to Touchpoint", moveCursorToTouch) {
@@ -1601,7 +1624,7 @@ private fun ControlsContent(state: XServerDrawerState) {
     HorizontalDivider(color = Color(0xFF1A1A1A), modifier = Modifier.padding(vertical = 6.dp))
 
     // Vibration section
-    Text("Vibration", color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Text("Vibration", color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
     Spacer(Modifier.height(4.dp))
 
     val vibrationSlots by XServerDialogState.vibrationSlots.collectAsState()
@@ -1635,6 +1658,7 @@ private fun AdvancedContent(state: XServerDrawerState) {
 
 @Composable
 private fun AdvancedActionRow(label: String, iconRes: Int, onClick: () -> Unit) {
+    val accent = MaterialTheme.colorScheme.primary
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -1647,7 +1671,7 @@ private fun AdvancedActionRow(label: String, iconRes: Int, onClick: () -> Unit) 
         Icon(
             painter = painterResource(iconRes),
             contentDescription = null,
-            tint = Primary,
+            tint = accent,
             modifier = Modifier.size(20.dp),
         )
         Spacer(Modifier.width(10.dp))
@@ -1659,6 +1683,7 @@ private fun AdvancedActionRow(label: String, iconRes: Int, onClick: () -> Unit) 
 
 @Composable
 private fun TmContent() {
+    val accent = MaterialTheme.colorScheme.primary
     val processes by XServerDialogState.tmProcesses.collectAsState()
     val cpuCores by XServerDialogState.tmCpuCores.collectAsState()
     val cpuTitle by XServerDialogState.tmCpuTitle.collectAsState()
@@ -1719,7 +1744,7 @@ private fun TmContent() {
     Spacer(Modifier.height(10.dp))
 
     // CPU info
-    Text(cpuTitle, color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Text(cpuTitle, color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
     Spacer(Modifier.height(2.dp))
     Column(
         modifier = Modifier
@@ -1736,7 +1761,7 @@ private fun TmContent() {
     Spacer(Modifier.height(8.dp))
 
     // Memory info
-    Text(memTitle, color = Primary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+    Text(memTitle, color = accent, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
     Spacer(Modifier.height(2.dp))
     Box(
         modifier = Modifier
@@ -1756,7 +1781,7 @@ private fun TmContent() {
                 XServerDialogState.onTmDismissed?.run()
                 XServerDialogState.onTmNewTask?.run()
             }
-        ) { Text("New Task\u2026", color = Primary) }
+        ) { Text("New Task\u2026", color = accent) }
         Spacer(Modifier.weight(1f))
         TextButton(onClick = { XServerDialogState.onTmDismissed?.run() }) { Text("Clear", color = MutedWhite) }
     }
@@ -1764,6 +1789,7 @@ private fun TmContent() {
 
 @Composable
 private fun TmProcessRow(proc: XServerDialogState.TmProcess) {
+    val accent = MaterialTheme.colorScheme.primary
     var menuExpanded by remember { mutableStateOf(false) }
 
     Row(
@@ -1784,7 +1810,7 @@ private fun TmProcessRow(proc: XServerDialogState.TmProcess) {
             Icon(
                 painter = painterResource(R.drawable.taskmgr_process),
                 contentDescription = null,
-                tint = Primary,
+                tint = accent,
                 modifier = Modifier.size(24.dp)
             )
         }
