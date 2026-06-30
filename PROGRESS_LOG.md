@@ -2,6 +2,19 @@
 
 ---
 
+## 2026-06-30 — In-game Task Manager rows as cards (match File Manager) + 2 P4 fixes bundled (CODE DONE + CI building)
+
+**TL;DR:** Task Manager processes in the in-game drawer now render as cards like the app File Manager
+rows (user request), and the two prior P4 device-test fixes ride along. Latest commit `3e94450` on
+`feat/ui-rebuild`, CI `28462330620` building, at device gate. Not merged (umbrella hold).
+- `XServerDrawer.kt`: `TmProcessRow` wrapped in a Card matching `FileManagerScreen.FileItemRow`
+  (RoundedCornerShape 10dp, `surfaceContainer`, `outline` border, 3dp vertical margin); removed the
+  single-surface column + inter-row dividers (cards self-space).
+- Bundled (CI-green at `589566c`, not yet device-tested): controls-editor uses app theme accent in
+  editMode; binding-spinner text luminance floor (never invisible).
+
+---
+
 ## 2026-06-30 — P4 device-test fixes: controls-editor readability + binding text never invisible (CODE DONE + CI building)
 
 **TL;DR:** Two bugs surfaced in device testing of P4b/custom-color, both fixed. Commit `589566c` on
