@@ -47,6 +47,12 @@ Agent finishes P1 → push → CI "Any branch compilation." green → **device t
 for user: keep the additive "NEW" badge on Appearance? **Now AT the device-test gate** — checkpoint
 re-flushed; user drives the install + test. Phase-completion checkpoint will follow once device-proven.
 
+**⏸️ PAUSED (2026-06-30) — user lost Wi-Fi mid-session, resuming at work.** Nothing in flight; all
+pushed. RESUME = device-test the `feat/drawer-rebuild-p1` build (CI `28434248077` green, ludashi
+flavor) per the checklist above + decide the Appearance "NEW" badge; on pass → phase-completion
+checkpoint → decide merge → Phase 2 (drawer dialogs). Full resume pointer in memory
+`project_bannerlator_drawer_rebuild` (🔖 RESUME HERE at top).
+
 ## 2026-06-29 — bionic-fg: upstream MERGED our compat PR #6; fork synced; branch-landscape mapped for later
 
 **TL;DR:** Our Android wrapper-ICD compatibility fix was **merged into upstream bionic-fg**
