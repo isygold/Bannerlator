@@ -2,6 +2,17 @@
 
 ---
 
+## 2026-06-30 — UI rebuild Phase 4a: on-screen touch controls follow theme accent — ✅ DEVICE-PROVEN
+
+Commit `df5ce64` on `feat/ui-rebuild`, CI `28453428988` green. Device-proven via user screenshot on a
+green/Forest preset: the in-game GAMEHUB-style on-screen controls (A–F shoulder row + MRB/BKSP/SPACE/
+ENTER keys) render in the theme accent (green) and the in-game Controls tab is themed to match —
+confirming both the classic-path literal routing and the `resolveAccentColor()` stub-wiring (GAMEHUB
+glass style) work on hardware. Not merged (umbrella hold). Next: per-profile custom control color
+(in progress, same branch), then P4b legacy XML.
+
+---
+
 ## 2026-06-30 — UI rebuild Phase 4a: on-screen touch controls follow theme accent (CODE DONE + CI building)
 
 **TL;DR:** Phase 4 = the native/legacy surfaces that Compose theming doesn't reach, wired to the
