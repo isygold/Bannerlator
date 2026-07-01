@@ -2,7 +2,15 @@
 
 ---
 
-## 2026-07-01 — Two user-reported bugs: white virtual-control accent (#46) + container creation bricked by orphan shortcut dir (#45), plus white-app-accent contrast follow-up — ✅ CODE DONE, CI building (branch `fix/white-accent-and-container-creation`, NOT merged)
+## 2026-07-01 — 🏁 MERGED TO MAIN: #46 white virtual-control accent + #45 container-creation orphan-dir + white/dark app-accent contrast
+
+> **Merge `0bfeebd`** (`--no-ff`, `f3a6340..0bfeebd`), branch `fix/white-accent-and-container-creation` deleted (local + remote). Branch tip `116ef9e` CI-green (run **`28511850270`**, headSha-verified). This adds one commit beyond the earlier checkpoint — `116ef9e` "symmetric on-accent contrast": a **dark** custom accent previously fell through to the preset's baked `onPrimary` (itself dark on Monochrome/Phosphor/Royal Gold/Frost → dark-on-dark glyphs), now mirrors the light-accent guard (derive on-accent from luminance for ANY custom accent; built-in presets keep their designed `onPrimary` → default byte-identical). The white-app-accent follow-up is now **DEVICE-CONFIRMED** by the user ("works well").
+> **Version left at vc36 / 2.2.1** (same as main's prior rail-scroll + vkBasalt pre-release). Per the opt-in beta-channel workflow, **NO release cut and NO versionCode bump** — the user chose to let fixes keep accumulating on `main` until there's enough for a pre-release (pre2, vc37) or a stable push. ⚠️ Testers already on vc36 won't be offered a new build until the versionCode bumps to 37+.
+> **Issues closed out:** #45 commented + **CLOSED (completed)** pointing at fix `b69c0e7` / merge `0bfeebd`. #46 commented crediting the color fixes (`b69c0e7` + `b1b2cc7` + `116ef9e` / merge `0bfeebd`) but **LEFT OPEN** to track its second, unaddressed complaint — "limit fps and others reset every time you close a game" — for which the reporter was asked for repro steps (which setting, per-game vs container default, GL vs Vulkan). That FPS-reset bug was deliberately NOT in this branch (AMA bot's `state.reset()` theory is a misdiagnosis; real suspect = shortcut-vs-container owner mismatch, needs a repro).
+
+---
+
+## 2026-07-01 — Two user-reported bugs: white virtual-control accent (#46) + container creation bricked by orphan shortcut dir (#45), plus white-app-accent contrast follow-up — ✅ CODE DONE, CI building (branch `fix/white-accent-and-container-creation`, NOT merged) [SUPERSEDED — see MERGED entry above]
 
 > **Source:** GitHub issues #46 ("custom colors… white doesn't apply to virtual controls, becomes blue") and #45 ("Add shortcut issue that can break container creation"). The AMA bot had diagnosed both but never pushed (no CI write creds); all three fixes below are independently code-verified against source, not taken on the bot's word.
 > **Branch `fix/white-accent-and-container-creation`** off `main`. Commit 1 `b69c0e7` (#46 control + #45), CI run **`28506368680` ✅GREEN** (headSha == tip, 3 flavors). Commit 2 `b1b2cc7` (white-app-accent follow-up), CI run **`28508536976`** dispatched (headSha verified == tip; result pending at checkpoint). NOT merged, version un-bumped (35/2.2), no tag.
