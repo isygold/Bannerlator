@@ -468,6 +468,27 @@ public class Container {
         putExtra("reshadeParams", (json == null || json.isEmpty()) ? null : json);
     }
 
+    // --- ReShade multi-effect loadout (Tier 1). reshadeLoadout is a JSON array of
+    // {"name":..,"enabled":..} in chain order; reshadeMode is "solo" (one active) or "stack" (any
+    // subset). The nested reshadeParams ({"<effect>":{uniform:value}}) hold per-effect overrides.
+    // When reshadeLoadout is absent the legacy single reshadeEffect + flat reshadeParams are migrated
+    // transparently (see ReshadeLoadout.parse / .paramsForEffect). "" = no loadout set.
+    public String getReshadeLoadout() {
+        return getExtra("reshadeLoadout", "");
+    }
+
+    public void setReshadeLoadout(String json) {
+        putExtra("reshadeLoadout", (json == null || json.isEmpty()) ? null : json);
+    }
+
+    public String getReshadeMode() {
+        return getExtra("reshadeMode", "solo");
+    }
+
+    public void setReshadeMode(String mode) {
+        putExtra("reshadeMode", (mode == null || mode.isEmpty()) ? null : mode);
+    }
+
     public String getWineVersion() {
         return wineVersion;
     }
