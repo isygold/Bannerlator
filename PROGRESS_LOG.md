@@ -4,6 +4,8 @@
 
 ## 2026-06-30 — In-game ReShade effect SWITCHING — Tier 1 (multi-effect loadout + per-effect enable gate) — CODE DONE + CI ✅GREEN, NOT device-tested / NOT merged
 
+> ⏳ **LIVE STATUS (crash-recovery anchor):** Tier 1 fully built + integrated, feature branch `feat/reshade-multi-effect-switch` @ **`cac9335`** (code tip `ab70dca`), combined CI **`28490017156` GREEN**. **Ludashi APK is ON THE DEVICE at `Download/bannerlator-reshade-tier1-ludashi.apk`** (md5 `369382dba6efb04f50d954776f799766`; also all 3 flavors at `/home/claude-user/scratchpad/reshade-tier1-apk/`). **USER IS DEVICE-TESTING NOW.** Test on a **FRESH container** (old ones keep the old .so — see gotcha below) + a Vulkan/DXVK title, per the checklist at the end of this entry. When results come back: log pass/fail per gate → then version-aware-extraction fix → merge decision → Tier 2. Nothing merged; no release.
+
 **Goal (user):** select MULTIPLE ReShade effects per game and **toggle between them LIVE in-game** — Solo (A/B one at a time) or Stack (layered) — with auto-generated per-effect sliders. Built on top of the merged Step 3 stack. Baseline was single-effect only (`Container.getReshadeEffect()` one string, conf `effects=<reshade>:cas`). Two tiers agreed: **Tier 1 = pre-compiled loadout with an instant per-effect enable gate (this entry)**; Tier 2 = live "add from catalog" via on-device recompile (later).
 
 - **LOCKED conf-key contract** (app emits / patch reads, exact): `effects = e1:e2:…:en:cas`; per effect `<ei> = <fxPath>`; uniforms `<ei>_<uniform>[_c] = value` (unchanged `formatUniformLine`); **NEW `<ei>_enabled = 0|1`** (default 1 = active); global master stays `enableOnLaunch`. effectKey = `name→[^A-Za-z0-9_]→_` lowercased.
