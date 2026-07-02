@@ -442,12 +442,25 @@ public final class SteamRepository {
     private volatile int reconnectAttempts = 0;
     private static final int MAX_RECONNECT_ATTEMPTS = 5;
 
+    /** Set by logout() so a user-initiated sign-out is not treated as an involuntary logoff to recover from. */
+    private volatile boolean loggingOut = false;
+    /** Set when we force a reconnect that must proceed even though the disconnect is "user-initiated" (see onLoggedOff). */
+    private volatile boolean forceReconnect = false;
+    /** Bounds relogin retries after an involuntary LoggedOff so a truly-dead token can't loop forever. */
+    private volatile int logoffRecoveryAttempts = 0;
+    private static final int MAX_LOGOFF_RECOVERY = 3;
+
     private void onDisconnected(DisconnectedCallback cb) {
-        Log.i(TAG, "Disconnected (userInitiated=" + cb.isUserInitiated() + ", attempt=" + reconnectAttempts + ")");
+        boolean forced = forceReconnect;
+        forceReconnect = false;
+        Log.i(TAG, "Disconnected (userInitiated=" + cb.isUserInitiated() + ", forced=" + forced
+                + ", attempt=" + reconnectAttempts + ")");
         connected = false;
         loggedIn  = false;
         connecting.set(false);
-        if (!cb.isUserInitiated() && pumping.get() && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        // Reconnect on an involuntary socket drop, OR when we deliberately forced a reconnect to
+        // recover from a clean CM logoff (onLoggedOff) — the latter arrives as "user-initiated".
+        if ((forced || !cb.isUserInitiated()) && pumping.get() && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttempts++;
             long delayMs = reconnectAttempts * 2000L;  // 2s, 4s, 6s, 8s, 10s
             Log.i(TAG, "Auto-reconnect in " + delayMs + "ms (attempt " + reconnectAttempts + ")");
@@ -478,14 +491,42 @@ public final class SteamRepository {
         pPut("account_id", (int)(sid64 & 0xFFFFFFFFL));
 
         loggedIn = true;
+        logoffRecoveryAttempts = 0;   // fresh session established — reset involuntary-logoff recovery budget
         emit("LoggedIn:" + sid64);
         Log.i(TAG, "Logged in as " + pGet("username", ""));
     }
 
     private void onLoggedOff(LoggedOffCallback cb) {
-        Log.i(TAG, "Logged off: " + cb.getResult());
+        EResult r = cb.getResult();
+        Log.i(TAG, "Logged off: " + r);
         loggedIn = false;
-        emit("LoggedOut");
+
+        // User-initiated sign-out, or a logoff meaning the session is intentionally gone
+        // (logged in elsewhere / session replaced) -> surface it, do NOT try to recover/loop.
+        if (loggingOut || r == EResult.LoggedInElsewhere || r == EResult.LogonSessionReplaced) {
+            emit("LoggedOut");
+            return;
+        }
+
+        // Otherwise this is an INVOLUNTARY logoff (e.g. EResult.Expired ~1h into a QR-approved
+        // session). The socket is still up but the CM has ended our session, and depot downloads
+        // ride that CM session, so they stall. Recover the way a socket drop already recovers:
+        // force a reconnect so onConnected re-logs-on from the stored refresh token and mints a
+        // fresh session. Bounded so a genuinely-dead token can't loop forever.
+        if (pumping.get() && isLoggedInPrefs() && steamClient != null
+                && logoffRecoveryAttempts < MAX_LOGOFF_RECOVERY) {
+            logoffRecoveryAttempts++;
+            Log.i(TAG, "Involuntary logoff (" + r + ") -> forcing reconnect+relogin (recovery "
+                    + logoffRecoveryAttempts + "/" + MAX_LOGOFF_RECOVERY + ")");
+            forceReconnect = true;
+            if (pumpHandler != null) pumpHandler.post(() -> { if (steamClient != null) steamClient.disconnect(); });
+            else steamClient.disconnect();
+        } else {
+            Log.w(TAG, "Logged off (" + r + ") and not recovering (attempts=" + logoffRecoveryAttempts
+                    + ") -> session needs re-auth");
+            emit("SessionExpired");
+            emit("LoggedOut");
+        }
     }
 
     private void onLicenseList(LicenseListCallback cb) {
@@ -799,6 +840,7 @@ public final class SteamRepository {
     /** Auto-login using a stored refresh token. Must not be called on the main thread. */
     public void loginWithToken(String username, String refreshToken) {
         if (steamUser == null) return;
+        loggingOut = false;   // a fresh logon means we are no longer in a sign-out
         Runnable work = () -> {
             LogOnDetails details = new LogOnDetails();
             details.setUsername(username);
@@ -844,6 +886,8 @@ public final class SteamRepository {
      * (called from Phase 2 auth flow after pollingWaitForResult).
      */
     public void saveSession(String username, String refreshToken) {
+        loggingOut = false;
+        logoffRecoveryAttempts = 0;
         pPut("username", username);
         pPut("refresh_token", refreshToken);
     }
@@ -862,6 +906,8 @@ public final class SteamRepository {
     // -------------------------------------------------------------------------
 
     public void logout() {
+        loggingOut = true;            // suppress involuntary-logoff recovery for this intentional sign-out
+        logoffRecoveryAttempts = 0;
         if (steamUser != null) steamUser.logOff();
         if (prefs != null) {
             prefs.edit()

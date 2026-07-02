@@ -36,6 +36,10 @@ object SteamDepotDownloader {
 
     private const val TAG = "SteamDepot"
 
+    /** How many times a failed download will silently recover the Steam session and retry
+     *  (as a resume) before the failure is surfaced to the user. Covers the ~1h CM-logoff case. */
+    private const val MAX_SESSION_RETRIES = 2
+
     // -------------------------------------------------------------------------
     // Active download tracking — used by UI to detect stale DL_DOWNLOADING rows
     // -------------------------------------------------------------------------
@@ -149,6 +153,7 @@ object SteamDepotDownloader {
         downloaderRef: AtomicReference<DepotDownloader?>,
         threads: Int = 4,
         isResume: Boolean = false,
+        attempt: Int = 0,
     ) {
         activeDownloads[appId] = Unit
         initDebugLog(ctx)
@@ -274,6 +279,10 @@ object SteamDepotDownloader {
         dlog("DepotDownloader constructed OK")
         downloaderRef.set(downloader)
 
+        // Captured by onDownloadFailed; the terminal decision (retry vs surface to user) is made
+        // in the finally block so a mid-download CM session loss can be recovered transparently.
+        var failure: Throwable? = null
+
         downloader.addListener(object : IDownloadListener {
             override fun onDownloadStarted(item: DownloadItem) {
                 dlog("onDownloadStarted: appId=${item.appId}")
@@ -349,7 +358,10 @@ object SteamDepotDownloader {
                 } else {
                     dlog("=== Download FAILED: appId=${item.appId} ===")
                     dlogError("onDownloadFailed", error)
-                    emitFailed(appId, error.message ?: "Unknown error")
+                    // Defer to finally: if the CM session was lost mid-download (the QR ~1h
+                    // logoff case), we recover it and retry once as a resume instead of
+                    // surfacing a bogus failure to the user.
+                    failure = error
                 }
             }
         })
@@ -374,6 +386,7 @@ object SteamDepotDownloader {
 
         dlog("Blocking on getCompletion().get()...")
         var completedNormally = false
+        var retryAsResume = false
         try {
             downloader.getCompletion().get()
             completedNormally = true
@@ -406,9 +419,35 @@ object SteamDepotDownloader {
                         db.deleteDownload(appId)
                         repo.emit("DownloadCancelled:$appId")
                     }
+                    else -> {
+                        // Genuine failure. Before surfacing it, give the session a chance to come
+                        // back — Fix A (SteamRepository.onLoggedOff) reconnects+relogins after an
+                        // involuntary CM logoff (the ~1h QR-session case). If it recovers, retry
+                        // this download once as a resume so the in-flight download is not aborted.
+                        if (attempt < MAX_SESSION_RETRIES) {
+                            dlog("finally: failure on attempt ${attempt + 1} — awaiting session recovery")
+                            val ok = repo.ensureLoggedIn(30_000L)
+                            dlog("finally: post-failure ensureLoggedIn → $ok (loggedIn=${repo.isLoggedIn})")
+                            if (ok && !cancelled.get() && !paused.get()) {
+                                dlog("finally: session recovered — will retry as resume")
+                                retryAsResume = true
+                            }
+                        }
+                        if (!retryAsResume) {
+                            emitFailed(appId, failure?.message ?: "Unknown error")
+                        }
+                    }
                 }
             }
             dlog("=== runInstall() finished ===")
+        }
+
+        // Outside the try/finally so the failed attempt is fully torn down first. Bounded by
+        // MAX_SESSION_RETRIES; re-enters as a resume so already-downloaded files are reused.
+        if (retryAsResume) {
+            dlog("Retrying install for appId=$appId (attempt ${attempt + 1} → ${attempt + 2}) as resume")
+            runInstall(appId, ctx, cancelled, paused, downloaderRef, threads,
+                    isResume = true, attempt = attempt + 1)
         }
     }
 
