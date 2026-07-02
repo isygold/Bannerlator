@@ -479,3 +479,5 @@ game — user rule) + community-config recommendations from The412Banner/bannerh
 (2,869 games, per-device SoC-keyed GameHub-schema configs; needs precomputed aggregation +
 name→appId mapping + component-version translation). Gate: CI green then on-device visual pass
 (grid density, download/pause/cancel states, white-accent preset).
+Update: branch pushed; CI artifacts run 28556819972 (label steam-store-m3) in flight with watcher;
+root bridge pinged OK — on green, APK goes to device /sdcard/Download for the visual pass.
