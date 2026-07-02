@@ -464,3 +464,18 @@ entries byte-identical, swapped exes carry sibling metadata (uid 10314/gid 1023,
 ⚠️ TEMPLATE = NEW containers only — existing containers keep the old exe (reinstall-imagefs
 preserves home/), so to update them push the exes via root bridge or make a new container.
 Lands in the next Bannerlator build; no tag/release cut.
+
+## 2026-07-01 — Steam store Compose M3 restyle (branch feat/steam-store-compose)
+Decision: keep our JavaSteam backend (same lib family GameNative uses; theirs is GPL-3.0 +
+proprietary blobs + monolithic coupling — vendoring rejected), rebuild only the UI/UX. The five
+Steam screens were already Compose, just hardcoded 0055FF/black — restyled all onto live
+MaterialTheme.colorScheme tokens (`0ca11e0`): library header→icon buttons, grid tiles→2:3
+Shortcuts idiom, list items→ContainerItem cards, detail screen Int-color state→semantic enums
+(InstallAction/PauseAction/GameStatus) resolved in composition, login/QR themed, onPrimary
+everywhere (white-accent-safe). Backend files untouched. Local compileLudashiDebugKotlin GREEN
+(aapt2 override needed in PRoot: -Pandroid.aapt2FromMavenOverride=termux aapt2).
+NEXT after this proves out: smart container-picker (rank existing containers; NO auto-create per
+game — user rule) + community-config recommendations from The412Banner/bannerhub-game-configs
+(2,869 games, per-device SoC-keyed GameHub-schema configs; needs precomputed aggregation +
+name→appId mapping + component-version translation). Gate: CI green then on-device visual pass
+(grid density, download/pause/cancel states, white-accent preset).
