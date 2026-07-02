@@ -39,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -108,6 +109,17 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
     private var addToShortcuts by mutableStateOf<AddToShortcutsRequest?>(null)
     private var addResult by mutableStateOf<AddShortcutResult?>(null)
 
+    // Goldberg (Steam emulator) state — only meaningful once the game is installed.
+    // The component is ONE global download shared by every game; the tier toggle
+    // only lights up once it's installed.
+    private var goldbergMode by mutableStateOf(GoldbergMode.OFF)
+    private var goldbergBusy by mutableStateOf(false)
+    private var goldbergMessage by mutableStateOf<String?>(null)
+    private var goldbergInstalled by mutableStateOf(false)
+    private var goldbergDownloading by mutableStateOf(false)
+    private var goldbergDownloadProgress by mutableFloatStateOf(0f)
+    private var goldbergSizeLabel by mutableStateOf("")
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         appId = intent.getIntExtra(EXTRA_APP_ID, 0)
@@ -136,6 +148,15 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
                     progressValue = progressValue,
                     progressText = progressText,
                     progressTextVisible = progressTextVisible,
+                    goldbergVisible = gameStatus == GameStatus.INSTALLED,
+                    goldbergMode = goldbergMode,
+                    goldbergBusy = goldbergBusy,
+                    goldbergInstalled = goldbergInstalled,
+                    goldbergDownloading = goldbergDownloading,
+                    goldbergDownloadProgress = goldbergDownloadProgress,
+                    goldbergSizeLabel = goldbergSizeLabel,
+                    onGoldbergDownloadClick = { onGoldbergDownloadClicked() },
+                    onGoldbergModeSelected = { onGoldbergModeSelected(it) },
                     onBack = { finish() },
                     onInstallClick = { onInstallClicked() },
                     onPauseResumeClick = { onPauseResumeClicked() },
@@ -193,6 +214,17 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
                             openShortcutsScreen(this@SteamGameDetailActivity)
                         },
                         onDismiss = { addResult = null },
+                    )
+                }
+
+                goldbergMessage?.let { msg ->
+                    AlertDialog(
+                        onDismissRequest = { goldbergMessage = null },
+                        title = { Text("Steam Emulator (Goldberg)") },
+                        text = { Text(msg) },
+                        confirmButton = {
+                            TextButton(onClick = { goldbergMessage = null }) { Text("OK") }
+                        },
                     )
                 }
             }
@@ -348,6 +380,15 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
             installAction = InstallAction.UNINSTALL
             installBtnEnabled = true
             launchBtnEnabled = true
+            goldbergMode = SteamPrefs.getGoldbergMode(appId)
+            goldbergInstalled = GoldbergComponent.isInstalled(this)
+            // If the global component isn't downloaded yet, fetch the catalog in
+            // the background so the download button can show its size.
+            if (!goldbergInstalled && goldbergSizeLabel.isEmpty()) {
+                GoldbergComponent.loadCatalogAsync { cat ->
+                    goldbergSizeLabel = cat?.takeIf { it.fileSize > 0 }?.let { fmtSize(it.fileSize) } ?: ""
+                }
+            }
         } else {
             statusText = "Not installed"
             gameStatus = GameStatus.NOT_INSTALLED
@@ -476,8 +517,49 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
 
     /** Compose add-to-shortcuts flow: load containers, then show the M3 picker. */
     private fun startAddToShortcuts(gameName: String, exePath: String, coverUrl: String?) {
+        // If this game is in Cold Client Loader mode, the shortcut must launch the
+        // Goldberg loader beside the exe instead of the game exe. Every other mode
+        // (OFF/REGULAR/EXPERIMENTAL) returns exePath unchanged.
+        val launchExe = GoldbergPatcher.resolveLaunchExe(this, appId, exePath)
         StarLaunchBridge.loadContainers(this) { containers ->
-            addToShortcuts = AddToShortcutsRequest(gameName, exePath, coverUrl, containers)
+            addToShortcuts = AddToShortcutsRequest(gameName, launchExe, coverUrl, containers)
+        }
+    }
+
+    /**
+     * Downloads the ONE global Goldberg component (ReShade-style: catalog →
+     * .tzst → MD5 verify → extract to imagefs/opt/goldberg). Once installed,
+     * every game's detail page shows the tier toggle ready — no re-download.
+     */
+    private fun onGoldbergDownloadClicked() {
+        if (goldbergDownloading || goldbergInstalled) return
+        goldbergDownloading = true
+        goldbergDownloadProgress = 0f
+        GoldbergComponent.downloadAsync(
+            this,
+            progress = { fraction -> goldbergDownloadProgress = fraction },
+            done = { success, message ->
+                goldbergDownloading = false
+                goldbergInstalled = GoldbergComponent.isInstalled(this)
+                goldbergMessage = message
+            },
+        )
+    }
+
+    /**
+     * Applies the chosen Goldberg tier on a worker thread, then persists it.
+     * OFF restores the game to pristine. The patcher surfaces the N/A case
+     * ("doesn't use the Steam API") and the not-bundled case as result messages.
+     */
+    private fun onGoldbergModeSelected(mode: GoldbergMode) {
+        val g = game ?: return
+        if (goldbergBusy || mode == goldbergMode) return
+        if (!g.isInstalled || g.installDir.isEmpty()) return
+        goldbergBusy = true
+        GoldbergPatcher.applyModeAsync(this, appId, g.installDir, g.name, mode) { success, message ->
+            goldbergBusy = false
+            if (success) goldbergMode = mode
+            goldbergMessage = message
         }
     }
 
@@ -515,6 +597,15 @@ private fun SteamGameDetailScreen(
     progressValue: Int,
     progressText: String,
     progressTextVisible: Boolean,
+    goldbergVisible: Boolean,
+    goldbergMode: GoldbergMode,
+    goldbergBusy: Boolean,
+    goldbergInstalled: Boolean,
+    goldbergDownloading: Boolean,
+    goldbergDownloadProgress: Float,
+    goldbergSizeLabel: String,
+    onGoldbergDownloadClick: () -> Unit,
+    onGoldbergModeSelected: (GoldbergMode) -> Unit,
     onBack: () -> Unit,
     onInstallClick: () -> Unit,
     onPauseResumeClick: () -> Unit,
@@ -666,6 +757,143 @@ private fun SteamGameDetailScreen(
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(10.dp),
             ) { Text("Launch", maxLines = 1) }
+        }
+
+        if (goldbergVisible) {
+            GoldbergSection(
+                installed = goldbergInstalled,
+                downloading = goldbergDownloading,
+                downloadProgress = goldbergDownloadProgress,
+                sizeLabel = goldbergSizeLabel,
+                mode = goldbergMode,
+                busy = goldbergBusy,
+                onDownloadClick = onGoldbergDownloadClick,
+                onModeSelected = onGoldbergModeSelected,
+            )
+        }
+    }
+}
+
+/**
+ * Opt-in "Steam Emulator (Goldberg)" section. Goldberg is ONE global download
+ * shared by every game: until it's installed, this shows a "Download Steam
+ * Emulator" button (with progress + MD5-verified extract); once installed it
+ * shows the tier selector. Tiers are escalating fallbacks. The helper text is
+ * deliberately honest: Goldberg only lets a game *start* without Steam — it
+ * can't reach a publisher's own online servers.
+ */
+@Composable
+private fun GoldbergSection(
+    installed: Boolean,
+    downloading: Boolean,
+    downloadProgress: Float,
+    sizeLabel: String,
+    mode: GoldbergMode,
+    busy: Boolean,
+    onDownloadClick: () -> Unit,
+    onModeSelected: (GoldbergMode) -> Unit,
+) {
+    val options = listOf(
+        GoldbergMode.OFF to "Off",
+        GoldbergMode.REGULAR to "Regular",
+        GoldbergMode.EXPERIMENTAL to "Experimental",
+        GoldbergMode.COLDCLIENT to "Cold Client Loader",
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 16.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(16.dp),
+    ) {
+        Text(
+            text = "Steam Emulator (Goldberg)",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = "Lets games that require Steam start without it. " +
+                "Won't fix online-only games that can't reach their own servers.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        if (!installed) {
+            // Component not downloaded yet — offer the one-time global download.
+            Spacer(Modifier.height(12.dp))
+            if (downloading) {
+                LinearProgressIndicator(
+                    progress = { downloadProgress.coerceIn(0f, 1f) },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surface,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "Downloading… ${(downloadProgress.coerceIn(0f, 1f) * 100).toInt()}%",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                val sizeSuffix = if (sizeLabel.isNotEmpty()) " (~$sizeLabel)" else ""
+                Button(
+                    onClick = onDownloadClick,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                ) { Text("Download Steam Emulator$sizeSuffix", maxLines = 1) }
+            }
+            return@Column
+        }
+
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = "Regular works for most games; try Experimental, then " +
+                "Cold Client Loader if a game still won't start.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        options.forEach { (optMode, label) ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(enabled = !busy) { onModeSelected(optMode) }
+                    .padding(vertical = 4.dp),
+            ) {
+                RadioButton(
+                    selected = mode == optMode,
+                    onClick = { onModeSelected(optMode) },
+                    enabled = !busy,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+        if (busy) {
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    strokeWidth = 2.dp,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Applying…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
