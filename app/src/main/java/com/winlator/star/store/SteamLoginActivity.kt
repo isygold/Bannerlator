@@ -351,8 +351,11 @@ private fun SteamLoginScreen(
         ) { Text("Sign In") }
         Spacer(Modifier.height(12.dp))
 
-        TextButton(onClick = onQrClick) {
-            Text("Sign in with QR Code")
+        // QR login temporarily disabled — sessions from QR sign-in can be
+        // dropped by the CM after ~1h. Username/password is the solid path
+        // for now. Re-enable once the logoff-recovery path is device-proven.
+        TextButton(onClick = onQrClick, enabled = false) {
+            Text("Sign in with QR Code (temporarily unavailable)")
         }
         Spacer(Modifier.height(16.dp))
 
