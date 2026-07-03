@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-07-03 — ⛔ Device-test of `4c49de5` (PICS-off-pump): download STILL fails at 0% → new root cause is a coroutine-dispatcher DEADLOCK, not pump starvation
+
+> **Test:** build `4c49de5` **confirmed installed** on device (`com.winlator.banner`, lastUpdateTime 19:07 EDT, 10 min after CI `28686413427` finished 18:57 EDT). Re-ran HL2 (appId 220) download at 19:24 EDT via root bridge, watched logcat (pid 27263, tag `SteamDepot`) + `steam_debug.txt`.
+> **Result: identical failure.** Login solid — `connected=true, loggedIn=true`, **no `LogonSessionReplaced`**, PICS fine (`hasPicsSize=true`, size 8.99 GB known). But `onDownloadStarted` → **exactly 10.2s later** `=== Download FAILED ===`, `onDownloadFailed: null`, `java.util.concurrent.CancellationException` at `AsyncJobManager.cancelTimedOutJobs(AsyncJobManager.kt:111)` → `AsyncJobSingle.setFailed(:49)`. So **hardening #2 (`4c49de5`, PICS parse off pump) fixed a real *earlier* starvation but is NOT the download blocker.**
+> **New root cause (from evidence, not inferred):** between `Blocking on getCompletion().get()...`/`onDownloadStarted` and the 10s failure there is **ZERO JavaSteam internal logging** — no CM traffic, no CDN server lookup, **no manifest request ever emitted**. The download coroutines never run at all. => **coroutine-dispatcher deadlock**: SteamDepot blocks the calling thread on `getCompletion().get()`, and the DepotDownloader's download work / manifest-AsyncJob completion is dispatched onto a thread that's now parked → nothing runs → the only thing that ever completes the future is AsyncJobManager's *separate* `TimerThread` cancelling the timed-out job at 10s, whose `CancellationException` unblocks `.get()`.
+> **Evidence archived:** `~/scratchpad/steam_hl2_deadlock_20260703.log` + device `/sdcard/Download/steam_debug_hl2_20260703.txt`.
+> **⏳ In progress:** `native-steam-engineer` agent tracing the exact `file:line` (SteamDepot `getCompletion().get()` vs the DepotDownloader `CoroutineDispatcher`; likely `SteamDepotDownloader.kt` + whatever logs "Blocking on getCompletion().get()") and drafting the minimal fix (dedicated thread for the blocking get / `await` instead of `.get()` / give DepotDownloader its own dispatcher). Fix NOT yet written/committed. See memory [[project_bannerlator_steam_session_hardening]].
+
+---
+
 ## 2026-07-03 — 🐛→🔧 Steam download: login fix device-PROVEN; manifest AsyncJob times out at 0% → move PICS sync off the pump (hardening #2)
 
 > **Device result of `c72d943` (login fix):** HL2 (appId 220) from build `28685150972` reached `connected=true, **loggedIn=true**` with **no `LogonSessionReplaced` teardown** — the single-flight logon + no-self-kill fix is device-proven, that failure class is closed.
