@@ -13,6 +13,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -143,6 +146,14 @@ public final class SteamRepository {
     private HandlerThread     pumpThread  = null;
     private Handler           pumpHandler = null;
     private final AtomicBoolean pumping    = new AtomicBoolean(false);
+
+    // Dedicated single-thread worker for library/PICS sync. The heavy PICS parse + Room writes
+    // MUST NOT run on the pump thread: they block runWaitCallbacks() for seconds and the depot
+    // manifest AsyncJob reply then can't be dispatched inside its ~10s window → CancellationException
+    // → download dies at 0%. The pump callback handlers only marshal the payload out of the callback
+    // and hand the parse/DB work here. Single-thread preserves the SYNC_PACKAGES→SYNC_APPS ordering.
+    // Lifecycle tracks the pump: created in startPump(), shut down in stopPump().
+    private volatile ExecutorService libraryWorker = null;
     /** True while a connect() call is in flight (posted to pump thread but not yet completed). */
     private final AtomicBoolean connecting = new AtomicBoolean(false);
 
@@ -404,6 +415,11 @@ public final class SteamRepository {
         pumpThread  = new HandlerThread("SteamPump");
         pumpThread.start();
         pumpHandler = new Handler(pumpThread.getLooper());
+        libraryWorker = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "SteamLibraryWorker");
+            t.setDaemon(true);
+            return t;
+        });
         schedulePump();
     }
 
@@ -411,6 +427,23 @@ public final class SteamRepository {
         pumping.set(false);
         if (pumpThread != null) { pumpThread.quitSafely(); pumpThread = null; }
         pumpHandler = null;
+        ExecutorService w = libraryWorker;
+        libraryWorker = null;
+        if (w != null) w.shutdownNow();   // abandon any stale in-flight sync from this session
+    }
+
+    /**
+     * Run library/PICS sync work off the pump thread. Keeps runWaitCallbacks() fast so AsyncJob
+     * (depot manifest) replies flow. Falls back to a throwaway thread if the worker isn't up yet
+     * (e.g. a sync triggered before startPump) or was just shut down mid-teardown.
+     */
+    private void runOnLibraryWorker(Runnable r) {
+        ExecutorService w = libraryWorker;
+        if (w != null && !w.isShutdown()) {
+            try { w.execute(r); return; }
+            catch (RejectedExecutionException ignored) { /* shutting down — fall through */ }
+        }
+        new Thread(r, "SteamLibrarySync").start();
     }
 
     private void schedulePump() {
@@ -569,21 +602,25 @@ public final class SteamRepository {
     }
 
     private void onLicenseList(LicenseListCallback cb) {
-        List<License> list = cb.getLicenseList();
+        // PUMP THREAD: only copy the payload out of the callback (it may be recycled once we return),
+        // then hand the DB writes + PICS sync to the worker so runWaitCallbacks() returns immediately.
+        final List<License> list = new ArrayList<>(cb.getLicenseList());
         Log.i(TAG, list.size() + " licenses received");
-        synchronized (licenses) {
-            licenses.clear();
-            licenses.addAll(list);
-        }
-        // Persist license records to DB
-        SteamDatabase db = SteamDatabase.getInstance();
-        db.clearLicenses();
-        for (License lic : list) {
-            long created = lic.getTimeCreated() != null ? lic.getTimeCreated().getTime() / 1000L : 0L;
-            db.upsertLicense(lic.getPackageID(), created, 0, 0);
-        }
-        emit("LibraryProgress:0:" + list.size());
-        syncPackages(list);
+        runOnLibraryWorker(() -> {
+            synchronized (licenses) {
+                licenses.clear();
+                licenses.addAll(list);
+            }
+            // Persist license records to DB
+            SteamDatabase db = SteamDatabase.getInstance();
+            db.clearLicenses();
+            for (License lic : list) {
+                long created = lic.getTimeCreated() != null ? lic.getTimeCreated().getTime() / 1000L : 0L;
+                db.upsertLicense(lic.getPackageID(), created, 0, 0);
+            }
+            emit("LibraryProgress:0:" + list.size());
+            syncPackages(list);
+        });
     }
 
     /** Phase 4 step 1: request PICS product info for all owned packages. */
@@ -646,41 +683,61 @@ public final class SteamRepository {
         }
     }
 
-    /** Phase 4 step 3: handle PICS product info callbacks for packages and apps. */
+    /** Phase 4 step 3: handle PICS product info callbacks for packages and apps.
+     *  PUMP THREAD: accumulate the (cheap) callback payload; when the response is complete, snapshot
+     *  the accumulated PICSProductInfo values and hand the heavy parse + DB work to the worker so the
+     *  pump keeps dispatching callbacks (including the depot manifest AsyncJob reply). The snapshot
+     *  holds references to already-parsed PICSProductInfo objects, which survive after cb is recycled. */
     private void onPICSProductInfo(PICSProductInfoCallback cb) {
         if (syncPhase == SYNC_PACKAGES) {
             pendingPackages.putAll(cb.getPackages());
             if (!cb.isResponsePending()) {
-                // All package info received — extract appIds and persist mappings
-                SteamDatabase db = SteamDatabase.getInstance();
-                List<Integer> appIds = new ArrayList<>();
-                for (PICSProductInfo pkg : pendingPackages.values()) {
-                    KeyValue appidsKv = pkg.getKeyValues().get("appids");
-                    List<KeyValue> children = appidsKv.getChildren();
-                    if (children != null) {
-                        for (KeyValue child : children) {
-                            try {
-                                String raw = child.getValue();
-                                if (raw == null || raw.isEmpty()) continue;
-                                int appId = Integer.parseInt(raw);
-                                if (!appIds.contains(appId)) appIds.add(appId);
-                                db.linkLicenseApp(pkg.getId(), appId);
-                            } catch (NumberFormatException ignored) {}
-                        }
-                    }
-                }
-                Log.i(TAG, "PICS packages resolved " + appIds.size() + " unique app IDs");
-                emit("LibraryProgress:1:" + appIds.size());
-                syncApps(appIds);
+                final List<PICSProductInfo> pkgs = new ArrayList<>(pendingPackages.values());
+                runOnLibraryWorker(() -> processPackages(pkgs));
             }
 
         } else if (syncPhase == SYNC_APPS) {
             pendingApps.putAll(cb.getApps());
             if (!cb.isResponsePending()) {
-                // All app info received — parse and store games
-                SteamDatabase db = SteamDatabase.getInstance();
-                int count = 0;
-                for (PICSProductInfo app : pendingApps.values()) {
+                final List<PICSProductInfo> apps = new ArrayList<>(pendingApps.values());
+                runOnLibraryWorker(() -> processApps(apps));
+            }
+        }
+    }
+
+    /** WORKER THREAD: resolve package PICS info into app IDs, persist license↔app mappings, then
+     *  kick the apps sync. Runs off the pump (see onPICSProductInfo). */
+    private void processPackages(List<PICSProductInfo> pkgs) {
+        // All package info received — extract appIds and persist mappings
+        SteamDatabase db = SteamDatabase.getInstance();
+        List<Integer> appIds = new ArrayList<>();
+        for (PICSProductInfo pkg : pkgs) {
+            KeyValue appidsKv = pkg.getKeyValues().get("appids");
+            List<KeyValue> children = appidsKv.getChildren();
+            if (children != null) {
+                for (KeyValue child : children) {
+                    try {
+                        String raw = child.getValue();
+                        if (raw == null || raw.isEmpty()) continue;
+                        int appId = Integer.parseInt(raw);
+                        if (!appIds.contains(appId)) appIds.add(appId);
+                        db.linkLicenseApp(pkg.getId(), appId);
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+        }
+        Log.i(TAG, "PICS packages resolved " + appIds.size() + " unique app IDs");
+        emit("LibraryProgress:1:" + appIds.size());
+        syncApps(appIds);
+    }
+
+    /** WORKER THREAD: parse app PICS info (name/icon/genres + depot-selection filter) and store games.
+     *  Runs off the pump (see onPICSProductInfo). */
+    private void processApps(List<PICSProductInfo> apps) {
+        // All app info received — parse and store games
+        SteamDatabase db = SteamDatabase.getInstance();
+        int count = 0;
+        for (PICSProductInfo app : apps) {
                     try {
                         KeyValue root = app.getKeyValues();
                         KeyValue common = root.get("common");
@@ -830,15 +887,13 @@ public final class SteamRepository {
                     } catch (Exception e) {
                         Log.w(TAG, "Skipping app " + app.getId() + ": " + e.getMessage());
                     }
-                }
-                syncPhase = SYNC_IDLE;
-                pendingPackages.clear();
-                pendingApps.clear();
-                recordSyncTime();
-                Log.i(TAG, "Library sync complete: " + count + " apps");
-                emit("LibrarySynced:" + count);
-            }
         }
+        syncPhase = SYNC_IDLE;
+        pendingPackages.clear();
+        pendingApps.clear();
+        recordSyncTime();
+        Log.i(TAG, "Library sync complete: " + count + " apps");
+        emit("LibrarySynced:" + count);
     }
 
     /** Handle depot decryption key callback. Stores key in memory for SteamDepotDownloader. */
@@ -864,12 +919,9 @@ public final class SteamRepository {
             Log.w(TAG, "syncLibrary() called but license list is empty");
             return;
         }
-        // picsGetProductInfo() does network I/O — must run on the pump background thread.
-        if (pumpHandler != null) {
-            pumpHandler.post(() -> syncPackages(copy));
-        } else {
-            new Thread(() -> syncPackages(copy), "SteamSync").start();
-        }
+        // picsGetProductInfo() does network I/O and must run off the main thread; route it to the
+        // library worker (never the pump — the ensuing PICS parse + DB work would block callbacks).
+        runOnLibraryWorker(() -> syncPackages(copy));
     }
 
     // -------------------------------------------------------------------------

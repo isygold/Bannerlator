@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-07-03 — 🐛→🔧 Steam download: login fix device-PROVEN; manifest AsyncJob times out at 0% → move PICS sync off the pump (hardening #2)
+
+> **Device result of `c72d943` (login fix):** HL2 (appId 220) from build `28685150972` reached `connected=true, **loggedIn=true**` with **no `LogonSessionReplaced` teardown** — the single-flight logon + no-self-kill fix is device-proven, that failure class is closed.
+> **But download still dies at 0%.** `steam_debug.txt`: `Blocking on getCompletion().get()` (18:23:15) → **~10.4s later `java.util.concurrent.CancellationException` at `AsyncJobManager.cancelTimedOutJobs(:111)`** — the depot **manifest-request AsyncJob timed out**; its reply was never dispatched in time. UI stuck on "Downloading… 0%".
+> **Root cause (confirmed in source, not inferred):** `runWaitCallbacks` is posted to the single `SteamPump` HandlerThread (`SteamRepository.java:418`) — *every* callback, incl. the manifest AsyncJob reply, is delivered there. `onLicenseList` (:571) and `onPICSProductInfo` (:650) ran their heavy work **synchronously on the pump**: the SYNC_APPS branch loops ~229 apps parsing each PICS KeyValue tree + depot-selection filter + Room writes → blocks `runWaitCallbacks` for seconds → manifest reply undelivered → Timer-thread 10s watchdog cancels the job → CancellationException. This is exactly **hardening plan item #2**. BC SHA-1 fix already present (:77), so downloads would proceed if the reply just landed.
+> **Fix (this session, `SteamRepository.java`, +106/−54):** added a dedicated single-thread `libraryWorker` executor (created in `startPump`, `shutdownNow` in `stopPump`, `runOnLibraryWorker` fallback for pre-start/teardown). Pump handlers now only marshal the callback payload (copy `getLicenseList()` / snapshot `pendingPackages`/`pendingApps` values into an `ArrayList`) and hand the DB + parse work to the worker via new `processPackages`/`processApps` methods. `syncLibrary()` re-sync also routed off the pump. `syncPhase` (volatile) is written on the worker before each `picsGetProductInfo` send and read on the pump only after a reply → happens-before holds, no phase race. JavaSteam send path verified off-pump-safe (`TcpConnection.send` guarded by `netLock`, matches GameNative). Compile-checked (javac -proc:none, zero structural errors); **NOT device-tested yet**.
+> **⏳ Next (device):** install the new build, re-run HL2 (appId 220) download — expect the manifest AsyncJob no longer times out at 0% and bytes start flowing. Then remaining hardening items #1/#3/#4/#5. See memory [[project_bannerlator_steam_session_hardening]], [[project_bannerlator_steam_download_login_guard]].
+
+---
+
 ## 2026-07-03 — 🐛→✅ Goldberg: back up + restore game-shipped steamclient dlls (found while prepping Experimental/ColdClient device test)
 
 > **How it surfaced:** before touching the UI to test the Experimental/ColdClient tiers, inspected Portal 2 on device via the root bridge (`com.winlator.banner`, `imagefs/steam_games/Portal 2`). md5 **confirmed Regular is correctly applied** (in-place api dlls = the bundled Goldberg regular builds; `.bak` files = distinct pristine originals). But Portal 2 also ships its **own** `bin/steamclient.dll` (md5 `4505032f`, not Goldberg's `2983e67d`).
