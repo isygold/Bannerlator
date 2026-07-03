@@ -3202,4 +3202,5 @@ Resume recipe: launch GL container xuser-3 -> AIO DX11 cube -> enable perf HUD -
 
 **Deferred:** #3 (move library sync off the pump thread) and #5 (wire the "Connecting to Steam…" notification to real state — currently dead `updateNotification`). Separate follow-up.
 
-**Status:** implementing → commit (The412Banner) → push `feat/steam-goldberg-patcher` → CI APK build → device-test HL2 download end-to-end. Key files: `SteamRepository.java`, `SteamDepotDownloader.kt`.
+**Status:** ✅ implemented + committed `c72d943` (The412Banner) + pushed `feat/steam-goldberg-patcher`. CI is `workflow_dispatch` (not on-push) → manually dispatched **CI Build (artifacts only) run `28685150972`** on sha c72d943 (building, ~16min). Key files: `SteamRepository.java` (single-flight guard `loggingOn`/`logonStartedAt`/`lastSelfLogonAt`, self-replace branch in onLoggedOn/onLoggedOff/onDisconnected, `getLastSessionStatus()`), `SteamDepotDownloader.kt` (dlog `lastSessionStatus` on ensureLoggedIn-fail).
+**NEXT (device-test once green):** install APK, download HL2 (appId 220) end-to-end. Pass = NO `Logged off: LogonSessionReplaced` teardown in logcat + download proceeds past manifest. If it still fails, `steam_debug.txt` now prints `Session status at failure: <reason>`. Deferred #3 (library sync off pump thread) + #5 (FGS notification) remain.
