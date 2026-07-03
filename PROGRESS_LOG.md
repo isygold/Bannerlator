@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-07-03 — 🅿️ Steam login: QR path greyed out; Goldberg becomes the focus (Portal 2 patch-apply device-proven)
+
+> **Decision (user):** username/password login is "working solid and the best" → **grey out the QR-code login for now** so we can push on Goldberg. The QR ~1h logoff-recovery work (Fix A/B, `4c6b202`+`6669771`) stays **in the code, untested/parked — not reverted**; we only disabled the UI entry point.
+> **Change (`12166b3`, branch `feat/steam-goldberg-patcher`):** `SteamLoginActivity.kt` ~`:354` — the "Sign in with QR Code" `TextButton` is now `enabled = false`, relabeled **"Sign in with QR Code (temporarily unavailable)"**. UI-only, one-line re-enable. Username/password fields untouched (the primary path). ludashi Kotlin+Java compile GREEN.
+> **CI:** artifacts-only build **`28681946617`** (`build-artifacts.yml`, ref `feat/steam-goldberg-patcher` tip `12166b3`, label `steam-logoff-fix`) — 3 flavors, no tag/release. User grabs the APK himself (no device push requested).
+> **🎮 Goldberg milestone (device):** user **downloaded + installed Portal 2 (single-player Steam title) via the store, then applied the Goldberg patch successfully.** First real single-player validation of the **patch-apply** step — the exact gate Brawlhalla (online-only, Error 3003) could never clear. ⏳ still to confirm explicitly: patched Portal 2 **boots into gameplay** past the Steam check (apply succeeded; in-game boot not yet reported).
+> **Net state:** QR >1h survival test **deprioritized/parked** (not abandoned; playbook preserved). Focus = Goldberg tier ladder + launch-proof. Still on `feat/steam-goldberg-patcher`, **NOT merged**.
+
+---
+
 ## 2026-07-02 — 🐛→✅ Steam: QR-login downloads die ~1h in — fixed (recover from involuntary CM logoff)
 
 > **Symptom (user):** on the QR-login device, Steam depot downloads stop working ~1 hour after login; on a *different* device using **username/password** they run all day, session after session. (This device has only ever used QR — so the correlation is cross-device, not a clean same-device A/B.)
