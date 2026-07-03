@@ -3204,3 +3204,18 @@ Resume recipe: launch GL container xuser-3 -> AIO DX11 cube -> enable perf HUD -
 
 **Status:** ✅ implemented + committed `c72d943` (The412Banner) + pushed `feat/steam-goldberg-patcher`. CI is `workflow_dispatch` (not on-push) → manually dispatched **CI Build (artifacts only) run `28685150972`** on sha c72d943 (building, ~16min). Key files: `SteamRepository.java` (single-flight guard `loggingOn`/`logonStartedAt`/`lastSelfLogonAt`, self-replace branch in onLoggedOn/onLoggedOff/onDisconnected, `getLastSessionStatus()`), `SteamDepotDownloader.kt` (dlog `lastSessionStatus` on ensureLoggedIn-fail).
 **NEXT (device-test once green):** install APK, download HL2 (appId 220) end-to-end. Pass = NO `Logged off: LogonSessionReplaced` teardown in logcat + download proceeds past manifest. If it still fails, `steam_debug.txt` now prints `Session status at failure: <reason>`. Deferred #3 (library sync off pump thread) + #5 (FGS notification) remain.
+
+
+## 🛡️ STEAM SESSION HARDENING PLAN (2026-07-03) — adopt 5 GameNative/Pluvia patterns
+**Why:** ~7 distinct root causes for "downloads fail after login" in ~2wk = architectural, not one bug. Our rebuilt `SteamRepository` models session state as hand-flipped volatile booleans + runs heavy work on the callback pump → every new path is a new race. Today's fix (`c72d943`) plugs ONE hole; it does NOT give us the properties that make GameNative solid.
+
+**Basis:** mapped GameNative/Pluvia `SteamService.kt` (~4481 lines, SAME JavaSteam lib) at `/data/data/com.termux/files/home/GameNative/…/service/SteamService.kt` vs our `SteamRepository.java`. Their robustness = derived login state + non-blocking pump + one bounded reconnect funnel + keep-alive/watchdog + dead-token clearing. We lost/never-had 4 of 5. We ARE ahead on one axis (download `ensureLoggedIn` gate — they have none; keep it). This is NOT the canceled full Pluvia port — it's grafting 5 patterns onto the existing stack.
+
+**Plan (priority order):**
+1. **Derive `isLoggedIn` from `steamClient` SteamID validity — delete the `loggedIn` volatile boolean.** *Highest ROI, small.* Ref GameNative SteamService.kt:425. Kills the "connected=true/loggedIn=false stuck forever" class outright.
+2. **Move library/PICS sync OFF the pump thread** (was "deferred #3", now known core). onPICSProductInfo/onLicenseList do the 229-app filter synchronously on the pump HandlerThread → blocks runWaitCallbacks ~5s → delays callbacks/heartbeats (the timing amplifier behind today's clobber). GameNative re-dispatches all heavy handler work to `scope.launch` children (SteamService.kt:4050, 3737+).
+3. **One reconnect funnel** — collapse our 3 overlapping recovery paths (onDisconnected + onLoggedOff + ensureLoggedIn, separate retry budgets) into a single cancel-and-replace job with exponential backoff (GameNative SteamService.kt:3654,3683; MAX 20, cap 60s, retryAttempt reset on connect).
+4. **Re-add dead-token clearing** — lost from abandoned `e383393`. Clear creds on InvalidPassword/Expired/Revoked/AccessDenied → stop hammering a dead token (GameNative:2876,3792) + emit SessionInvalid → route to sign-in.
+5. **Keep-alive ping + connect watchdog** — cheap, prevents idle CM drops (GameNative pingInterval 15s :3456 + post-connect BAD-CM watchdog :3563). We're TCP-only so add the watchdog; investigate a TCP heartbeat.
+
+**Guardrails:** Do 1+2 first (biggest ROI). Do NOT start editing until today's `c72d943` (CI run `28685150972`) is DEVICE-CONFIRMED on HL2 — don't stack unproven changes. One item per commit, device-verify each. Branch `feat/steam-goldberg-patcher`. Also-deferred #5 = wire the dead `updateNotification` (cosmetic).
