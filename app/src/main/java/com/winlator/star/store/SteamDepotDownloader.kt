@@ -181,6 +181,10 @@ object SteamDepotDownloader {
             val ok = repo.ensureLoggedIn(15_000L)
             dlog("ensureLoggedIn → $ok (loggedIn=${repo.isLoggedIn})")
             if (!ok) {
+                // Surface WHY into the debug file the UI points the user at — otherwise the only
+                // record of the logon/logoff EResult (e.g. LogonSessionReplaced, InvalidPassword)
+                // is in logcat, which the user can't reach.
+                dlog("Session status at failure: ${repo.lastSessionStatus}")
                 emitFailed(appId, "Steam session not ready — sign in again or retry in a moment")
                 return
             }

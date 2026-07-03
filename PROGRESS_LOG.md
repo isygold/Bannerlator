@@ -3177,3 +3177,29 @@ Resume state:
 - Termux/Claude session brought back to foreground.
 
 Resume recipe: launch GL container xuser-3 -> AIO DX11 cube -> enable perf HUD -> State A Native OFF (dwell ~30s, 3+ samples) -> State B Native ON (toggle in drawer, dwell ~30s, same samples). Sample {`/sys/class/kgsl/kgsl-3d0/gpu_busy_percentage`, `gpuclk`, `/sys/class/power_supply/battery/current_now` uA, thermal_zone temp, displayed FPS}. Confirm overlay via dumpsys SDE pipe table (ON: game AHB DEVICE/DEVICE on SDE pipe + GPU_TARGET empty; OFF: base SurfaceView DEVICE/DEVICE, no game AHB). VERDICT: ON lower GPU% AND power at equal FPS -> portrait worth productionizing; flat/worse -> drop portrait, headline the free landscape-native win.
+
+
+## 🔴 STEAM DOWNLOAD FIX (2026-07-03) — LogonSessionReplaced regression on rebuilt stack (#1+#2+#4). Branch `feat/steam-goldberg-patcher`.
+**Symptom:** After a successful sign-in, Steam game downloads fail on the detail page: "Download failed: Steam session not ready — sign in again or retry in a moment" (device: HL2 appId 220, davidroethlein@comcast.net). Foreground-service notification stuck at "Connecting to Steam…".
+
+**Evidence:**
+- `steam_debug.txt`: `SteamClient: connected=true, loggedIn=false` → `Not logged in — waiting for session…` → `ensureLoggedIn → false` after 15s. File does NOT record WHY.
+- logcat (SteamRepo) is where the reason lives:
+  ```
+  17:47:11.851 Connected to Steam CM / Auto-login as davidroethlein@comcast.net
+  17:47:12.857 Logged in as davidroethlein@comcast.net        ← login SUCCEEDS
+  17:47:12–17:47:17 Library sync (229 apps, depot filter) — ALL on pump thread 23943 (blocks callbacks ~5s)
+  17:47:17.191 Library sync complete: 229 apps
+  17:47:17.191 Logged off: LogonSessionReplaced               ← queued LoggedOff dispatched the instant pump freed
+  ```
+
+**Root cause (self-inflicted double-login):** The Steam stack was REBUILT and lost the old `feat/steam-detail-revamp` fixes (single-flight logon `ceeeeb5`, dead-token `e383393` — never merged into the goldberg line). So: TWO logons fire for the same account — foreground-service `onConnected` auto-login (SteamRepository.java:436) + interactive `SteamLoginActivity.kt:197` loginWithToken — neither guarded. The 2nd replaces the 1st; Steam sends `LoggedOff: LogonSessionReplaced` for the older session; `onLoggedOff` (:506) treats that as TERMINAL (emits LoggedOut, no recovery) and clobbers the good LoggedOn's `loggedIn=true` → stuck `connected=true, loggedIn=false` → every download "session not ready". The 5s library sync on the single pump thread delays the LoggedOff so it lands AFTER the good LoggedOn, guaranteeing the clobber.
+
+**Fixes applied (#1+#2+#4):**
+1. **Single-flight logon guard** — `loginWithToken` skips if already `loggedIn` or a logon is in flight (`loggingOn` AtomicBoolean + `logonStartedAt`; supersede only a stalled logon >LOGON_STALL_MS=12s so we can't lock out forever). Released in onLoggedOn/onLoggedOff/onDisconnected. Kills the double logon at the source.
+2. **No self-kill on LogonSessionReplaced** — `onLoggedOff` treats a `LogonSessionReplaced` arriving within SELF_REPLACE_WINDOW_MS=15s of our own logon (`lastSelfLogonAt`) as self-inflicted → ignores it (does NOT clear loggedIn or emit LoggedOut; the newer session is live). Genuine/old replacement (real "logged in elsewhere") still surfaces LoggedOut as before.
+3. **Log the reason into steam_debug.txt (#4)** — repo records `lastSessionStatus` (LoggedIn / LoginFailed:<r> / LoggedOff:<r>); SteamDepotDownloader dlogs it into steam_debug.txt when ensureLoggedIn fails, so the file the UI points to actually contains the cause next time.
+
+**Deferred:** #3 (move library sync off the pump thread) and #5 (wire the "Connecting to Steam…" notification to real state — currently dead `updateNotification`). Separate follow-up.
+
+**Status:** implementing → commit (The412Banner) → push `feat/steam-goldberg-patcher` → CI APK build → device-test HL2 download end-to-end. Key files: `SteamRepository.java`, `SteamDepotDownloader.kt`.

@@ -450,6 +450,24 @@ public final class SteamRepository {
     private volatile int logoffRecoveryAttempts = 0;
     private static final int MAX_LOGOFF_RECOVERY = 3;
 
+    // --- Single-flight logon guard (fixes the self-inflicted LogonSessionReplaced) ---------------
+    // Several call sites fire a token logon: onConnected auto-login, ensureLoggedIn, and the
+    // interactive login activities. Two concurrent logOns on the SAME account make Steam reply
+    // LogonSessionReplaced and kick us mid-session, leaving connected=true / loggedIn=false so
+    // every depot download fails "session not ready". Coalesce them onto one in-flight logon.
+    /** True while a logOn has been posted but no LoggedOn/LoggedOff/Disconnected has resolved it. */
+    private final AtomicBoolean loggingOn = new AtomicBoolean(false);
+    /** Wall-clock ms of the last logOn WE posted (guard start). */
+    private volatile long logonStartedAt = 0L;
+    /** Wall-clock ms the logOn was actually sent on the pump thread (for self-replace detection). */
+    private volatile long lastSelfLogonAt = 0L;
+    /** A logon with no callback older than this is treated as stalled and may be superseded. */
+    private static final long LOGON_STALL_MS = 12_000L;
+    /** A LogonSessionReplaced within this window of our own logon is our own newer session, not an eviction. */
+    private static final long SELF_REPLACE_WINDOW_MS = 15_000L;
+    /** Last session transition, surfaced into steam_debug.txt so the file the UI points to shows the cause. */
+    private volatile String lastSessionStatus = "none";
+
     private void onDisconnected(DisconnectedCallback cb) {
         boolean forced = forceReconnect;
         forceReconnect = false;
@@ -458,6 +476,7 @@ public final class SteamRepository {
         connected = false;
         loggedIn  = false;
         connecting.set(false);
+        loggingOn.set(false);   // any in-flight logon died with the socket
         // Reconnect on an involuntary socket drop, OR when we deliberately forced a reconnect to
         // recover from a clean CM logoff (onLoggedOff) — the latter arrives as "user-initiated".
         if ((forced || !cb.isUserInitiated()) && pumping.get() && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
@@ -479,8 +498,10 @@ public final class SteamRepository {
     }
 
     private void onLoggedOn(LoggedOnCallback cb) {
+        loggingOn.set(false);   // this logon has resolved (success or failure) — release the guard
         if (cb.getResult() != EResult.OK) {
             Log.w(TAG, "Login failed: " + cb.getResult());
+            lastSessionStatus = "LoginFailed:" + cb.getResult().name();
             emit("LoginFailed:" + cb.getResult().name());
             return;
         }
@@ -492,6 +513,7 @@ public final class SteamRepository {
 
         loggedIn = true;
         logoffRecoveryAttempts = 0;   // fresh session established — reset involuntary-logoff recovery budget
+        lastSessionStatus = "LoggedIn";
         emit("LoggedIn:" + sid64);
         Log.i(TAG, "Logged in as " + pGet("username", ""));
     }
@@ -499,10 +521,27 @@ public final class SteamRepository {
     private void onLoggedOff(LoggedOffCallback cb) {
         EResult r = cb.getResult();
         Log.i(TAG, "Logged off: " + r);
+        lastSessionStatus = "LoggedOff:" + r.name();
+
+        // SELF-REPLACEMENT: a LogonSessionReplaced landing right after OUR OWN logon is the eviction
+        // of the session WE just replaced — our newer session is the live one. The single-flight
+        // guard should prevent a second logon, but a reconnect race (onConnected relogin overlapping
+        // ensureLoggedIn) can still slip one through. Treat it as a no-op: do NOT clear loggedIn or
+        // emit LoggedOut, or we clobber the good LoggedOn and get stuck connected-but-not-logged-in
+        // (the exact bug that made every download fail "session not ready").
+        if (r == EResult.LogonSessionReplaced && !loggingOut
+                && (System.currentTimeMillis() - lastSelfLogonAt) < SELF_REPLACE_WINDOW_MS
+                && isLoggedInPrefs()) {
+            Log.i(TAG, "LogonSessionReplaced within self-logon window -> ignoring (our newer session is live)");
+            loggingOn.set(false);
+            return;   // leave loggedIn as-is; the newer session's LoggedOn owns it
+        }
+
         loggedIn = false;
+        loggingOn.set(false);
 
         // User-initiated sign-out, or a logoff meaning the session is intentionally gone
-        // (logged in elsewhere / session replaced) -> surface it, do NOT try to recover/loop.
+        // (logged in elsewhere / session replaced by a DIFFERENT client) -> surface it, do NOT recover/loop.
         if (loggingOut || r == EResult.LoggedInElsewhere || r == EResult.LogonSessionReplaced) {
             emit("LoggedOut");
             return;
@@ -840,12 +879,27 @@ public final class SteamRepository {
     /** Auto-login using a stored refresh token. Must not be called on the main thread. */
     public void loginWithToken(String username, String refreshToken) {
         if (steamUser == null) return;
+        // Single-flight: a redundant logon while already logged in — or a second concurrent logon
+        // — is exactly what triggers LogonSessionReplaced and evicts us. Skip both. Only supersede
+        // a STALLED logon (posted but no callback within LOGON_STALL_MS) so we can never lock out.
+        if (loggedIn) {
+            Log.i(TAG, "loginWithToken skipped — already logged in");
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (loggingOn.get() && (now - logonStartedAt) < LOGON_STALL_MS) {
+            Log.i(TAG, "loginWithToken skipped — logon already in flight");
+            return;
+        }
+        loggingOn.set(true);
+        logonStartedAt = now;
         loggingOut = false;   // a fresh logon means we are no longer in a sign-out
         Runnable work = () -> {
             LogOnDetails details = new LogOnDetails();
             details.setUsername(username);
             details.setAccessToken(refreshToken);  // refreshToken goes in accessToken field
             details.setShouldRememberPassword(true);
+            lastSelfLogonAt = System.currentTimeMillis();
             steamUser.logOn(details);
         };
         // steamUser.logOn() does network I/O — must run on the pump background thread.
@@ -925,6 +979,9 @@ public final class SteamRepository {
     // -------------------------------------------------------------------------
     // Accessors for downstream phases
     // -------------------------------------------------------------------------
+
+    /** Last session transition (LoggedIn / LoginFailed:&lt;r&gt; / LoggedOff:&lt;r&gt;) for debug logging. */
+    public String getLastSessionStatus() { return lastSessionStatus; }
 
     public SteamClient   getSteamClient() { return steamClient; }
     public SteamApps     getSteamApps()   { return steamApps; }
