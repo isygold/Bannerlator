@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-07-03 — 🐛→✅ Goldberg: back up + restore game-shipped steamclient dlls (found while prepping Experimental/ColdClient device test)
+
+> **How it surfaced:** before touching the UI to test the Experimental/ColdClient tiers, inspected Portal 2 on device via the root bridge (`com.winlator.banner`, `imagefs/steam_games/Portal 2`). md5 **confirmed Regular is correctly applied** (in-place api dlls = the bundled Goldberg regular builds; `.bak` files = distinct pristine originals). But Portal 2 also ships its **own** `bin/steamclient.dll` (md5 `4505032f`, not Goldberg's `2983e67d`).
+> **Bug:** `GoldbergPatcher.removeAddedFiles` deleted `steamclient.dll`/`steamclient64.dll` **purely by name** (they're in `ADDED_FILE_NAMES`), and `applyExperimental`/`applyColdClient` **overwrote** them with no backup — unlike api dlls, which shared-prep backs up. So any game that ships its own steamclient loses it: Experimental overwrites it unrecoverably, and **Off deletes it entirely instead of restoring pristine**. Running the Off test as-is would have corrupted the Portal 2 install we just proved works.
+> **Fix (`6600914`):** new `backupIfOriginal(file)` mirrors the steam_api `.bak` rule — copies the first (pristine) copy to `<name>.bak` iff the file exists and no backup is there yet — and is called before every steamclient/loader overwrite in Experimental + ColdClient. `removeAddedFiles` now **restores from `.bak` if present** (keeping the `.bak` as the permanent source) and only deletes files with no original (loader exes, `GameOverlayRenderer`, `ColdClientLoader.ini`, our `steam_appid.txt`). Scope note: `bin/win64/` has no original `steamclient64.dll`, so Experimental genuinely *adds* it there (delete-on-restore stays correct); only the x86 `bin/steamclient.dll` collided. A `steam_appid.txt`-backup edit was reverted (games don't ship it → keep it always-added→deleted). Intermediate tier-switch stacking is transient and cleaned at Off.
+> **CI:** artifacts-only build **`28684046577`** (`build-artifacts.yml`, ref `feat/steam-goldberg-patcher` tip `6600914`, label steam-logoff-fix).
+> **⏳ Next (device, once the build installs):** run Regular→Experimental→ColdClient→Off on Portal 2, verifying each step by md5 against the captured fingerprints (esp. that Off restores `bin/steamclient.dll` to `4505032f` from its new `.bak`). Fingerprints + step-by-step in memory [[project-bannerlator-goldberg-autopatch]].
+
+---
+
 ## 2026-07-03 — 🅿️ Steam login: QR path greyed out; Goldberg becomes the focus (Portal 2 patch-apply device-proven)
 
 > **Decision (user):** username/password login is "working solid and the best" → **grey out the QR-code login for now** so we can push on Goldberg. The QR ~1h logoff-recovery work (Fix A/B, `4c6b202`+`6669771`) stays **in the code, untested/parked — not reverted**; we only disabled the UI entry point.
