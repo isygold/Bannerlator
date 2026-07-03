@@ -199,7 +199,14 @@ object GoldbergPatcher {
             val client = File(goldberg, "experimental/${archDir(t.arch)}/${t.arch.steamclientDll}")
             if (!api.isFile) return false to "Missing bundled ${api.name} (experimental/${archDir(t.arch)})."
             FileUtils.copy(api, t.dll)
-            if (client.isFile) FileUtils.copy(client, File(t.dir, t.arch.steamclientDll))
+            if (client.isFile) {
+                // Back up a game-shipped steamclient before overwriting it, so
+                // restore/tier-switch can put the original back (some games — e.g.
+                // Portal 2 — ship their own steamclient.dll).
+                val dest = File(t.dir, t.arch.steamclientDll)
+                backupIfOriginal(dest)
+                FileUtils.copy(client, dest)
+            }
         }
         return true to "Experimental Goldberg applied to \"$gameName\". Launch it — if it still won't start, try Cold Client Loader."
     }
@@ -226,7 +233,11 @@ object GoldbergPatcher {
         for (f in files) {
             if (!f.isFile) continue
             if (f.name.equals("ColdClientLoader.ini", ignoreCase = true)) continue
-            FileUtils.copy(f, File(exeDir, f.name))
+            // Back up any game-shipped file we're about to clobber (loader set
+            // includes steamclient dlls that can collide with the game's own).
+            val dest = File(exeDir, f.name)
+            backupIfOriginal(dest)
+            FileUtils.copy(f, dest)
         }
 
         // Generate ColdClientLoader.ini from the bundled template so we match its
@@ -333,7 +344,9 @@ object GoldbergPatcher {
                 File(settingsDir, "steam_interfaces.txt").writeText(interfaces.joinToString("\n") + "\n")
             }
 
-            // 3. AppId, both in steam_settings and beside the dll.
+            // 3. AppId, both in steam_settings and beside the dll. (steam_appid.txt
+            //    is a Goldberg-convention file games don't ship, so it's treated as
+            //    purely added — no backup, removed on restore.)
             File(settingsDir, "steam_appid.txt").writeText(appId.toString())
             File(t.dir, "steam_appid.txt").writeText(appId.toString())
         }
@@ -406,9 +419,30 @@ object GoldbergPatcher {
         for (dir in dirs) {
             File(dir, "steam_settings").takeIf { it.isDirectory }?.deleteRecursively()
             for (name in ADDED_FILE_NAMES) {
-                File(dir, name).takeIf { it.isFile }?.delete()
+                val f = File(dir, name)
+                val bak = File(dir, "$name.bak")
+                when {
+                    // The game shipped this file — restore its original and keep
+                    // the .bak as the permanent pristine source (same as api dlls).
+                    bak.isFile -> FileUtils.copy(bak, f)
+                    // Purely Goldberg-added (loader exes, overlay, ini, our appid) —
+                    // no original to preserve, so remove it.
+                    f.isFile -> f.delete()
+                }
             }
         }
+    }
+
+    /**
+     * Backs a file up to `<name>.bak` before Goldberg overwrites it, but only if
+     * the file exists and no backup is there yet — so the FIRST (pristine) copy is
+     * preserved as the permanent source of truth, exactly like the steam_api .bak
+     * in [sharedPrep]. Lets [removeAddedFiles] restore a game's own steamclient /
+     * steam_appid instead of deleting it.
+     */
+    private fun backupIfOriginal(file: File) {
+        val bak = File(file.parentFile, file.name + ".bak")
+        if (file.isFile && !bak.exists()) FileUtils.copy(file, bak)
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
