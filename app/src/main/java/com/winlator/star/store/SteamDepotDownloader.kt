@@ -504,10 +504,11 @@ object SteamDepotDownloader {
                     val implied = (installDone.toDouble() / depotPercentComplete).toLong()
                     if (implied > installTotalRunning.get()) installTotalRunning.set(implied)
                 }
-                val iTotal = installTotalRunning.get()
+                var iTotal = installTotalRunning.get()
                 var dTotal = downloadTotalRunning.get()
-                // Never let the download bar exceed 100% — grow the denominator if the
-                // in-memory estimate was low (e.g. cache miss on resume).
+                // Never let either bar exceed 100% — grow the denominator if the size
+                // estimate was low (PICS can under-report real install size; cache miss on resume).
+                if (installDone  > iTotal) { installTotalRunning.set(installDone);  iTotal = installDone }
                 if (downloadDone > dTotal) { downloadTotalRunning.set(downloadDone); dTotal = downloadDone }
 
                 // Overall % is the aggregate install fraction (what's actually on disk),
