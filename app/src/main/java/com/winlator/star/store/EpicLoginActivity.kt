@@ -89,7 +89,7 @@ class EpicLoginActivity : ComponentActivity() {
                 creds.expiresAt = tokenResult.expiresAt
                 EpicCredentialStore.save(this@EpicLoginActivity, creds)
 
-                Log.d(TAG, "Epic login saved OK for: ${tokenResult.displayName}")
+                Log.d(TAG, "Epic login saved OK")   // don't log displayName (PII)
                 withContext(Dispatchers.Main) { finish() }
             }
         }

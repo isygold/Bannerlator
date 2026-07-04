@@ -168,7 +168,7 @@ class GogLoginActivity : ComponentActivity() {
             ed.putInt("bh_gog_expires_in", 3600)
             ed.apply()
 
-            Log.d(TAG, "Login saved for: $username")
+            Log.d(TAG, "GOG login saved OK")   // don't log username (PII)
             withContext(Dispatchers.Main) { finish() }
         } catch (e: Exception) {
             Log.e(TAG, "Login post-processing failed", e)

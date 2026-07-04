@@ -87,7 +87,9 @@ public class EpicAuthClient {
             conn.disconnect();
 
             if (code < 200 || code >= 300) {
-                Log.e(TAG, "Epic token HTTP " + code + ": " + resp);
+                // Log only the status code, NOT the raw response body — it can carry error/
+                // correlation context we don't want in logcat.
+                Log.e(TAG, "Epic token HTTP " + code + " (error body suppressed)");
                 return null;
             }
 
