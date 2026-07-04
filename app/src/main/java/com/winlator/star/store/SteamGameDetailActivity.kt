@@ -1044,6 +1044,19 @@ private fun DownloadSpeedPickerDialog(
                         )
                     }
                 }
+
+                // Shown only when the box is ticked. The log is scrubbed of credentials, but is a
+                // diagnostic file — steer users away from posting it in public.
+                if (debugLog) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = "⚠️ Don't post this log publicly. Share it only directly with the " +
+                            "developer or someone you trust — unless you're debugging it yourself.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(start = 4.dp, end = 4.dp),
+                    )
+                }
             }
         },
         confirmButton = {
