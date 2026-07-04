@@ -1,6 +1,7 @@
 package com.winlator.star.store.download
 
 import android.content.Intent
+import com.winlator.star.store.DownloadManagerActivity
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.Badge
