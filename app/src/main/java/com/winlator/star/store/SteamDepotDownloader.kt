@@ -89,12 +89,15 @@ object SteamDepotDownloader {
     }
 
     private fun dlog(msg: String) {
-        Log.i(TAG, msg)
+        // Scrub username/email/token from EVERY line (incl. JavaSteam-bridge + stack traces, which
+        // all funnel through here) — these files are shared for support and must never carry secrets.
+        val safe = SteamLogRedactor.redact(msg)
+        Log.i(TAG, safe)
         debugLogFile ?: return
         try {
             BufferedWriter(FileWriter(debugLogFile!!, true)).use { w ->
                 val ts = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date())
-                w.write("[$ts] $msg\n")
+                w.write("[$ts] $safe\n")
             }
         } catch (_: Exception) {}
     }

@@ -298,6 +298,10 @@ public final class SteamRepository {
         if (prefs == null) {
             prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         }
+        // Register the persisted username + refresh token so the log redactor strips them from every
+        // diagnostic line, even before this session performs a login.
+        SteamLogRedactor.registerSecret(pGet("username", ""));
+        SteamLogRedactor.registerSecret(pGet("refresh_token", ""));
         SteamDatabase.getInstance(appContext);
         if (steamClient != null) return;
 
@@ -527,7 +531,9 @@ public final class SteamRepository {
 
     /** Persistent, append-only session log so a mid/between-download LogonSessionReplaced is never lost. */
     private File sessionLogFile = null;
-    private void slog(String msg) {
+    private void slog(String rawMsg) {
+        // Scrub username/email/token before this line touches any shared diagnostic file.
+        String msg = SteamLogRedactor.redact(rawMsg);
         Log.i(TAG, "STATUS " + msg);
         try {
             if (sessionLogFile == null && appContext != null) {
@@ -542,7 +548,7 @@ public final class SteamRepository {
             }
         } catch (Exception ignored) {}
         // Mirror into the active download debug log (no-op when no download log is open) so a
-        // download's steam_debug.txt carries the session-transition context inline.
+        // download's steam_debug.txt carries the session-transition context inline. (dlog re-redacts.)
         try { SteamDepotDownloader.INSTANCE.mirrorSessionLine("[STATUS] " + msg); }
         catch (Throwable ignored) {}
     }
@@ -1012,6 +1018,8 @@ public final class SteamRepository {
     /** Auto-login using a stored refresh token. Must not be called on the main thread. */
     public void loginWithToken(String username, String refreshToken) {
         if (steamUser == null) return;
+        SteamLogRedactor.registerSecret(username);
+        SteamLogRedactor.registerSecret(refreshToken);
         // Single-flight: a redundant logon while already logged in — or a second concurrent logon
         // — is exactly what triggers LogonSessionReplaced and evicts us. Skip both. Only supersede
         // a STALLED logon (posted but no callback within LOGON_STALL_MS) so we can never lock out.
@@ -1076,6 +1084,8 @@ public final class SteamRepository {
     public void saveSession(String username, String refreshToken) {
         loggingOut = false;
         logoffRecoveryAttempts = 0;
+        SteamLogRedactor.registerSecret(username);
+        SteamLogRedactor.registerSecret(refreshToken);
         pPut("username", username);
         pPut("refresh_token", refreshToken);
     }
@@ -1106,6 +1116,7 @@ public final class SteamRepository {
         }
         synchronized (licenses) { licenses.clear(); }
         cachedGameRows = null;
+        SteamLogRedactor.clearSecrets();   // creds are being removed; forget them from the redactor too
         setStatus(SteamStatus.SIGNED_OUT, "user logout");
         Log.i(TAG, "Logged out");
         emit("LoggedOut");
