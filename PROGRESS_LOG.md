@@ -2,6 +2,21 @@
 
 ---
 
+## 2026-07-04 — 🗺️ PLAN: gated merge of `feat/steam-goldberg-patcher` → `main` (user-approved)
+
+> **Goal:** consolidate the Steam + Goldberg work into `main` so it stops getting lost (the old `feat/steam-detail-revamp` Steam fixes were abandoned on a local branch and had to be re-derived when the store was rebuilt here). **But gate the merge on quality — do NOT merge the not-yet-completing download flow.**
+> **Reassurance:** this branch is pushed to GitHub (35 commits ahead of main; main 4 ahead of branch), so the work is safe — merging is not required to preserve it. We can gate freely.
+> **Gate sequence (in order, likely this session):**
+> 1. **Prove ONE full download E2E on device** — pill+redaction build `28690582627` (HEAD `6cc4d28`): sign out of Steam elsewhere + set app protected/don't-optimize → HL2 (220) → Install → **100% + install**. The real gate — the headline feature has never once completed end-to-end.
+> 2. **Land hardening** — `network_security_config.xml` cleartext for `steamcontent.com` CDN (kills the 500+ `alibaba:80` errors) + WAKE_LOCK + keep FGS alive during downloads (OEM process-kill half).
+> 3. **Demote diagnostics behind a debug flag** — `wireJavaSteamLog()` (per-chunk JavaSteam bridge → steam_debug.txt) is too heavy for release; gate behind BuildConfig.DEBUG. **KEEP** the `bumpPendingJobTimeouts` 60s AsyncJob watchdog (a real fix).
+> 4. **Reconcile main's 4 commits** into the branch (rebase/merge, resolve conflicts).
+> 5. **Then merge.**
+> **Also outstanding for a clean main:** Goldberg auto-patch only Regular tier device-proven (Experimental/ColdClient/Off-restore untested).
+> **Immediate next action:** wait for build `28690582627` green → deliver APK → run gate #1.
+
+---
+
 ## 2026-07-04 — 🔒 SECURITY: redact username/email/token from all shared diagnostic logs (commit `6cc4d28`, CI `28690582627`)
 
 > **Why:** `steam_debug.txt` + `steam_session.txt` are shared for support, so they must NEVER carry a Steam username, email, or auth/refresh token — including lines forwarded from the bundled JavaSteam library (uncontrolled). Empirical scan of the real 9081-line capture already showed 0 tokens / 0 email / 0 steamID64 (the "token" hits were PICS access-token COUNTS + HL2 asset filenames `refreshlogin.res`/`steampassworddialog.res`), but this makes it a permanent guarantee.
