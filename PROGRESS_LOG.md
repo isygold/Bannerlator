@@ -2,6 +2,18 @@
 
 ---
 
+## 2026-07-04 — ✅ OOM fix shipped + GameNative-style 4-tier download speed → standard APK delivered, awaiting device test
+
+> Two commits on `feat/steam-goldberg-patcher`:
+> - **`d02b0de` — the OOM fix (conservative):** capped `maxDecompress`/`maxFileWrites` at the call site + added `android:largeHeap="true"`. Root cause was NOT our engine — `app/libs/steam` is empty, we use the same maven `in.dragonbra:javasteam-depotdownloader:1.8.0` as GameNative; the bug was a **mislabeled ctor arg**: the 7th slot is `maxFileWrites` (not `progressUpdateInterval`, which is a hardcoded 500L inside the engine), and we passed **100** → ~100 concurrent write stages × multi-MB buffers → 256 MB heap blown ~15s in.
+> - **`ad9a4bd` — upgraded to GameNative's tiered model:** new `DownloadSpeedConfig(tier)` mirroring GameNative — tiers **8/16/24/32 = Slow/Medium/Fast/Blazing** (default **Fast=24**), `{download,decompress}` ratios `.6/.2, 1.2/.4, 1.5/.5, 2.4/.8`, `maxDownloads`/`maxDecompress` derived as **cores × ratio** (adapts to device). `maxFileWrites = maxDecompress` (GameNative omits the arg and takes the engine default; our positional ctor requires it, so we bind it to decompress to keep peak live buffers ≈ decompress+filewrites bounded). Picker expanded **3→4 tiers** (`SteamGameDetailActivity` `DownloadSpeedPickerDialog`), `threads`→`speedTier` plumbed through install/resume/runInstall. Session/login/wakelock untouched; no dependency swap.
+> **On an 8-core phone:** Slow 4/1/1, Medium 9/3/3, Fast 12/4/4, Blazing 19/6/6 — vs the old `maxFileWrites=100`. Now matches GameNative on downloads+decompress at every tier.
+> **CI:** run `28710061779` GREEN. **Standard APK delivered** to device Downloads: `bannerlator-steam-speed-tiers-ad9a4bd-standard.apk` (589 MB, sha `ae8c962690…`).
+> **NEXT = device-test HL2 (appId 220):** open normally → 4-tier picker (Fast default) → expect full ~8.4 GB, **no OOM** (~15s was the old death). Optionally stress **Blazing** watching peak RAM. **If clean → Batch 2/3 done → merge-to-main gate** (reconcile main's 4 commits + gate verbose diagnostics behind a debug flag). Then Download Manager.
+> **📌 Release note:** at the stable release merging this branch, hand out credits — upstream OSS (JavaSteam, GameNative, Pluvia, Goldberg/gbe_fork) **+ our own original work** (session hardening, wakelock, library-sync batching, OOM fix, adapted speed tiers, Goldberg auto-patch, store restyle) — in **GitHub release notes + repo credits**. (User instruction 2026-07-04.)
+
+---
+
 ## 2026-07-04 — ✅ OOM ROOT-CAUSED + FIX APPLIED (Option B) → committing for CI build
 
 > **The batch-3 "add a Semaphore to DepotDownloader.kt" plan (entry below) was WRONG and is retracted.** native-steam-engineer investigation (compared us to GameNative, decompiled the shipped jar, `javap`'d the ctor):
