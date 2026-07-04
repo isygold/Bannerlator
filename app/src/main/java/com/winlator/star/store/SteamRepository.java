@@ -1035,6 +1035,37 @@ public final class SteamRepository {
     /** Last session transition (LoggedIn / LoginFailed:&lt;r&gt; / LoggedOff:&lt;r&gt;) for debug logging. */
     public String getLastSessionStatus() { return lastSessionStatus; }
 
+    /**
+     * Raise the CM AsyncJob timeout for every currently-registered job still at the 10s default.
+     *
+     * DepotDownloader / Steam3Session create their CM jobs (picsGetAccessTokens, picsGetProductInfo,
+     * getManifestRequestCode, depot-key, CDN-auth) internally and await() them immediately — there is
+     * NO exposed per-job or Config timeout knob, and AsyncJob's 10 000ms default is hard-coded in its
+     * constructor (no static setter). The only reachable lever is the live job map:
+     *   SteamClient.getJobManager$javasteam() -> AsyncJobManager.getAsyncJobs() -> AsyncJob.setTimeout().
+     * getJobManager$javasteam() is Kotlin-`internal` (mangled name) so this MUST live in Java — our
+     * Kotlin cannot reference it without reflection.
+     *
+     * A download-scoped watchdog polls this so late-registered per-depot jobs are covered too. Bumping
+     * the window lets a reply that is merely LATE (transient TcpConnection netThread head-of-line block
+     * behind a large PICS parse) still land instead of being cancelled at 10s — while a genuine
+     * no-reply still fails, just at the longer bound. Diagnostic + mitigation; the LogListener shows
+     * exactly when (or whether) the reply arrives inside the extended window.
+     */
+    public void bumpPendingJobTimeouts(long timeoutMs) {
+        SteamClient sc = steamClient;
+        if (sc == null) return;
+        try {
+            int bumped = 0;
+            for (in.dragonbra.javasteam.types.AsyncJob job : sc.getJobManager$javasteam().getAsyncJobs().values()) {
+                if (job.getTimeout() < timeoutMs) { job.setTimeout(timeoutMs); bumped++; }
+            }
+            if (bumped > 0) Log.i(TAG, "bumpPendingJobTimeouts: raised " + bumped + " job(s) to " + timeoutMs + "ms");
+        } catch (Throwable t) {
+            Log.w(TAG, "bumpPendingJobTimeouts failed", t);
+        }
+    }
+
     public SteamClient   getSteamClient() { return steamClient; }
     public SteamApps     getSteamApps()   { return steamApps; }
     public SteamDatabase getDatabase() {

@@ -424,6 +424,21 @@ object SteamDepotDownloader {
 
         dlog("Items added, download auto-starts via getCompletion()")
 
+        // --- CM AsyncJob timeout watchdog (10s default -> 60s) --------------------------------
+        // The download's internal CM jobs (appinfo/manifest/depot-key/CDN-auth) time out at the
+        // hard-coded 10s AsyncJob default with no exposed knob; the only reachable lever is the live
+        // job map (see SteamRepository.bumpPendingJobTimeouts). Poll every 1s (matching AsyncJobManager's
+        // own timeout tick) so each newly-registered job is stretched before the 10s deadline. This lets
+        // a merely-LATE reply (transient netThread head-of-line block) still land; the JavaSteam
+        // LogListener then shows whether the reply arrives late (HOL) or never (real no-reply @60s).
+        val jobWatchdog = AtomicBoolean(true)
+        Thread({
+            while (jobWatchdog.get()) {
+                try { repo.bumpPendingJobTimeouts(60_000L) } catch (_: Throwable) {}
+                try { Thread.sleep(1_000L) } catch (_: InterruptedException) { break }
+            }
+        }, "SteamJobTimeoutWatchdog").apply { isDaemon = true; start() }
+
         dlog("Blocking on getCompletion().get()...")
         var completedNormally = false
         var retryAsResume = false
@@ -441,6 +456,7 @@ object SteamDepotDownloader {
             dlog("getCompletion() unexpected exception: ${e.message}")
             dlogError("getCompletion unexpected", e)
         } finally {
+            jobWatchdog.set(false)   // stop the AsyncJob-timeout watchdog for this download
             activeDownloads.remove(appId)
             dlog("Closing DepotDownloader")
             try { downloader.close() } catch (_: Exception) {}
