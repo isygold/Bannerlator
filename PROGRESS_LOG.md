@@ -2,6 +2,17 @@
 
 ---
 
+## 2026-07-04 — 🔧 MERGE PREP #1: per-download "Log debug session" toggle (gate verbose diagnostics)
+
+> First merge-prep task done (`89b90b8`). Verbose Steam logging (the ~33k-line `steam_debug.txt` firehose + JavaSteam `LogManager` bridge + engine `debug=true`) was always-on for every user; now gated behind **one switch**: `verbose = BuildConfig.DEBUG || debugLog`, where `debugLog` = a new **per-download checkbox** on the speed-picker dialog ("Log debug session", unchecked by default, not persisted).
+> - **Off (release default):** `steam_debug.txt` never created, JS bridge not wired, engine `debug=false` → no firehose, no per-line file I/O during download.
+> - **On (debug builds or ticked box):** full `steam_debug.txt` as before.
+> - **Never silent:** `dlogError` now WARN-logs regardless, `emitFailed` ERROR-logs, `steam_session.txt` always-on → a failed DL always leaves a trace. Redactor untouched (verified strips tokens/user/email — the only "password" hits in the blazing log were HL asset filenames like `SteamPasswordDialog.res`).
+> - `debugLog` threads through install/resume/buildControl/runInstall + retry, same path as `speedTier`. Files: `SteamDepotDownloader.kt`, `SteamGameDetailActivity.kt`. No gradle change (buildConfig already on). Session/login/wakelock unchanged.
+> **Known small gaps (by design):** resume (no picker) runs with logging off unless debug build; "log location" UI shows "(not initialized)" when off. CI build `28711420383` dispatched. **NEXT merge-prep tasks:** reconcile main's 4 commits + fix the cosmetic `Depot N complete: X KB` under-report → then MERGE to main.
+
+---
+
 ## 2026-07-04 — ✅✅ BATCH 3 DEVICE-PROVEN: fresh FULL Half-Life download on BLAZING, zero OOM → merge-to-main gate MET
 
 > Second device test — the heavy one. Uninstalled HL1 first (verified gone: no `steam_games/Half-Life` dir, `steam.db` appId 70 `is_installed=0`, `steam_downloads` empty), then fresh-downloaded Half-Life (appId 70) on **Blazing**. Evidence: `~/scratchpad/steam_debug_hl1_blazing.txt` (32,865 lines).
