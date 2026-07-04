@@ -2,6 +2,15 @@
 
 ---
 
+## 2026-07-04 — 🔒 SECURITY: redact username/email/token from all shared diagnostic logs (commit `6cc4d28`, CI `28690582627`)
+
+> **Why:** `steam_debug.txt` + `steam_session.txt` are shared for support, so they must NEVER carry a Steam username, email, or auth/refresh token — including lines forwarded from the bundled JavaSteam library (uncontrolled). Empirical scan of the real 9081-line capture already showed 0 tokens / 0 email / 0 steamID64 (the "token" hits were PICS access-token COUNTS + HL2 asset filenames `refreshlogin.res`/`steampassworddialog.res`), but this makes it a permanent guarantee.
+> **Impl:** new `SteamLogRedactor.redact()`/`registerSecret()`/`clearSecrets()`, applied at the ONLY two file-write choke-points — `SteamDepotDownloader.dlog` (covers the JavaSteam bridge + `dlogError` stacks, all funnel through it) and `SteamRepository.slog`. Layer 1 = exact-match on registered secrets (username + refresh_token, registered in `initialize`/`saveSession`/`loginWithToken`, cleared on `logout`) — the only reliable way to strip a non-pattern Steam username. Layer 2 = pattern backstop: email→`[email]`, JWT `eyJ...`→`[token]` (Steam tokens are JWTs), `[A-Za-z0-9_-]{88,}`→`[token]` (bound kept high so it can't clobber 40-hex chunk ids / ~19-digit manifest gids the log needs).
+> **Superseded** the pill-only build `28690390977` (cancelled). Branch `feat/steam-goldberg-patcher` HEAD `6cc4d28` = `940902d` (pill) + `6cc4d28` (redaction).
+> **NEXT:** CI `28690582627` green → deliver APK → clean live device test (sign out elsewhere + protect app) watching the pill + `steam_session.txt`. Then (a) net-sec-config cleartext for `steamcontent.com` CDN, (b) WAKE_LOCK + keep FGS alive during downloads.
+
+---
+
 ## 2026-07-04 — ✅ MANIFEST-HANG FIXED (device-proven); new dominant blocker = `LogonSessionReplaced` mid-download (account live elsewhere + OEM process-kill). Built in-app status pill + persistent session log.
 
 > **Diagnostic-build device result (build `28688995408`, HEAD `7e73811`, HL2 appId 220, 20:49–20:52):**
