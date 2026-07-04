@@ -2,6 +2,13 @@
 
 ---
 
+## 2026-07-04 — ✅ Batch 2 build GREEN + APK delivered (CI 28694533713, SHA 3e68a93)
+
+> CI `28694533713` SUCCESS on `3e68a93`. APK byte-verified (589,506,517 B) + scanned → `/sdcard/Download/Bannerlator-standard-batch2-28694533713.apk`. **Awaiting device test — the goal: open app NORMALLY (no Force Stop) → HL2 Install just works** (wakelock stops the kill/restart/self-collision). Verify `WAKELOCK: acquired/released` pairs, FGS "Downloading N%", stall auto-recovers via reconnectAndRelogin; + exe-picker scroll portrait/landscape + Launch HL2. If clean → both batches done → reconcile main's 4 commits + gate verbose diagnostics behind debug flag → MERGE to main.
+> **NEW FEATURE SCOPED (post-merge): cross-store Download Manager (Steam-first), Compose M3.** Template = BannerHub 3.8.0 (`BhDownloadService`+`BhDownloadsActivity`+⬇badge). User decisions: v1 = **Downloads + Library** (active DLs + persistent installed library w/ Launch/Uninstall + Clear); progress = **match Steam detail's two-bar byte progress**; other stores already Compose M3 → **only the DL manager needs M3** (leave existing store screens as-is). Build store-agnostic unified registry now, wire Steam only in v1. Cards must match existing games/container card layout+theme. HTML preview requested next. See [[project_bannerlator_download_manager]].
+
+---
+
 ## 2026-07-04 — ✅ Batch 2 committed, build started (CI 28694533713, SHA 3e68a93)
 
 > **Commit `3e68a93`** on `feat/steam-goldberg-patcher`. Combined build **`28694533713`** in_progress on HEAD `3e68a93` (~16 min) — carries Batch 2 + the exe-picker responsive-scroll fix (picker-only build 28694272626 cancelled/superseded). Diff reviewed — clean + compile-correct (`row.name` in scope, interop verified).
