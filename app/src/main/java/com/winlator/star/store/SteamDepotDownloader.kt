@@ -491,7 +491,13 @@ object SteamDepotDownloader {
             }
 
             override fun onDepotCompleted(depotId: Int, compressedBytes: Long, uncompressedBytes: Long) {
-                dlog("Depot $depotId complete: ${fmtSize(uncompressedBytes)} uncompressed / ${fmtSize(compressedBytes)} compressed")
+                // The engine's per-depot byte args here UNDER-report (observed: a ~575 MB depot logged
+                // as 47.5 MB). Prefer our own cumulative per-depot tracking from onChunkCompleted, which
+                // is accurate (it drives the progress bar + DB); fall back to the engine arg only if we
+                // tracked nothing for this depot.
+                val u = maxOf(uncompressedBytes, installByDepot[depotId] ?: 0L)
+                val c = maxOf(compressedBytes,   downloadByDepot[depotId] ?: 0L)
+                dlog("Depot $depotId complete: ${fmtSize(u)} uncompressed / ${fmtSize(c)} compressed")
             }
 
             override fun onDownloadCompleted(item: DownloadItem) {
@@ -499,6 +505,9 @@ object SteamDepotDownloader {
                 val iTotal = installTotalRunning.get()
                 val dTotal = downloadTotalRunning.get()
                 val finalInstall = maxOf(lastInstallDone.get(), installByDepot.values.sum())
+                // Accurate grand total from our own tracking (the per-depot engine args under-report).
+                dlog("Total downloaded: ${fmtSize(finalInstall)} uncompressed / " +
+                        "${fmtSize(downloadByDepot.values.sum())} compressed across ${installByDepot.size} depot(s)")
 
                 // FALSE-COMPLETE GUARD: after an interrupted/polluted install, DepotDownloader can
                 // declare "complete" having written almost nothing — leftover partial files + stale
