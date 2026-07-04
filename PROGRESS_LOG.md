@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-07-04 — 📥 Download Manager: full spec locked + HTML preview delivered (impl deferred until Steam work merges)
+
+> Cross-store in-app Download Manager, **Steam-first**, Jetpack **Compose M3 / WinlatorTheme**. Template = **BannerHub 3.8.0** (`BhDownloadService` + `BhDownloadsActivity` + ⬇ badge, source at `~/BannerHub/extension/`), ported to Compose. **Implementation begins ONLY AFTER the current Steam download work (Batch 1+2) is device-proven + merged** (user was explicit).
+> **User decisions:** v1 = **Downloads + Library** (active DLs + persistent installed library w/ Launch/Uninstall + Clear); progress = **match the Steam detail page's two-bar byte progress**; other stores are ALREADY Compose M3 (verified) so **only the DL manager needs M3 — leave existing store screens as-is**; ⬇ badge (count of active, hidden at 0) in every store library+detail header; tap card → correct-store detail page.
+> **Card idiom (must match games/container cards):** the `SteamGamesActivity` list card (L451, "Containers/Shortcuts list idiom") — `RoundedCornerShape(12) · surfaceVariant · 1dp outline · 60×80 rounded cover tile · bodyLarge title · Launch(filled)/Uninstall(outlined-error) buttons`. Cover = `library_600x900.jpg`. Two-bar progress from the detail page (solid install + lighter download + bytes).
+> **Build phasing:** (1) store-agnostic `DownloadRegistry` (observable) + normalized `DownloadEntry`; (2) route SteamDepotDownloader in; (3) Compose `DownloadsButton` + `DownloadManagerScreen`; (4) wire ⬇ + routing into Steam headers; (5) later Epic/GOG/Amazon report into the same registry. Each step = own CI build + device test + memory/log checkpoint.
+> **DELIVERED (design only):** faithful HTML mockup from the real theme tokens — artifact `claude.ai/code/artifact/42dcfc0e-284a-42e2-a77f-e71efaba2d95`; saved to device `/sdcard/Download/Bannerlator-DownloadManager-preview.html`; source `~/scratchpad/dl-manager-preview.html`. See memory `project_bannerlator_download_manager`.
+
+---
+
 ## 2026-07-04 — ✅ Batch 2 build GREEN + APK delivered (CI 28694533713, SHA 3e68a93)
 
 > CI `28694533713` SUCCESS on `3e68a93`. APK byte-verified (589,506,517 B) + scanned → `/sdcard/Download/Bannerlator-standard-batch2-28694533713.apk`. **Awaiting device test — the goal: open app NORMALLY (no Force Stop) → HL2 Install just works** (wakelock stops the kill/restart/self-collision). Verify `WAKELOCK: acquired/released` pairs, FGS "Downloading N%", stall auto-recovers via reconnectAndRelogin; + exe-picker scroll portrait/landscape + Launch HL2. If clean → both batches done → reconcile main's 4 commits + gate verbose diagnostics behind debug flag → MERGE to main.
