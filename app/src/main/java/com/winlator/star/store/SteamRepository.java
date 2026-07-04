@@ -497,7 +497,7 @@ public final class SteamRepository {
         setStatus(loggedIn ? SteamStatus.ONLINE : SteamStatus.CONNECTING, "CM connected");
 
         if (isLoggedInPrefs()) {
-            Log.i(TAG, "Auto-login as " + pGet("username", ""));
+            Log.i(TAG, SteamLogRedactor.redact("Auto-login as " + pGet("username", "")));
             loginWithToken(pGet("username", ""), pGet("refresh_token", ""));
         }
     }
@@ -675,7 +675,7 @@ public final class SteamRepository {
         lastSessionStatus = "LoggedIn";
         setStatus(SteamStatus.ONLINE, "logged in");
         emit("LoggedIn:" + sid64);
-        Log.i(TAG, "Logged in as " + pGet("username", ""));
+        Log.i(TAG, SteamLogRedactor.redact("Logged in as " + pGet("username", "")));
     }
 
     private void onLoggedOff(LoggedOffCallback cb) {

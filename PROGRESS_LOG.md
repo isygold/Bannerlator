@@ -9,7 +9,15 @@
 > - **On (debug builds or ticked box):** full `steam_debug.txt` as before.
 > - **Never silent:** `dlogError` now WARN-logs regardless, `emitFailed` ERROR-logs, `steam_session.txt` always-on → a failed DL always leaves a trace. Redactor untouched (verified strips tokens/user/email — the only "password" hits in the blazing log were HL asset filenames like `SteamPasswordDialog.res`).
 > - `debugLog` threads through install/resume/buildControl/runInstall + retry, same path as `speedTier`. Files: `SteamDepotDownloader.kt`, `SteamGameDetailActivity.kt`. No gradle change (buildConfig already on). Session/login/wakelock unchanged.
-> **Known small gaps (by design):** resume (no picker) runs with logging off unless debug build; "log location" UI shows "(not initialized)" when off. CI build `28711420383` dispatched. **NEXT merge-prep tasks:** reconcile main's 4 commits + fix the cosmetic `Depot N complete: X KB` under-report → then MERGE to main.
+> **Known small gaps (by design):** resume (no picker) runs with logging off unless debug build; "log location" UI shows "(not initialized)" when off.
+>
+> **🔒 SECURITY PASS (`c333008` + follow-up) — audit of the debug logs before shipping the toggle:**
+> - **Redactor gap FOUND + FIXED:** the pattern backstops missed Steam's REAL tokens — Steam refresh/access tokens base64 their `{ ` prefix to **`eyA`**, but the JWT regex anchored on canonical `eyJ` (no match), and the 88-char long-token regex is broken by the JWT's dots (segments 43/25/86, all <88). So token safety rode ENTIRELY on exact-match registration timing, no net for an unregistered/mid-download-minted token. Fix: anchor JWT pattern on `ey` (catches `eyA`+`eyJ`); add SteamID64 redaction `76561\d{12}` (prefix-anchored, won't clobber ~19-digit manifest/gid or 40-hex chunk). Verified in python: catches real token + steamID, leaves manifest/chunk ids intact.
+> - **Primary guarantee intact:** exact-match strip of username + refresh_token (`registerSecret` at connect 322-323 / login 1150-51,1265-66 / cleared on sign-out 1297); both `dlog` (steam_debug.txt) + `slog` (steam_session.txt) redact every line. Empirically both real logs scanned clean (0 email/user/steamID).
+> - **UI warning added:** ticking "Log debug session" now shows red text — share the log only directly with the developer or someone you trust, not publicly, unless self-debugging.
+> - **Logcat username leak fixed:** `SteamRepository` lines 500/678 (`Auto-login as`/`Logged in as <username>`) now wrapped in `SteamLogRedactor.redact()` (were raw → logcat only, not shared files, but closed anyway).
+> - **⚠️ OUT-OF-SCOPE FINDINGS (other storefronts, flagged for user, NOT yet fixed):** `EpicAuthClient.java:90` logs the raw token-endpoint HTTP **response body** on error (potential Epic token leak to logcat); `EpicLoginActivity.kt:92` logs Epic displayName; `GogLoginActivity.kt:171` logs GOG username. Separate subsystems from the Steam debug-log feature — decide whether to fix in a follow-up.
+> CI: superseded `28711420383` (cancelled) → hardened `28711598449` → +logcat fix rebuild. **NEXT merge-prep:** reconcile main's 4 commits + fix cosmetic `Depot N complete: X KB` under-report → MERGE to main.
 
 ---
 
