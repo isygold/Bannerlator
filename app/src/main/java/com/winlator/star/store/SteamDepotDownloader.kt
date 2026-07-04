@@ -354,18 +354,26 @@ object SteamDepotDownloader {
             repo.emit("DownloadProgress:$appId:$iDone:$iTotal:$dDone:$dTotal")
         }
 
-        dlog("Constructing DepotDownloader(androidEmulation=true, maxDownloads=$threads, maxDecompress=$threads, debug=true)")
+        // Memory-bound the decompress + file-write pipeline stages. The 7th arg is maxFileWrites
+        // (NOT progressUpdateInterval — that's a hardcoded 500L inside the engine); passing 100 here
+        // let up to ~100 chunks hold multi-MB decompressed buffers at once and OOM'd the 256 MB heap
+        // ~15s in. GameNative runs this same engine with tiny caps; mirror that. maxDownloads stays
+        // high (network parallelism is cheap on heap); decompress/file-write are the heap drivers.
+        val cores = Runtime.getRuntime().availableProcessors()
+        val maxDecompress = (cores / 4).coerceIn(1, 2)
+        val maxFileWrites = 2
+        dlog("Constructing DepotDownloader(androidEmulation=true, maxDownloads=$threads, maxDecompress=$maxDecompress, maxFileWrites=$maxFileWrites, debug=true)")
         val downloader = try {
             DepotDownloader(
                 steamClient,
                 licenses,
-                true,    // debug
-                false,   // useLanCache
-                threads, // maxDownloads
-                threads, // maxDecompress
-                100,     // progressUpdateInterval
-                true,    // androidEmulation
-                null,    // parentJob
+                true,          // debug
+                false,         // useLanCache
+                threads,       // maxDownloads
+                maxDecompress, // maxDecompress (was `threads` — unbounded per-core buffers)
+                maxFileWrites, // maxFileWrites (was 100, mislabeled "progressUpdateInterval" — the OOM driver)
+                true,          // androidEmulation
+                null,          // parentJob
             )
         } catch (e: Exception) {
             dlog("FAIL: DepotDownloader constructor threw")
