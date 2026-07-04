@@ -2,6 +2,18 @@
 
 ---
 
+## 2026-07-04 — ✅✅ BATCH 3 DEVICE-PROVEN: fresh FULL Half-Life download on BLAZING, zero OOM → merge-to-main gate MET
+
+> Second device test — the heavy one. Uninstalled HL1 first (verified gone: no `steam_games/Half-Life` dir, `steam.db` appId 70 `is_installed=0`, `steam_downloads` empty), then fresh-downloaded Half-Life (appId 70) on **Blazing**. Evidence: `~/scratchpad/steam_debug_hl1_blazing.txt` (32,865 lines).
+> - **Blazing tier confirmed:** `Constructing DepotDownloader(tier=32, cores=8, maxDownloads=19, maxDecompress=6, maxFileWrites=6)` — max concurrency = the real memory stress.
+> - **Genuinely fresh (not resume/validate):** 0 `Resume seed`, **0 `Validating`**, **4,493 `Pre-allocating`** lines.
+> - **ZERO OOM** — no `OutOfMemory`/`Failed to allocate`/`growth limit`/`Parent job is Cancelling`. On the heaviest tier. This is the proof.
+> - **Full download verified on disk:** 4,492 `File done`, depot 1 → `pct=100%`, real full-size files (`valve/halflife.wad`=37.9 MB, `xeno.wad`=6.5 MB, `maps/`≈219 MB); `steam.db` now `is_installed=1`, size 603 MB. ~600 MB in **57 s** (~10.5 MB/s).
+> - **⚠️ Cosmetic bug to clean up later:** the `Depot N complete: X KB uncompressed/Y compressed` summary line **under-reports** (showed Depot 1 = 31 KB while 4,492 files / ~600 MB actually landed). Harmless — download is correct — but the per-depot byte accounting is wrong; fix when we gate diagnostics.
+> **→ MERGE-TO-MAIN GATE MET.** All 3 batches done + device-proven (fresh full DL, both Medium and Blazing tiers, no OOM). **NEXT: reconcile main's 4 commits + gate the verbose diagnostics behind a debug flag → MERGE `feat/steam-goldberg-patcher` to main → THEN cross-store Download Manager.** At the stable release, hand out credits (upstream OSS + our own work → GitHub release notes + repo credits).
+
+---
+
 ## 2026-07-04 — ✅ DEVICE TEST PASSED: OOM gone, tiered speed confirmed (HL1) — heavier stress test still pending
 
 > Installed `ad9a4bd` standard APK, ran a Steam download on device (`com.winlator.banner`). **Result: clean, no OOM.** Evidence pulled via root bridge → `~/scratchpad/steam_debug_hl2_tiered.txt` (4 MB / 32,685 lines) + `~/scratchpad/steam_session_hl2_tiered.txt`.
