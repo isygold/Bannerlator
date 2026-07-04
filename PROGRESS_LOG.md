@@ -19,6 +19,8 @@
 > **❌ combined build `28713882981` FAILED → ✅ fixed (`c826c79`) → rebuild `28714157849`.** Cause was NOT the new dep (`lifecycle-runtime-compose` resolved fine) — one missing import: `DownloadsButton.kt` (pkg `...store.download`) referenced `DownloadManagerActivity` (pkg `...store`) without importing it → Unresolved reference. Added the import; verified all other cross-package refs resolve (DownloadManagerActivity imports the .download classes; both Steam headers import DownloadsButton). Rebuild running → deliver on green.
 >
 > **✅ REBUILD `28714157849` GREEN → APK DELIVERED.** Standard flavor in device Downloads: `bannerlator-download-manager-v1-c826c79-standard.apk` (589 MB, sha `092494f5c8c1`). New dep `lifecycle-runtime-compose:2.7.0` resolves. **v1 Download Manager is now testable on device.** NEXT = device-test: ⬇ opens "Downloads & Library"; start a Steam DL → live badge + two-bar progress + Cancel/Pause → completes into Library w/ Launch/Uninstall; installed games seed into Library. **NO merge to main until device-tested + sign-off.**
+>
+> **✅✅ DEVICE-TESTED (user screenshots) — v1 WORKS END-TO-END:** ⬇ in Steam Library + detail headers; badge live-count "1" during DL; "Downloads & Library" screen renders (game-card idiom, Steam badges, covers, Downloading/Library sections); **FlatOut DL live 2%→15%→61%** w/ progress + Cancel/Pause; installed HL/HL2/Portal2 auto-seeded into Library w/ Launch/Uninstall; FGS notif "Steam — Downloading FlatOut — 61%". Minor cosmetic: two-bar reads as single bar on fresh DL (byte pairs close) — numbers correct, polish-only. **v1 DEVICE-PROVEN → awaiting user sign-off to MERGE `feat/download-manager`→main.** Then Epic/GOG/Amazon into same registry (later).
 
 ---
 
