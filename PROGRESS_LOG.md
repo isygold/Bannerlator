@@ -17,6 +17,8 @@
 > **🚧 v1 FEATURE-COMPLETE — combined build running.** All 3 phases on `feat/download-manager`; Phase 1 compile-check `28713214632` was GREEN; **combined CI build `28713882981` RUNNING** (Phase 2+3 + new lifecycle dep). On green → deliver standard APK to device Downloads + device-test (badge live-updates during a Steam DL, two-bar progress, Launch/Uninstall round-trip, Library seeded). If red → fix (likely the new dep/import) + rebuild before delivering. **Branch stays open; NO merge to main until device-tested + user sign-off.**
 >
 > **❌ combined build `28713882981` FAILED → ✅ fixed (`c826c79`) → rebuild `28714157849`.** Cause was NOT the new dep (`lifecycle-runtime-compose` resolved fine) — one missing import: `DownloadsButton.kt` (pkg `...store.download`) referenced `DownloadManagerActivity` (pkg `...store`) without importing it → Unresolved reference. Added the import; verified all other cross-package refs resolve (DownloadManagerActivity imports the .download classes; both Steam headers import DownloadsButton). Rebuild running → deliver on green.
+>
+> **✅ REBUILD `28714157849` GREEN → APK DELIVERED.** Standard flavor in device Downloads: `bannerlator-download-manager-v1-c826c79-standard.apk` (589 MB, sha `092494f5c8c1`). New dep `lifecycle-runtime-compose:2.7.0` resolves. **v1 Download Manager is now testable on device.** NEXT = device-test: ⬇ opens "Downloads & Library"; start a Steam DL → live badge + two-bar progress + Cancel/Pause → completes into Library w/ Launch/Uninstall; installed games seed into Library. **NO merge to main until device-tested + sign-off.**
 
 ---
 
