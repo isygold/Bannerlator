@@ -14,6 +14,7 @@
 > 5. **Then merge.**
 > **Also outstanding for a clean main:** Goldberg auto-patch only Regular tier device-proven (Experimental/ColdClient/Off-restore untested).
 > **Immediate next action:** wait for build `28690582627` green → deliver APK → run gate #1.
+> **UPDATE:** build `28690582627` **GREEN** (SHA `6cc4d28`). APK delivered + byte-verified (589,502,775 B) + media-scanned to `/sdcard/Download/Bannerlator-standard-pill-redact-28690582627.apk`. (PRoot session has DIRECT /sdcard access — `cp` to Download, no socket transfer needed.) Awaiting user: sign out of Steam elsewhere + protect app → install → HL2 download. Crash-proof capture = on-device `steam_debug.txt` + persistent `steam_session.txt` (+ will start a device-side `logcat -f /sdcard/...` before the tap); local streamed capture NOT used (dies with PRoot session).
 
 ---
 
