@@ -208,7 +208,14 @@ class SteamGamesActivity : ComponentActivity(), SteamRepository.SteamEventListen
                 val parts = event.split(":")
                 val phase = parts.getOrNull(1)?.toIntOrNull() ?: 0
                 val count = parts.getOrNull(2)?.toIntOrNull() ?: 0
-                statusText = if (phase == 0) "Syncing packages ($count)\u2026" else "Fetching $count app records\u2026"
+                // Phase 2 carries a 4th field (running total) so the app-record sync \u2014 now fetched in
+                // small batches (SteamRepository.requestNextAppBatch) \u2014 counts up as "N/372".
+                val total = parts.getOrNull(3)?.toIntOrNull() ?: 0
+                statusText = when {
+                    phase == 0            -> "Syncing packages ($count)\u2026"
+                    phase == 2 && total > 0 -> "Fetching app records ($count/$total)\u2026"
+                    else                  -> "Fetching $count app records\u2026"
+                }
             }
             event.startsWith("LibrarySynced:") -> {
                 loadGames()

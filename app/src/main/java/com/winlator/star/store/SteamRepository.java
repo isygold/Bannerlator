@@ -286,6 +286,25 @@ public final class SteamRepository {
     private final Map<Integer, PICSProductInfo> pendingPackages = new ConcurrentHashMap<>();
     private final Map<Integer, PICSProductInfo> pendingApps     = new ConcurrentHashMap<>();
 
+    // --- App-sync batching (Batch 1 core fix) --------------------------------------------------
+    // The library used to fetch PICS product info for ALL owned app IDs (~372 on a large account) in
+    // ONE picsGetProductInfo. That single huge request monopolises the shared CM TcpConnection: the
+    // whole ~372-app response is parsed inline on the netThread and, while it parses, a concurrently
+    // started depot download's own appinfo AsyncJob gets no reply inside its window → 60s
+    // CancellationException → download stuck at 0%. We now walk the app list in small SEQUENTIAL
+    // batches (each response drives the next), and PAUSE the sync entirely while a download is active
+    // so the download's appinfo has a clear connection. All queue mutation is confined to the single
+    // libraryWorker thread — the same ordering guarantee the existing SYNC_PACKAGES→SYNC_APPS design
+    // already relies on — so no extra locking is needed.
+    private static final int APP_SYNC_BATCH = 25;
+    private final java.util.ArrayDeque<Integer> remainingAppIds = new java.util.ArrayDeque<>();
+    private int appSyncTotal     = 0;   // total apps to fetch this sync (for the N/total progress line)
+    private int appSyncProcessed = 0;   // running count of apps parsed+stored across all batches
+    /** True while a depot download owns the CM connection — the app-sync batch loop must yield to it. */
+    private volatile boolean downloadActive = false;
+    /** True while the batch loop is parked mid-sync because a download is active (queue kept intact). */
+    private volatile boolean appSyncPaused  = false;
+
     // -------------------------------------------------------------------------
     // Initialisation
     // -------------------------------------------------------------------------
@@ -727,21 +746,97 @@ public final class SteamRepository {
         steamApps.picsGetProductInfo(Collections.emptyList(), pkgRequests, false);
     }
 
-    /** Phase 4 step 2: request PICS product info for all resolved app IDs. */
+    /** Phase 4 step 2: seed the app-sync batch queue, then kick the first batch.
+     *  WORKER THREAD (called from processPackages / syncLibrary). From here the sync advances one
+     *  small batch at a time — see requestNextAppBatch() for why we no longer fetch all at once. */
     private void syncApps(List<Integer> appIds) {
         if (steamApps == null || appIds.isEmpty()) {
             syncPhase = SYNC_IDLE;
             emit("LibrarySynced:0");
             return;
         }
+        // Reseed the queue + running counters. A mid-sync reconnect re-enters here (via
+        // syncLibrary→syncPackages) and replaces any stale/paused queue wholesale, so a paused sync
+        // is never lost or double-counted.
+        remainingAppIds.clear();
+        remainingAppIds.addAll(appIds);
+        appSyncTotal     = appIds.size();
+        appSyncProcessed = 0;
+        appSyncPaused    = false;
+        pendingApps.clear();
+        Log.i(TAG, "PICS: app sync starting for " + appSyncTotal + " apps in batches of " + APP_SYNC_BATCH);
+        requestNextAppBatch();
+    }
+
+    /**
+     * WORKER THREAD: issue the next batch of app PICS requests. Polls up to APP_SYNC_BATCH ids off
+     * remainingAppIds, sends ONE picsGetProductInfo for just that slice, and lets the response
+     * (onPICSProductInfo → processApps) drive the following batch. Keeping each CM request small
+     * stops the library sync from monopolising the shared TcpConnection and starving a concurrent
+     * depot download's appinfo AsyncJob.
+     *
+     * PAUSE-DURING-DOWNLOAD: if a download is active, do NOT issue the next batch — park with the
+     * queue intact (appSyncPaused) and return. The already-sent in-flight batch is ≤25 apps so it
+     * drains fast; setDownloadActive(false) resumes us once the download releases the connection.
+     */
+    private void requestNextAppBatch() {
+        if (steamApps == null) return;
+        // Queue drained → the library sync is complete. Finish exactly as the old single-shot did.
+        if (remainingAppIds.isEmpty()) {
+            finishAppSync();
+            return;
+        }
+        // A download owns the CM connection right now — yield to it and keep our place in the queue.
+        if (downloadActive) {
+            appSyncPaused = true;
+            Log.i(TAG, "PICS app-sync paused (download active) — " + remainingAppIds.size() + " apps queued");
+            return;
+        }
+        List<PICSRequest> appRequests = new ArrayList<>();
+        for (int i = 0; i < APP_SYNC_BATCH && !remainingAppIds.isEmpty(); i++) {
+            appRequests.add(new PICSRequest(remainingAppIds.poll()));
+        }
         syncPhase = SYNC_APPS;
         pendingApps.clear();
-        List<PICSRequest> appRequests = new ArrayList<>();
-        for (int id : appIds) {
-            appRequests.add(new PICSRequest(id));
-        }
-        Log.i(TAG, "PICS: requesting info for " + appRequests.size() + " apps");
+        Log.i(TAG, "PICS: requesting info for " + appRequests.size() + " apps ("
+                + remainingAppIds.size() + " remaining)");
         steamApps.picsGetProductInfo(appRequests, Collections.emptyList(), false);
+    }
+
+    /** WORKER THREAD: the batch queue is drained — close out the sync the way processApps used to,
+     *  emitting the final LibrarySynced with the total app count accumulated across all batches. */
+    private void finishAppSync() {
+        syncPhase = SYNC_IDLE;
+        pendingPackages.clear();
+        pendingApps.clear();
+        appSyncPaused = false;
+        recordSyncTime();
+        Log.i(TAG, "Library sync complete: " + appSyncProcessed + " apps");
+        emit("LibrarySynced:" + appSyncProcessed);
+    }
+
+    /**
+     * Coordinate the background library sync with an active depot download. Called by
+     * SteamDepotDownloader around a download: true while it owns the CM connection, false when it
+     * releases it (success / failure / cancel / exception, from the download's finally).
+     *
+     * When set true the batch loop parks itself at the next batch boundary (see requestNextAppBatch);
+     * when set false, if a sync is parked with work left and we're still logged in, resume it. The
+     * resume runs on the libraryWorker so all queue mutation stays confined to that one thread — this
+     * method itself is called from the download coroutine (Dispatchers.IO) and must not touch the
+     * queue directly. Setting the flag is a cheap volatile write; no marshalling needed for that.
+     */
+    public void setDownloadActive(boolean active) {
+        downloadActive = active;
+        if (!active) {
+            runOnLibraryWorker(() -> {
+                if (appSyncPaused && !remainingAppIds.isEmpty() && loggedIn) {
+                    appSyncPaused = false;
+                    Log.i(TAG, "PICS app-sync resuming after download — " + remainingAppIds.size() + " apps queued");
+                    requestNextAppBatch();
+                }
+            });
+        }
     }
 
     /** Null-safe asString(): returns "" instead of null when a KeyValue has no value. */
@@ -975,12 +1070,17 @@ public final class SteamRepository {
                         Log.w(TAG, "Skipping app " + app.getId() + ": " + e.getMessage());
                     }
         }
-        syncPhase = SYNC_IDLE;
-        pendingPackages.clear();
+        // Batch bookkeeping: this callback carried ONE batch (≤ APP_SYNC_BATCH apps). Add it to the
+        // running total and emit progress as processed/total so the UI can show "Fetching N/372".
+        appSyncProcessed += count;
         pendingApps.clear();
-        recordSyncTime();
-        Log.i(TAG, "Library sync complete: " + count + " apps");
-        emit("LibrarySynced:" + count);
+        emit("LibraryProgress:2:" + appSyncProcessed + ":" + appSyncTotal);
+        Log.i(TAG, "PICS app batch parsed: +" + count + " (" + appSyncProcessed + "/" + appSyncTotal
+                + " processed, " + remainingAppIds.size() + " queued)");
+        // Drive the next batch — or finish when the queue is drained (finishAppSync emits
+        // LibrarySynced). If a download became active meanwhile, this parks the sync instead of
+        // issuing more CM traffic; setDownloadActive(false) later resumes it.
+        requestNextAppBatch();
     }
 
     /** Handle depot decryption key callback. Stores key in memory for SteamDepotDownloader. */

@@ -396,9 +396,23 @@ object SteamDepotDownloader {
                 dlog("=== Download complete: appId=${item.appId} ===")
                 val iTotal = installTotalRunning.get()
                 val dTotal = downloadTotalRunning.get()
+                val finalInstall = maxOf(lastInstallDone.get(), installByDepot.values.sum())
+
+                // FALSE-COMPLETE GUARD: after an interrupted/polluted install, DepotDownloader can
+                // declare "complete" having written almost nothing — leftover partial files + stale
+                // .DepotDownloader state make it skip the main depot (proven: HL2 marked Installed at
+                // 405MB of 8.4GB). If we have a real PICS size and <90% of it landed on disk, this is
+                // NOT a genuine completion: refuse to markInstalled and surface a retryable failure so
+                // the user isn't left with a broken "Installed" game.
+                if (iTotal > 0L && finalInstall < (iTotal * 90L / 100L)) {
+                    dlog("INCOMPLETE: onDownloadCompleted but only ${fmtSize(finalInstall)} of " +
+                            "${fmtSize(iTotal)} on disk (<90%) — refusing to mark installed")
+                    emitFailed(appId, "Download incomplete (${fmtSize(finalInstall)}/${fmtSize(iTotal)}) — please retry")
+                    return
+                }
+
                 // Both bars reach 100% before switching to installed state.
                 emitProgress(iTotal, iTotal, dTotal, dTotal)
-                val finalInstall = maxOf(lastInstallDone.get(), installByDepot.values.sum())
                 db.markInstalled(appId, installDir.absolutePath, if (finalInstall > 0L) finalInstall else iTotal)
                 repo.emit("DownloadComplete:$appId")
             }
@@ -436,6 +450,13 @@ object SteamDepotDownloader {
 
         dlog("Items added, download auto-starts via getCompletion()")
 
+        // Pause the background library PICS sync while THIS download owns the CM connection. A
+        // full-library appinfo request (~372 apps in one shot) monopolises the shared TcpConnection
+        // and starves this download's own appinfo AsyncJob → 60s CancellationException @0%. The
+        // in-flight library batch (≤25 apps) drains fast; SteamRepository resumes the sync from our
+        // finally block. Cleared for every terminal path (success / fail / cancel / exception).
+        repo.setDownloadActive(true)
+
         // --- CM AsyncJob timeout watchdog (10s default -> 60s) --------------------------------
         // The download's internal CM jobs (appinfo/manifest/depot-key/CDN-auth) time out at the
         // hard-coded 10s AsyncJob default with no exposed knob; the only reachable lever is the live
@@ -469,6 +490,7 @@ object SteamDepotDownloader {
             dlogError("getCompletion unexpected", e)
         } finally {
             jobWatchdog.set(false)   // stop the AsyncJob-timeout watchdog for this download
+            repo.setDownloadActive(false)   // release the CM; resumes any parked library PICS sync
             activeDownloads.remove(appId)
             dlog("Closing DepotDownloader")
             try { downloader.close() } catch (_: Exception) {}

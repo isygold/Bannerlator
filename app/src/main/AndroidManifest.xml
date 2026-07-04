@@ -47,6 +47,7 @@
         android:isGame="true"
         android:allowBackup="false"
         android:allowAudioPlaybackCapture="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:hardwareAccelerated="true"
         android:supportsRtl="true"
         tools:ignore="DataExtractionRules,GoogleAppIndexingWarning">
