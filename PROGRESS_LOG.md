@@ -1,12 +1,26 @@
 # Star-Compose — Progress Log
 
-> **⏸️ CURRENT STATE (2026-07-04) — uninstall feedback in, wedge fixed, black-box fix building.** Branch `feat/download-manager` (off main, NOT merged). DL Manager v1 DEVICE-PROVEN; landing-screen toggle works. Head `45b838d` (docs) atop code `eb7dd55`.
+> **⏸️ CURRENT STATE (2026-07-04) — black-box fix DEVICE-PROVEN, Bug-1 size-text fix building, branch ~clean for merge.** Branch `feat/download-manager` (off main, NOT merged). DL Manager v1 DEVICE-PROVEN; landing-screen toggle works. Head `b8e9e5b` (Bug-1 fix) atop `eb7dd55` (black-box fix).
 > - **✅ Verified uninstall (spinner + confirmation) DEVICE-PROVEN** (`f561252`): blocking `UninstallProgressDialog` during the verified recursive delete, then a confirmation. Replaced the old fire-and-forget delete.
-> - **🎉 SAME-SESSION UNINSTALL→REINSTALL WEDGE = FIXED (device-proven).** Repro on new build + clean slate + debug toggle ON: uninstalled HL2 → immediately reinstalled same session → downloaded **10.65 GB → `is_installed=1`, NO wedge** (vs the old stuck `queued 0` + library 23/372). DL card showed correct live 5%, no stale-100%. **Cause of fix:** the blocking spinner serializes delete-before-reinstall (can't tap Install until the delete is verified done) = the deferred #3 reinstall-guard, for free; + we'd cleared the orphaned `queued` row. 6 MB `steam_debug.txt` captured but not needed.
-> - **🐞→✅ Black-box confirmation FIXED (`eb7dd55`).** User: the "X uninstalled" popup was an empty black box at the toast position → system `Toast` renders black on this ROM (targetSDK 28). Replaced the 3 Steam uninstall Toasts with **`UninstallResultBar`** (themed auto-dismiss ~2.2 s snackbar-style bar, non-interactive). **CI build `28717094726` GREEN → standard APK DELIVERED** `/sdcard/Download/bannerlator-blackbox-fix-eb7dd55-standard.apk` (589,559,745 B, sha head `340168b186d7`), media-scanned. **Not yet installed** — user installs → uninstall a game → confirm the bar shows real text (not a black box).
-> - **🐞 Logged, fix later (display-only):** (a) DL card stale-100% on reused entry (zero counters on terminal→DOWNLOADING); (b) progress overshoots >100% (`bytes_total` is a manifest estimate). Amazon/GOG/Epic uninstall Toasts also black-box (deferred to their phase).
-> - Steam/Goldberg merged to main (`c89dc03`, no release, vc37/2.2.2). Device build = `52e7e38` (vc37) until the new APK installs. PARKED: Epic/GOG/Amazon registry wiring.
-> **NEXT:** user installs `bannerlator-blackbox-fix-eb7dd55-standard.apk` → uninstalls a game → confirms the `UninstallResultBar` shows real text (not a black box) → then merge decision (branch→main; check fast-forward vs merge commit). Detail below + memory `project_bannerlator_download_manager`.
+> - **🎉 SAME-SESSION UNINSTALL→REINSTALL WEDGE = FIXED (device-proven).** Uninstalled HL2 → immediately reinstalled same session → **10.65 GB → `is_installed=1`, NO wedge.** Cause of fix: the blocking spinner serializes delete-before-reinstall (= the reinstall-guard, for free) + cleared the orphaned `queued` row.
+> - **🐞→✅ Black-box confirmation FIXED (`eb7dd55`) + DEVICE-PROVEN (user, latest screenshot).** System `Toast` rendered as an empty black box on this ROM (targetSDK 28) → replaced the 3 Steam uninstall Toasts with **`UninstallResultBar`** (themed auto-dismiss ~2.2 s snackbar bar). **Installed + confirmed on device: the bar shows real text, no black box.** All Steam-side uninstall feedback now works end-to-end.
+> - **🐞→✅ Bug-1 (>100% size TEXT) FIXED (`b8e9e5b`).** The *percent* was already clamped everywhere; only the byte-count text could read done>total when PICS under-reports size (HL2 8.99 GB estimate vs 10.66 GB real). Fix: grow the install denominator when `installDone>iTotal`, mirroring the existing download-bar guard (`SteamDepotDownloader.kt:~510`); corrected total flows to both the detail page + DL card. **CI build `28717970189` RUNNING → on green deliver standard APK.**
+> - **🐞 Bug-2 (DL card stale-100% on reused entry) — DEFERRED by user (not recurred since blocking-uninstall).** Root cause found: `SteamDepotDownloader.kt:396` gates the counter-reset on `get(dmKey)==null`, so reinstalling a previously-INSTALLED game keeps stale counters; fix if it resurfaces = gate reset on `attempt==0`.
+> - Steam/Goldberg merged to main (`c89dc03`, no release, vc37/2.2.2). PARKED: Epic/GOG/Amazon registry wiring.
+> **NEXT:** build `28717970189` green → deliver standard APK → user glances at a download's size text (never overshoots) → branch is clean → **merge decision (branch→main; check fast-forward vs merge commit).** No release cut planned. Detail below + memory `project_bannerlator_download_manager`.
+
+---
+
+## 2026-07-04 — ✅ Black-box fix device-proven + 🐞→✅ Bug-1 (size-text >100%) fixed
+
+> **Black-box fix (`eb7dd55`) DEVICE-PROVEN (user, latest screenshot):** installed the delivered APK, uninstalled a game, and the `UninstallResultBar` renders real text — no more empty black box. Last open verification on the branch is cleared; all Steam-side uninstall feedback works end-to-end.
+>
+> **Verified the two "known cosmetic bugs" against live code before touching anything:**
+> - **Bug-1 (>100%):** the *percent* is already clamped everywhere — producer caps at 99 (`SteamDepotDownloader.kt:515`), both display surfaces `.coerceIn(0,100)` (`DownloadManagerActivity.kt:474`, `SteamGameDetailActivity.kt:284/285/754/755`), all since `ad4887f` (2026-07-01). The only live residual was the byte-count **text** reading done>total when PICS under-reports install size (`installTotal` self-corrected only when `!hasPicsSize`, `:503`).
+> - **Bug-2 (reinstall stale-100%):** NOT fixed — root cause is the `get(dmKey)==null` gate at `SteamDepotDownloader.kt:396` (reinstall of an INSTALLED game keeps stale counters). **User deferred it** — hasn't recurred since the blocking-uninstall serialization; fix if it comes back = gate the reset on `attempt==0`.
+>
+> **Fix (`b8e9e5b`):** grow the install denominator when `installDone>iTotal`, mirroring the existing download-bar guard, so the corrected total flows to both the detail page (`emitProgress`) and the DL-manager card (registry). One file, +4/-3. Committed as The412Banner, pushed, **CI build `28717970189` dispatched** → deliver standard APK on green.
+> **NEXT:** green build → APK to device → user eyeballs a download's size text → merge decision.
 
 ---
 
