@@ -48,6 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -1029,9 +1030,12 @@ private fun ExePickerDialogGame(
         text = {
             // HL2 (and many Source games) ship dozens of bin/*.exe SDK tools, so this list can be
             // long — bound its height and make it scrollable, or the real game exe is unreachable.
+            // Cap at ~half the CURRENT screen height so it fits + scrolls in both portrait and the
+            // much shorter landscape (a fixed dp cap could overflow a short landscape dialog).
+            val maxListHeight = (LocalConfiguration.current.screenHeightDp * 0.5f).dp
             Column(
                 modifier = Modifier
-                    .heightIn(max = 420.dp)
+                    .heightIn(max = maxListHeight)
                     .verticalScroll(rememberScrollState()),
             ) {
                 candidates.forEach { path ->
