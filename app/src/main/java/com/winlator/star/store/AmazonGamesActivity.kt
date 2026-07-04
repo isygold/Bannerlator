@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.winlator.star.store.download.DownloadRegistry
+import com.winlator.star.store.download.DownloadsButton
 import com.winlator.star.store.download.Store
 import com.winlator.star.store.download.StoreDownloadHooks
 import com.winlator.star.ui.theme.WinlatorTheme
@@ -867,6 +868,10 @@ private fun AmazonGamesScreen(
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
             ) { Text("\u21BA", color = Color.White, fontSize = 16.sp) }
+
+            // \u2B07 cross-store Download Manager (global active-count badge), trailing the
+            // header actions like Steam's list header.
+            DownloadsButton()
         }
 
         // Search bar

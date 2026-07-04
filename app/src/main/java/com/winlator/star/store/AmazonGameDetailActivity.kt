@@ -46,6 +46,7 @@ import androidx.lifecycle.lifecycleScope
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.winlator.star.store.download.DownloadRegistry
+import com.winlator.star.store.download.DownloadsButton
 import com.winlator.star.store.download.Store
 import com.winlator.star.store.download.StoreDownloadHooks
 import com.winlator.star.ui.theme.WinlatorTheme
@@ -712,6 +713,10 @@ private fun AmazonGameDetailScreen(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(start = 12.dp, end = 8.dp),
             )
+
+            // ⬇ cross-store Download Manager (live active-count badge) — trailing edge,
+            // matching SteamGameDetailActivity's header placement.
+            DownloadsButton()
         }
 
         Column(

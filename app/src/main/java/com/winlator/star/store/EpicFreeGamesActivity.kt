@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.winlator.star.store.download.DownloadsButton
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -315,6 +316,8 @@ private fun EpicFreeGamesScreen(
                     .background(Color(0xFF0078F0), RoundedCornerShape(4.dp))
                     .padding(horizontal = 8.dp, vertical = 4.dp),
             )
+            // ⬇ cross-store Download Manager (global active-count badge).
+            DownloadsButton()
         }
 
         Row(

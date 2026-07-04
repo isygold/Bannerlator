@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.winlator.star.store.download.DownloadsButton
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -608,6 +609,8 @@ private fun EpicGamesScreen(
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.height(40.dp),
             ) { Text("FREE", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+            // ⬇ cross-store Download Manager (global active-count badge).
+            DownloadsButton()
         }
 
         OutlinedTextField(

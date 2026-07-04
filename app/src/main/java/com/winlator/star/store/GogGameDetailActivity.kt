@@ -48,6 +48,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.winlator.star.store.download.DownloadsButton
 import com.winlator.star.ui.theme.WinlatorTheme
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -634,6 +635,8 @@ private fun GogGameDetailScreen(
                 maxLines = 1,
                 modifier = Modifier.padding(start = 12.dp, end = 8.dp).weight(1f),
             )
+            // ⬇ cross-store Download Manager (global active-count badge), trailing edge.
+            DownloadsButton()
         }
 
         // Cover art

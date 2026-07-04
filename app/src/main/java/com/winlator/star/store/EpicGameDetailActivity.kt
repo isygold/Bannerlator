@@ -42,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.winlator.star.store.download.DownloadsButton
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -634,6 +635,8 @@ private fun EpicGameDetailScreen(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            // ⬇ cross-store Download Manager (global active-count badge), trailing edge.
+            DownloadsButton()
         }
 
         if (artCover.isNotEmpty()) {
