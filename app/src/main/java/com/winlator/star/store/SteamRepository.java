@@ -6,10 +6,16 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
 
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Date;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -465,6 +471,7 @@ public final class SteamRepository {
         connecting.set(false);
         reconnectAttempts = 0;
         emit("Connected");
+        setStatus(loggedIn ? SteamStatus.ONLINE : SteamStatus.CONNECTING, "CM connected");
 
         if (isLoggedInPrefs()) {
             Log.i(TAG, "Auto-login as " + pGet("username", ""));
@@ -501,6 +508,63 @@ public final class SteamRepository {
     /** Last session transition, surfaced into steam_debug.txt so the file the UI points to shows the cause. */
     private volatile String lastSessionStatus = "none";
 
+    // --- In-app connection/login indicator state (drives the top-header status pill) --------------
+    // The pill is the honest, always-visible replacement for the notification (which is cosmetic).
+    // Every transition is written to the PERSISTENT steam_session.txt (survives across downloads,
+    // which the per-download steam_debug.txt does not) and mirrored into the active download log.
+    public enum SteamStatus { CONNECTING, ONLINE, SIGNED_IN_ELSEWHERE, OFFLINE, SIGNED_OUT }
+    private volatile SteamStatus status = SteamStatus.OFFLINE;
+    public SteamStatus getStatus() { return status; }
+
+    /** Set the indicator state; on a real change, log it and emit "SteamStatus:<NAME>" for the pill. */
+    private void setStatus(SteamStatus s, String reason) {
+        SteamStatus prev = status;
+        if (prev == s) return;
+        status = s;
+        slog(prev + " -> " + s + "  (" + reason + ")");
+        emit("SteamStatus:" + s.name());
+    }
+
+    /** Persistent, append-only session log so a mid/between-download LogonSessionReplaced is never lost. */
+    private File sessionLogFile = null;
+    private void slog(String msg) {
+        Log.i(TAG, "STATUS " + msg);
+        try {
+            if (sessionLogFile == null && appContext != null) {
+                File dir = appContext.getExternalFilesDir(null);
+                if (dir != null) sessionLogFile = new File(dir, "steam_session.txt");
+            }
+            if (sessionLogFile != null) {
+                String ts = new SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US).format(new Date());
+                try (BufferedWriter w = new BufferedWriter(new FileWriter(sessionLogFile, true))) {
+                    w.write("[" + ts + "] " + msg + "\n");
+                }
+            }
+        } catch (Exception ignored) {}
+        // Mirror into the active download debug log (no-op when no download log is open) so a
+        // download's steam_debug.txt carries the session-transition context inline.
+        try { SteamDepotDownloader.INSTANCE.mirrorSessionLine("[STATUS] " + msg); }
+        catch (Throwable ignored) {}
+    }
+
+    /**
+     * User-tapped the status pill to recover. Safe to call from the main thread — connect() and
+     * loginWithToken() both post their network I/O to the pump thread. Bounded by the existing
+     * guards; does nothing if there is no saved token (user must sign in interactively).
+     */
+    public void reconnectNow() {
+        loggingOut = false;
+        logoffRecoveryAttempts = 0;
+        reconnectAttempts = 0;
+        if (!isLoggedInPrefs()) return;
+        setStatus(SteamStatus.CONNECTING, "user tapped reconnect");
+        if (!connected) {
+            connect();                                              // onConnected auto-logs-in
+        } else if (!loggedIn) {
+            loginWithToken(pGet("username", ""), pGet("refresh_token", ""));
+        }
+    }
+
     private void onDisconnected(DisconnectedCallback cb) {
         boolean forced = forceReconnect;
         forceReconnect = false;
@@ -515,6 +579,7 @@ public final class SteamRepository {
         if ((forced || !cb.isUserInitiated()) && pumping.get() && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttempts++;
             long delayMs = reconnectAttempts * 2000L;  // 2s, 4s, 6s, 8s, 10s
+            setStatus(SteamStatus.CONNECTING, "auto-reconnect attempt " + reconnectAttempts);
             Log.i(TAG, "Auto-reconnect in " + delayMs + "ms (attempt " + reconnectAttempts + ")");
             if (pumpHandler != null) {
                 pumpHandler.postDelayed(() -> {
@@ -526,6 +591,7 @@ public final class SteamRepository {
             }
         } else {
             reconnectAttempts = 0;
+            setStatus(SteamStatus.OFFLINE, "disconnected");
             emit("Disconnected");
         }
     }
@@ -535,6 +601,12 @@ public final class SteamRepository {
         if (cb.getResult() != EResult.OK) {
             Log.w(TAG, "Login failed: " + cb.getResult());
             lastSessionStatus = "LoginFailed:" + cb.getResult().name();
+            // A token-rejection result won't self-heal (user must re-auth) -> SIGNED_OUT; anything
+            // else (transient) stays CONNECTING so the pill shows we're still trying.
+            String rn = cb.getResult().name();
+            boolean rejected = rn.contains("Password") || rn.contains("Expired")
+                    || rn.contains("Denied") || rn.contains("Revoked") || rn.contains("Invalid");
+            setStatus(rejected ? SteamStatus.SIGNED_OUT : SteamStatus.CONNECTING, "login failed:" + rn);
             emit("LoginFailed:" + cb.getResult().name());
             return;
         }
@@ -547,6 +619,7 @@ public final class SteamRepository {
         loggedIn = true;
         logoffRecoveryAttempts = 0;   // fresh session established — reset involuntary-logoff recovery budget
         lastSessionStatus = "LoggedIn";
+        setStatus(SteamStatus.ONLINE, "logged in");
         emit("LoggedIn:" + sid64);
         Log.i(TAG, "Logged in as " + pGet("username", ""));
     }
@@ -567,6 +640,7 @@ public final class SteamRepository {
                 && isLoggedInPrefs()) {
             Log.i(TAG, "LogonSessionReplaced within self-logon window -> ignoring (our newer session is live)");
             loggingOn.set(false);
+            setStatus(SteamStatus.ONLINE, "self-replace ignored — newer session live");
             return;   // leave loggedIn as-is; the newer session's LoggedOn owns it
         }
 
@@ -575,7 +649,12 @@ public final class SteamRepository {
 
         // User-initiated sign-out, or a logoff meaning the session is intentionally gone
         // (logged in elsewhere / session replaced by a DIFFERENT client) -> surface it, do NOT recover/loop.
+        // We intentionally do NOT auto-reconnect here: a genuine different-client replacement means the
+        // account is live elsewhere (e.g. desktop Steam), so relogging would start a logon tug-of-war.
+        // The pill shows "Signed in elsewhere" and the user taps to reconnect once they've signed out there.
         if (loggingOut || r == EResult.LoggedInElsewhere || r == EResult.LogonSessionReplaced) {
+            setStatus(loggingOut ? SteamStatus.SIGNED_OUT : SteamStatus.SIGNED_IN_ELSEWHERE,
+                    loggingOut ? "user sign-out" : "replaced by another client: " + r.name());
             emit("LoggedOut");
             return;
         }
@@ -588,6 +667,7 @@ public final class SteamRepository {
         if (pumping.get() && isLoggedInPrefs() && steamClient != null
                 && logoffRecoveryAttempts < MAX_LOGOFF_RECOVERY) {
             logoffRecoveryAttempts++;
+            setStatus(SteamStatus.CONNECTING, "involuntary logoff recovery " + logoffRecoveryAttempts);
             Log.i(TAG, "Involuntary logoff (" + r + ") -> forcing reconnect+relogin (recovery "
                     + logoffRecoveryAttempts + "/" + MAX_LOGOFF_RECOVERY + ")");
             forceReconnect = true;
@@ -596,6 +676,7 @@ public final class SteamRepository {
         } else {
             Log.w(TAG, "Logged off (" + r + ") and not recovering (attempts=" + logoffRecoveryAttempts
                     + ") -> session needs re-auth");
+            setStatus(SteamStatus.SIGNED_OUT, "logged off, needs re-auth: " + r.name());
             emit("SessionExpired");
             emit("LoggedOut");
         }
@@ -946,6 +1027,7 @@ public final class SteamRepository {
         loggingOn.set(true);
         logonStartedAt = now;
         loggingOut = false;   // a fresh logon means we are no longer in a sign-out
+        setStatus(SteamStatus.CONNECTING, "logon posted");
         Runnable work = () -> {
             LogOnDetails details = new LogOnDetails();
             details.setUsername(username);
@@ -1024,6 +1106,7 @@ public final class SteamRepository {
         }
         synchronized (licenses) { licenses.clear(); }
         cachedGameRows = null;
+        setStatus(SteamStatus.SIGNED_OUT, "user logout");
         Log.i(TAG, "Logged out");
         emit("LoggedOut");
     }

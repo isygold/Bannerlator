@@ -79,6 +79,15 @@ object SteamDepotDownloader {
         }
     }
 
+    /**
+     * Append a session-state line (from SteamRepository's indicator) into the ACTIVE download log,
+     * so a download's steam_debug.txt carries the connect/login/replaced context inline. No-op when
+     * no download log is currently open — the persistent steam_session.txt is the always-on record.
+     */
+    @JvmStatic fun mirrorSessionLine(msg: String) {
+        if (debugLogFile != null) dlog(msg)
+    }
+
     private fun dlog(msg: String) {
         Log.i(TAG, msg)
         debugLogFile ?: return

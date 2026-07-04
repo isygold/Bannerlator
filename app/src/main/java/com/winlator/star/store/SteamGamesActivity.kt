@@ -86,6 +86,7 @@ class SteamGamesActivity : ComponentActivity(), SteamRepository.SteamEventListen
     private var addToShortcuts by mutableStateOf<AddToShortcutsRequest?>(null)
     private var addResult by mutableStateOf<AddShortcutResult?>(null)
     private var viewMode by mutableStateOf("grid")
+    private var steamStatus by mutableStateOf(SteamRepository.getInstance().status)
 
     private val imageCache = object : LruCache<Int, Bitmap>(4 * 1024 * 1024) {
         override fun sizeOf(key: Int, value: Bitmap) = value.byteCount
@@ -104,6 +105,8 @@ class SteamGamesActivity : ComponentActivity(), SteamRepository.SteamEventListen
                     statusText = statusText,
                     isLoading = isLoading,
                     viewMode = viewMode,
+                    steamStatus = steamStatus,
+                    onReconnect = { SteamRepository.getInstance().reconnectNow() },
                     onBack = { finish() },
                     onRefresh = { SteamRepository.getInstance().syncLibrary() },
                     onViewToggle = {
@@ -211,7 +214,15 @@ class SteamGamesActivity : ComponentActivity(), SteamRepository.SteamEventListen
                 loadGames()
                 statusText = "${games.size} games in library"
             }
-            event == "LoggedOut" -> { finish() }
+            event.startsWith("SteamStatus:") -> {
+                val name = event.substringAfter("SteamStatus:")
+                steamStatus = try { SteamRepository.SteamStatus.valueOf(name) } catch (e: Exception) { steamStatus }
+            }
+            event == "LoggedOut" -> {
+                // Only bounce to sign-in on a real sign-out. On a different-client replacement we keep
+                // the screen so the "Signed in elsewhere" pill stays tappable to reconnect.
+                if (SteamRepository.getInstance().status != SteamRepository.SteamStatus.SIGNED_IN_ELSEWHERE) finish()
+            }
             event == "Disconnected" -> { statusText = "Disconnected \u2014 reconnecting\u2026" }
             event == "Connected" -> {
                 val repo = SteamRepository.getInstance()
@@ -305,6 +316,8 @@ private fun SteamGamesScreen(
     statusText: String,
     isLoading: Boolean,
     viewMode: String,
+    steamStatus: SteamRepository.SteamStatus,
+    onReconnect: () -> Unit,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onViewToggle: () -> Unit,
@@ -334,6 +347,7 @@ private fun SteamGamesScreen(
                 color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.weight(1f).padding(start = 4.dp),
             )
+            SteamStatusPill(status = steamStatus, onReconnect = onReconnect)
             IconButton(onClick = onViewToggle) {
                 Icon(
                     imageVector = if (viewMode == "grid") Icons.Filled.ViewList else Icons.Filled.GridView,

@@ -124,6 +124,8 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
     private var goldbergDownloadProgress by mutableFloatStateOf(0f)
     private var goldbergSizeLabel by mutableStateOf("")
 
+    private var steamStatus by mutableStateOf(SteamRepository.getInstance().status)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         appId = intent.getIntExtra(EXTRA_APP_ID, 0)
@@ -136,6 +138,8 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
             WinlatorTheme {
                 SteamGameDetailScreen(
                     headerBitmap = headerBitmap,
+                    steamStatus = steamStatus,
+                    onReconnect = { SteamRepository.getInstance().reconnectNow() },
                     nameText = nameText,
                     typeText = typeText,
                     sizeText = sizeText,
@@ -247,6 +251,10 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
 
     override fun onEvent(event: String) {
         when {
+            event.startsWith("SteamStatus:") -> {
+                val name = event.substringAfter("SteamStatus:")
+                steamStatus = try { SteamRepository.SteamStatus.valueOf(name) } catch (e: Exception) { steamStatus }
+            }
             event.startsWith("DownloadProgress:") -> {
                 // Format: DownloadProgress:appId:installDone:installTotal:downloadDone:downloadTotal
                 val parts = event.split(":")
@@ -596,6 +604,8 @@ private data class ExePickerDataGame(
 @Composable
 private fun SteamGameDetailScreen(
     headerBitmap: Bitmap?,
+    steamStatus: SteamRepository.SteamStatus,
+    onReconnect: () -> Unit,
     nameText: String,
     typeText: String,
     sizeText: String,
@@ -647,6 +657,8 @@ private fun SteamGameDetailScreen(
                     tint = MaterialTheme.colorScheme.onBackground,
                 )
             }
+            Spacer(Modifier.weight(1f))
+            SteamStatusPill(status = steamStatus, onReconnect = onReconnect)
         }
 
         // Hero image with a subtle gradient into the background at the bottom
