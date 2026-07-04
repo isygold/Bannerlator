@@ -86,7 +86,7 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
     private var game by mutableStateOf<SteamGame?>(null)
 
     @Volatile private var downloadHandle: SteamDepotDownloader.DownloadControl? = null
-    private var lastThreadCount = 4
+    private var lastSpeedTier = DownloadSpeedConfig.DEFAULT_TIER  // 24 = Fast
 
     // UI state
     private var headerBitmap by mutableStateOf<Bitmap?>(null)
@@ -176,14 +176,20 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
 
                 if (showSpeedPicker) {
                     DownloadSpeedPickerDialog(
-                        selectedIndex = when (lastThreadCount) { 8 -> 1; 16 -> 2; else -> 0 },
+                        selectedIndex = when (lastSpeedTier) {
+                            DownloadSpeedConfig.TIER_SLOW    -> 0
+                            DownloadSpeedConfig.TIER_MEDIUM  -> 1
+                            DownloadSpeedConfig.TIER_FAST    -> 2
+                            DownloadSpeedConfig.TIER_BLAZING -> 3
+                            else -> 2  // Fast
+                        },
                         onDismiss = { showSpeedPicker = false },
-                        onDownload = { threadCount ->
+                        onDownload = { tier ->
                             showSpeedPicker = false
-                            lastThreadCount = threadCount
+                            lastSpeedTier = tier
                             installBtnEnabled = false
                             installBtnText = "Starting…"
-                            downloadHandle = SteamDepotDownloader.installApp(appId, applicationContext, lastThreadCount)
+                            downloadHandle = SteamDepotDownloader.installApp(appId, applicationContext, lastSpeedTier)
                         },
                     )
                 }
@@ -503,7 +509,7 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
             pauseBtnText = "Resuming…"
             installBtnEnabled = false
             installBtnText = "Starting…"
-            downloadHandle = SteamDepotDownloader.resumeApp(appId, applicationContext, lastThreadCount)
+            downloadHandle = SteamDepotDownloader.resumeApp(appId, applicationContext, lastSpeedTier)
         }
     }
 
@@ -970,12 +976,15 @@ private fun InfoChip(label: String) {
 private fun DownloadSpeedPickerDialog(
     selectedIndex: Int,
     onDismiss: () -> Unit,
-    onDownload: (threadCount: Int) -> Unit,
+    onDownload: (speedTier: Int) -> Unit,
 ) {
+    // Tiers mirror GameNative: cores × ratio scales download + decompress concurrency.
+    // Higher tiers download faster but use more RAM/CPU during decompression.
     val options = listOf(
-        "Safe (4 threads) — least RAM/CPU usage" to 4,
-        "Normal (8 threads) — balanced" to 8,
-        "Fast (16 threads) — maximum speed" to 16,
+        "Slow — lowest RAM/CPU" to DownloadSpeedConfig.TIER_SLOW,
+        "Medium — balanced" to DownloadSpeedConfig.TIER_MEDIUM,
+        "Fast — recommended" to DownloadSpeedConfig.TIER_FAST,
+        "Blazing — fastest, highest RAM/CPU" to DownloadSpeedConfig.TIER_BLAZING,
     )
     var selected by remember { mutableIntStateOf(selectedIndex) }
 

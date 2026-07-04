@@ -195,25 +195,26 @@ object SteamDepotDownloader {
 
     /**
      * Start a fresh install. Returns a DownloadControl with cancel + pause Runnables.
-     * @param threads number of parallel chunk downloads + decompression workers (4 / 8 / 16)
+     * @param speedTier download-speed tier key (8=Slow / 16=Medium / 24=Fast / 32=Blazing);
+     *   fed to [DownloadSpeedConfig] to derive maxDownloads/maxDecompress/maxFileWrites.
      */
-    fun installApp(appId: Int, ctx: Context, threads: Int = 4): DownloadControl =
-        buildControl(appId, ctx, threads, isResume = false)
+    fun installApp(appId: Int, ctx: Context, speedTier: Int = DownloadSpeedConfig.DEFAULT_TIER): DownloadControl =
+        buildControl(appId, ctx, speedTier, isResume = false)
 
     /**
      * Resume a previously paused install. Keeps the existing DB row (bytes intact).
      * DepotDownloader will re-verify and skip already-written chunks where possible.
      */
-    fun resumeApp(appId: Int, ctx: Context, threads: Int = 4): DownloadControl =
-        buildControl(appId, ctx, threads, isResume = true)
+    fun resumeApp(appId: Int, ctx: Context, speedTier: Int = DownloadSpeedConfig.DEFAULT_TIER): DownloadControl =
+        buildControl(appId, ctx, speedTier, isResume = true)
 
-    private fun buildControl(appId: Int, ctx: Context, threads: Int, isResume: Boolean): DownloadControl {
+    private fun buildControl(appId: Int, ctx: Context, speedTier: Int, isResume: Boolean): DownloadControl {
         val cancelled     = AtomicBoolean(false)
         val paused        = AtomicBoolean(false)
         val downloaderRef = AtomicReference<DepotDownloader?>(null)
 
         CoroutineScope(Dispatchers.IO).launch {
-            runInstall(appId, ctx, cancelled, paused, downloaderRef, threads, isResume)
+            runInstall(appId, ctx, cancelled, paused, downloaderRef, speedTier, isResume)
         }
 
         return DownloadControl(
@@ -243,7 +244,7 @@ object SteamDepotDownloader {
         cancelled: AtomicBoolean,
         paused: AtomicBoolean,
         downloaderRef: AtomicReference<DepotDownloader?>,
-        threads: Int = 4,
+        speedTier: Int = DownloadSpeedConfig.DEFAULT_TIER,
         isResume: Boolean = false,
         attempt: Int = 0,
     ) {
@@ -354,24 +355,28 @@ object SteamDepotDownloader {
             repo.emit("DownloadProgress:$appId:$iDone:$iTotal:$dDone:$dTotal")
         }
 
-        // Memory-bound the decompress + file-write pipeline stages. The 7th arg is maxFileWrites
-        // (NOT progressUpdateInterval — that's a hardcoded 500L inside the engine); passing 100 here
-        // let up to ~100 chunks hold multi-MB decompressed buffers at once and OOM'd the 256 MB heap
-        // ~15s in. GameNative runs this same engine with tiny caps; mirror that. maxDownloads stays
-        // high (network parallelism is cheap on heap); decompress/file-write are the heap drivers.
-        val cores = Runtime.getRuntime().availableProcessors()
-        val maxDecompress = (cores / 4).coerceIn(1, 2)
-        val maxFileWrites = 2
-        dlog("Constructing DepotDownloader(androidEmulation=true, maxDownloads=$threads, maxDecompress=$maxDecompress, maxFileWrites=$maxFileWrites, debug=true)")
+        // Derive the three pipeline-stage caps from CPU cores × the selected tier's ratios
+        // (see DownloadSpeedConfig, a faithful port of GameNative on this same engine). The 7th
+        // ctor arg is maxFileWrites (NOT progressUpdateInterval — that's a hardcoded 500L inside
+        // the engine); passing a large value there let up to ~100 chunks hold multi-MB decompressed
+        // buffers at once and OOM'd the 256 MB heap. maxDownloads stays high (network parallelism is
+        // cheap on heap); decompress + file-write are the heap drivers and are kept bounded.
+        val speedConfig   = DownloadSpeedConfig(speedTier)
+        val cores         = speedConfig.cpuCores
+        val maxDownloads  = speedConfig.maxDownloads
+        val maxDecompress = speedConfig.maxDecompress
+        val maxFileWrites = speedConfig.maxFileWrites
+        dlog("Constructing DepotDownloader(tier=$speedTier, cores=$cores, maxDownloads=$maxDownloads, " +
+                "maxDecompress=$maxDecompress, maxFileWrites=$maxFileWrites, androidEmulation=true, debug=true)")
         val downloader = try {
             DepotDownloader(
                 steamClient,
                 licenses,
                 true,          // debug
                 false,         // useLanCache
-                threads,       // maxDownloads
-                maxDecompress, // maxDecompress (was `threads` — unbounded per-core buffers)
-                maxFileWrites, // maxFileWrites (was 100, mislabeled "progressUpdateInterval" — the OOM driver)
+                maxDownloads,  // maxDownloads (cores × tier download ratio)
+                maxDecompress, // maxDecompress (cores × tier decompress ratio — bounds the big buffers)
+                maxFileWrites, // maxFileWrites (tied to maxDecompress; was 100, mislabeled "progressUpdateInterval")
                 true,          // androidEmulation
                 null,          // parentJob
             )
@@ -626,7 +631,7 @@ object SteamDepotDownloader {
         // MAX_SESSION_RETRIES; re-enters as a resume so already-downloaded files are reused.
         if (retryAsResume) {
             dlog("Retrying install for appId=$appId (attempt ${attempt + 1} → ${attempt + 2}) as resume")
-            runInstall(appId, ctx, cancelled, paused, downloaderRef, threads,
+            runInstall(appId, ctx, cancelled, paused, downloaderRef, speedTier,
                     isResume = true, attempt = attempt + 1)
         }
     }
