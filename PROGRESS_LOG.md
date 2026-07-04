@@ -21,7 +21,7 @@
 >
 > **User decisions (AskUserQuestion):** (a) **generalize at the shared `StoreDownloadHooks` seam** so GOG/Epic inherit it; (b) bundle all 3 polish fixes (level23→%, add %/size to detail bar, fix blank cover art).
 >
-> **Built (native-steam-engineer, NOT yet committed at time of writing — see next commit):**
+> **Built (native-steam-engineer) → committed `3ad879a`, pushed, CI `28722689070` dispatched/RUNNING:**
 > - NEW `download/DownloadForegroundService.kt` — store-agnostic FGS, own "Downloads" channel (`downloads_channel`, IMPORTANCE_LOW), NOTIF_ID `9002` (≠ Steam's 9001), ongoing progress notif, tap→`DownloadManagerActivity`, `dataSync` type, `ConcurrentHashMap<key,Active(text,seq)>` source of truth (1→"Downloading", N→"N downloads"+most-recent line), self-stops when active set empties, sticky-restart-with-empty-map self-stops.
 > - NEW `download/DownloadScope.kt` — `object DownloadScope { val io = CoroutineScope(SupervisorJob()+Dispatchers.IO) }` process-lifetime scope.
 > - `StoreDownloadHooks.kt` — register/tick push `DownloadForegroundService.setProgress(key,line)`; markInstalled/Failed/Cancelled call `finish(key)`. Line built from registry entry via shared formatter.
@@ -31,7 +31,7 @@
 > - `DownloadManagerActivity.kt` — new `DownloadCoverArt` (Steam=appId loader, others=Coil URL, graceful placeholder) fixes blank Amazon cover (4c); `fmtSizeDm`→shared formatter.
 > - `AndroidManifest.xml` — `FOREGROUND_SERVICE_DATA_SYNC` perm + `<service DownloadForegroundService dataSync>`.
 >
-> Compile-sane review passed (`DownloadRegistry.get` exists; Kotlin/Java call direction clean — Java engine never calls the Kotlin object). **NEXT:** commit as The412Banner → CI build → deliver standard APK → device-test the shade notification + background survival + cover + label polish (checklist below).
+> Compile-sane review passed (`DownloadRegistry.get` exists; Kotlin/Java call direction clean — Java engine never calls the Kotlin object). **Committed `3ad879a` as The412Banner, pushed, CI `28722689070` running (~15 min). NEXT:** on green → deliver standard APK to `/sdcard/Download/` → device-test the shade notification + background survival + cover + label polish (checklist below).
 >
 > **Device-test checklist:** (1) Amazon install → live ongoing shade notif "Downloading … — X% (…/…)", no sound; (2) tap notif → opens Downloads&Library; (3) Home mid-DL → keeps progressing; (4) Back off detail page mid-DL → continues (used to abort); (5) Cancel from Manager stops it + clears notif; (6) Cancel from detail page still works; (7) complete → INSTALLED row + notif auto-dismiss; (8) Amazon cover renders (no white box); (9) detail label = `20% (810.2 MB / 3.9 GB)`, never "level23"; (10) Steam notif still independent (channel 9001).
 
