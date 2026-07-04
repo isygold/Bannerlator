@@ -13,6 +13,23 @@
 
 ---
 
+## 2026-07-04 — 🐞→✅ Install-state = one source of truth (uninstall left Amazon list "Installed")
+
+> **Device-test of `3ad879a` surfaced a bug:** user uninstalled Amazon "Dread Templar" from the DL manager. **Files WERE deleted** (device-verified: `/data/data/com.winlator.banner/files/Amazon/` empty), but the Amazon store list still showed "✓ Installed". **Cause:** cross-store uninstall cleared the registry row + Steam DB but never Amazon's native record; the Amazon list reads install-state solely from pref `amazon_exe_<id>` (`AmazonGamesActivity.kt:1014,1245`), which survived. Latent 2nd bug: `AmazonLibrarySync.seed()` treated `exe!=null` as installed → would resurrect a zombie INSTALLED row on next cold start.
+>
+> **User decisions (AskUserQuestion):** install-state = ONE source of truth across detail/card/list for ALL of {install-state, update-available, cover/metadata}; generalize seam for GOG/Epic.
+>
+> **Fix (native-steam-engineer) → committed `cceba57`, pushed, CI `28723445905` running:**
+> - NEW `AmazonInstallState.purge(ctx,pid)` — single owner of Amazon's native record (clears `amazon_exe_`/`amazon_dir_`/`amazon_manifest_version_`/`amazon_size_`); called from ALL 3 uninstall paths (list, detail, cross-store Manager). Amazon-side so `download` pkg stays engine-free.
+> - `DownloadManagerActivity.purgeNativeInstall(entry)` — generalized `when(store)` seam (AMAZON wired; GOG/EPIC TODO-stub; STEAM via DB); + seeds Amazon in `onCreate` so opening the Manager directly self-heals; + amber "● Installed — Update available" on the card.
+> - `AmazonLibrarySync` **self-heal**: install-truth now requires bytes on disk (`isInstalled(dir) || (exe!=null && File(exe).exists())`), else purge prefs + `removeLibraryEntry`. `isActive` guard moved BEFORE the heal so in-flight downloads are never purged. → auto-fixes the user's current orphaned Dread Templar prefs on next launch.
+> - `DownloadEntry.updateAvailable` (transient, not persisted) — amber card marker matching the store list's language; sourced from cached `versionId` `_UPDATE_AVAILABLE` suffix at seed; `markInstalled` clears it; Steam=false.
+> - cover parity: seed cover = `artUrl.ifEmpty{heroUrl}` (matches list). Installed cards show no size line (Steam parity — flagged, can add if wanted).
+>
+> Compile-verified (`Store` imported, `isActive`/`get` exist, same-package helper). **NEXT:** CI green → deliver APK → device-test: uninstall from Manager → Amazon list flips to NOT installed; cold restart → no zombie; update-available shows on card; cover/title match detail.
+
+---
+
 ## 2026-07-04 — 🔔 Cross-store download NOTIFICATION + background survival (device-test feedback on restyle build)
 
 > **Restyle+Amazon build `7ec2b50` device-tested by user (3 screenshots, Dread Templar / Amazon).** ✅ Restyle solid (detail page matches Steam layout + orange Amazon badge); ✅ Amazon→DownloadRegistry end-to-end PROVEN: ⬇ header "1" badge lit on download start, Downloads&Library shows live Amazon row `20% (810.2 MB / 3.9 GB)` + Cancel, library seeded (FlatOut + HL2). **Gap the user flagged:** Amazon downloads don't appear in the **system notification shade like Steam does**, and (root-caused) don't survive backgrounding.
