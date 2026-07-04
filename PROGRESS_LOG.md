@@ -2,6 +2,14 @@
 
 ---
 
+## 2026-07-04 — ⏭️ NEXT FEATURE: cross-store Download Manager (Steam-first, Compose M3) — UNBLOCKED, ready to start
+
+> The gate is met (Steam work merged to main), so the **cross-store Download Manager** is now the active feature. **Design is locked** (spec + exact UI tokens + HTML preview already delivered — see memory `project_bannerlator_download_manager`). Template = BannerHub 3.8.0's `BhDownloadService`/`BhDownloadsActivity`/`⬇ badge`, ported to **Jetpack Compose M3 / WinlatorTheme**. v1 scope = **Downloads + Library** (active/paused downloads on top, persistent installed-game library w/ Launch/Uninstall below, Clear), Steam-first.
+> **Phasing (agreed):** (0) ✅ finish+merge Steam — DONE. (1) build store-agnostic **`DownloadRegistry`** (observable StateFlow) + normalized **`DownloadEntry`**(store,id,name,cover,state,pct,installDone/Total,downloadDone/Total,pause?,cancel) = the `BhDownloadService` role. (2) route `SteamDepotDownloader` into it (already has the data via its listener; keep the `DownloadProgress:` event). (3) Compose **`DownloadsButton`** (M3 IconButton+Badge) + **`DownloadManagerScreen`** (Scaffold/TopAppBar "Downloads & Library", LazyColumn of cards matching the games/container card idiom, **two-bar byte progress** like the Steam detail page, store-colored badges, Clear). (4) wire ⬇ into Steam library+detail headers + tap-card→correct-store-detail routing. (5) LATER: Epic/GOG/Amazon report into the same registry (cancel-only where no pause). Each phase = own CI build + device test + memory/log checkpoint.
+> **Start:** branch off `main` (e.g. `feat/download-manager`). No release tie-in.
+
+---
+
 ## 2026-07-04 — 🎉 MERGED TO MAIN: `feat/steam-goldberg-patcher` → main (fast-forward, NO release cut)
 
 > All 3 merge-prep tasks done → **merged the whole Steam/Goldberg branch to `main`** via fast-forward (main was a strict ancestor). `main`: `cd7082c` → **`c89dc03`**. Pushed.
