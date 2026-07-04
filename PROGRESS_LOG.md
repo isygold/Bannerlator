@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-07-04 — 🛠️ Batch 2 lined up (session/process hardening) — native-steam agent implementing
+
+> After merge-gate #1 (full HL2 download) proven, user approved Batch 2. A native-steam-engineer subagent is implementing it now (not yet committed/built).
+> **Batch 2 (scoped pragmatic):** (1) **partial wakelock while downloading** (+ WAKE_LOCK perm) — root-cause fix for the OEM kill→restart churn that spawns a 2nd process and self-collides (LogonSessionReplaced); (2) **force reconnect+relogin before a retry** — new `SteamRepository.reconnectAndRelogin(ms)` (ensureLoggedIn no-ops when it *thinks* it's logged in, so a stale/masked session never recovered); retry now runs on a genuinely fresh session; (3) **wire the FGS notification to real state** (Online / Downloading N%) — the existing `updateNotification` was dead code; makes the FGS legitimately ongoing (less killable) + honest.
+> **DEFERRED (documented follow-up, not in Batch 2):** the heavyweight dedicated `:steam` single-owner process refactor — with the wakelock stopping the churn, the practical collision should be gone; Force Stop stays the fallback.
+> **Also queued polish (not started):** exe-picker should filter/rank OUT bin/*.exe SDK tools (surface hl2.exe); grow install denominator past the low PICS estimate.
+> **In flight:** exe-picker responsive-height build CI `28694272626` (HEAD 20e08f1) — deliver when green so user can confirm picker scroll + Launch HL2.
+
+---
+
 ## 2026-07-04 — 🎉 MERGE-GATE #1 MET: full HL2 download completed E2E (Batch 1 device-proven) + exe-picker scroll fix
 
 > **THE download saga is FIXED.** After Force Stop → single process → HL2 Install on Batch 1 (`6b91f13`): library-sync pause worked, appInfo/depot-keys landed (no 60s timeout), all depots pulled real bytes. Log: `Total downloaded: 5,967,673,520 B (10,684,397,022 uncompressed) from 8 depots` → `Download complete`. **On-disk HL2 = 10 GB** (was 822 MB). UI "100% (8.5 GB / 8.4 GB) · Installed". False-complete guard correctly did NOT trip.
