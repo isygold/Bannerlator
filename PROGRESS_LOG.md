@@ -2,6 +2,15 @@
 
 ---
 
+## 2026-07-04 — ✅ Batch 2 committed, build started (CI 28694533713, SHA 3e68a93)
+
+> **Commit `3e68a93`** on `feat/steam-goldberg-patcher`. Combined build **`28694533713`** in_progress on HEAD `3e68a93` (~16 min) — carries Batch 2 + the exe-picker responsive-scroll fix (picker-only build 28694272626 cancelled/superseded). Diff reviewed — clean + compile-correct (`row.name` in scope, interop verified).
+> **What shipped:** (1) partial WAKE_LOCK held only while downloading (acquire at setDownloadActive(true), release in finally; ref-counted, 6h cap) — keeps the process alive vs the OEM killer so it can't churn into a 2nd process/self-collision. (2) `SteamRepository.reconnectAndRelogin(ms)` — tears the CM session down + rebuilds it; runInstall retry uses it when no depot progress (0%/60s appinfo-no-reply signature) or on a repeat attempt, else keeps lightweight ensureLoggedIn for the ~1h-logoff case. (3) FGS notification wired to real state via process-static `setStatusText` (Online/Connecting/… + 'Downloading N%' throttled; reverts on finish) — makes the FGS truthful + legitimately ongoing.
+> **Deferred (documented in code):** dedicated `:steam` single-owner process.
+> **Next (checkpoint 3 on build finish):** watch CI green → deliver APK → device-test: open app (NO Force Stop this time) → HL2 Install should just work; verify wakelock held/released log pairs, notification shows Downloading N%, and a stall auto-recovers via reconnectAndRelogin. Also confirm exe-picker scrolls portrait+landscape + Launch HL2.
+
+---
+
 ## 2026-07-04 — 🛠️ Batch 2 lined up (session/process hardening) — native-steam agent implementing
 
 > After merge-gate #1 (full HL2 download) proven, user approved Batch 2. A native-steam-engineer subagent is implementing it now (not yet committed/built).
