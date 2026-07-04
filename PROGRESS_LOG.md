@@ -9,6 +9,8 @@
 > **Start:** branch off `main` (e.g. `feat/download-manager`). No release tie-in.
 >
 > **✅ PHASE 1 BUILT (`2476995`, branch `feat/download-manager`):** store-agnostic data layer in new subpackage `com.winlator.star.store.download` (3 files, 368 lines) — `DownloadModels.kt` (`Store`/`DownloadState` enums, `DownloadEntry` w/ two byte pairs + transient pause/cancel lambdas + `key`/`isActive`, `LibraryEntry`), `DownloadRegistry.kt` (object: `entries`/`activeCount`/`library` StateFlows, `init`/`upsert`/`update`/`remove`/`clear`/`get`/`isActive`/lib ops, thread-safe CAS, INSTALLED-only durable `bh_library` persistence), `StoreStyle.kt` (store accent colors). Zero Steam imports; Phase 2/3 seams documented in KDoc. Compile-check CI `28713214632` running (no local build available). **NEXT = Phase 2: route `SteamDepotDownloader` into the registry.**
+>
+> **✅ PHASE 2 BUILT (`6826c93`):** Steam is now a live PRODUCER into `DownloadRegistry`. `SteamDepotDownloader.kt` gets additive hooks — start→`upsert(DOWNLOADING, pause/cancel from DownloadControl)`, progress→`update{copy(pct,bytes)}`, complete→`copy(INSTALLED, installPath)` (auto-persists to library), pause/cancel/fail→state transitions at existing finally points (fail centralized in `emitFailed`). NEW `SteamLibrarySync.kt` seeds `is_installed=1` games into the library; `DownloadRegistry.init` + seed wired in `SteamForegroundService.onStartCommand`. Existing `DownloadProgress:`/`DownloadComplete:` emits unchanged (detail page still works); registry still imports zero Steam types. **NEXT = Phase 3: Compose UI (⬇ badge + DownloadManagerScreen) → combined build → deliver.**
 
 ---
 
