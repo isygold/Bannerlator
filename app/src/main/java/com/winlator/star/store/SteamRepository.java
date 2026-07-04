@@ -546,6 +546,35 @@ public final class SteamRepository {
         status = s;
         slog(prev + " -> " + s + "  (" + reason + ")");
         emit("SteamStatus:" + s.name());
+        // Mirror the honest connection state into the foreground-service notification so the FGS is
+        // a legitimately-ongoing, TRUTHFUL indicator (not a frozen "Connecting…" string). Static
+        // no-op when the service isn't running; guarded so any class-load/order issue on this path
+        // can never break the pill. (A live download temporarily overrides this with a "Downloading
+        // … N%" line from SteamDepotDownloader, which reverts here via refreshFgsStatus() on finish.)
+        try { SteamForegroundService.setStatusText(fgsTextFor(s)); }
+        catch (Throwable ignored) {}
+    }
+
+    /** Notification text for each connection state — the FGS's honest one-liner. */
+    private static String fgsTextFor(SteamStatus s) {
+        switch (s) {
+            case ONLINE:              return "Steam: Online";
+            case CONNECTING:          return "Connecting to Steam…";
+            case SIGNED_IN_ELSEWHERE: return "Signed in elsewhere";
+            case SIGNED_OUT:          return "Signed out";
+            case OFFLINE:
+            default:                  return "Offline";
+        }
+    }
+
+    /**
+     * Re-assert the CURRENT connection status into the FGS notification. Called by
+     * SteamDepotDownloader when a download ends, to revert the transient "Downloading … N%" text
+     * back to the honest connection state. Static no-op when the service isn't running.
+     */
+    public void refreshFgsStatus() {
+        try { SteamForegroundService.setStatusText(fgsTextFor(status)); }
+        catch (Throwable ignored) {}
     }
 
     /** Persistent, append-only session log so a mid/between-download LogonSessionReplaced is never lost. */
@@ -1174,6 +1203,55 @@ public final class SteamRepository {
             try { Thread.sleep(150); }
             catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
         }
+        return loggedIn;
+    }
+
+    /**
+     * Force a genuinely FRESH Steam session, then block the caller until it re-logs-in (or times out).
+     *
+     * ensureLoggedIn() short-circuits to {@code true} the instant {@code loggedIn} is set — which is
+     * exactly wrong for a retry after a stalled download: the session can be ONLINE-but-stale (a masked
+     * LogonSessionReplaced, or a socket that silently died) so the retry would run on the same dead
+     * session and fail again. This method instead tears the session DOWN and rebuilds it: it disconnects
+     * the CM and rides the SAME involuntary-logoff recovery path onLoggedOff() already uses —
+     * {@code forceReconnect=true} so onDisconnected reconnects even though a client-initiated disconnect
+     * arrives as "user-initiated", the in-flight-logon guard cleared (as onDisconnected does when the
+     * socket dies), and {@code loggingOut=false} so this is NOT mistaken for a user sign-out. onConnected
+     * then auto-logs-in from the saved refresh token and mints a brand-new session.
+     *
+     * Blocks the CALLING thread (the download worker — NEVER the pump) polling {@code loggedIn} every
+     * ~150ms like ensureLoggedIn; the pump keeps running callbacks meanwhile, so this can't deadlock.
+     *
+     * @return true if a fresh session is logged in by the time we return; false if there is no saved
+     *         token to recover to, or the fresh logon didn't land within {@code timeoutMs}.
+     */
+    public boolean reconnectAndRelogin(long timeoutMs) {
+        if (steamClient == null) return false;
+        if (!isLoggedInPrefs()) return false;   // no saved token — nothing to recover to; caller must re-auth
+        Log.i(TAG, "reconnectAndRelogin: forcing a fresh session (timeout " + timeoutMs + "ms)");
+        setStatus(SteamStatus.CONNECTING, "forced reconnect+relogin for retry");
+        // Arm the involuntary-logoff recovery path so the client-initiated disconnect below re-logs-in
+        // instead of being treated as a user sign-out (see onDisconnected/onLoggedOff).
+        loggingOut = false;
+        forceReconnect = true;
+        loggingOn.set(false);            // supersede any stalled in-flight logon (onDisconnected clears this too)
+        reconnectAttempts = 0;           // give the forced reconnect its full retry budget
+        logoffRecoveryAttempts = 0;
+        loggedIn = false;                // drop the stale session immediately so the poll below waits for the NEW one
+        final SteamClient sc = steamClient;
+        // CM I/O must not run on the caller/worker thread — post the disconnect to the pump. onDisconnected
+        // → auto-reconnect → onConnected → auto-login (isLoggedInPrefs) rebuilds the session.
+        if (pumpHandler != null) {
+            pumpHandler.post(() -> { try { sc.disconnect(); } catch (Throwable ignored) {} });
+        } else {
+            new Thread(() -> { try { sc.disconnect(); } catch (Throwable ignored) {} }, "SteamForcedReconnect").start();
+        }
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (!loggedIn && System.currentTimeMillis() < deadline) {
+            try { Thread.sleep(150); }
+            catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+        }
+        Log.i(TAG, "reconnectAndRelogin: loggedIn=" + loggedIn + " connected=" + connected);
         return loggedIn;
     }
 

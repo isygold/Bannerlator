@@ -1,6 +1,7 @@
 package com.winlator.star.store
 
 import android.content.Context
+import android.os.PowerManager
 import android.util.Log
 import `in`.dragonbra.javasteam.depotdownloader.DepotDownloader
 import `in`.dragonbra.javasteam.depotdownloader.IDownloadListener
@@ -21,6 +22,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
@@ -50,6 +52,49 @@ object SteamDepotDownloader {
 
     /** True if a download for this appId is currently running in this process. */
     @JvmStatic fun isDownloading(appId: Int): Boolean = activeDownloads.containsKey(appId)
+
+    // -------------------------------------------------------------------------
+    // Partial wakelock — keeps the process/CPU alive for the duration of a download
+    // -------------------------------------------------------------------------
+    // ROOT-CAUSE churn fix: on this OEM device's aggressive task-killer the app process was killed
+    // and restarted repeatedly mid-download (4 PIDs in 10 min); a restarted process re-logs-in while
+    // the old process's Steam session is still briefly alive → Steam kicks one → LogonSessionReplaced
+    // → download stuck at 0%. A PARTIAL_WAKE_LOCK held ONLY while a download is active keeps the CPU
+    // (and thus the process) alive so the killer is far less likely to fire mid-download. One shared,
+    // reference-counted lock so overlapping downloads acquire/release safely; acquired with a 6h
+    // safety cap so a crash can never pin it forever.
+    @Volatile private var wakeLock: PowerManager.WakeLock? = null
+
+    /** Lazily create (once) and acquire the shared partial wakelock. Null/exception-safe: a device
+     *  without POWER_SERVICE (universal in practice) must not break the download. */
+    @Synchronized
+    private fun acquireDownloadWakelock(ctx: Context) {
+        try {
+            var wl = wakeLock
+            if (wl == null) {
+                val pm = ctx.applicationContext.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                if (pm == null) { dlog("WAKELOCK: POWER_SERVICE unavailable — continuing without it"); return }
+                wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Bannerlator:steam-download")
+                wl.setReferenceCounted(true)   // multiple concurrent downloads acquire/release safely
+                wakeLock = wl
+            }
+            wl.acquire(6L * 60L * 60L * 1000L)   // 6h cap — a crash can't pin the lock forever
+            dlog("WAKELOCK: acquired (partial, held=${wl.isHeld})")
+        } catch (t: Throwable) {
+            dlog("WAKELOCK: acquire failed (${t.message}) — continuing without it")
+        }
+    }
+
+    /** Release one acquire of the shared wakelock. Guarded: a reference-counted release throws if the
+     *  count already hit zero, which is benign — we just want it dropped on every terminal path. */
+    private fun releaseDownloadWakelock() {
+        try {
+            val wl = wakeLock ?: return
+            if (wl.isHeld) { wl.release(); dlog("WAKELOCK: released (held=${wl.isHeld})") }
+        } catch (t: Throwable) {
+            dlog("WAKELOCK: release skipped (${t.message})")
+        }
+    }
 
     // -------------------------------------------------------------------------
     // Debug log — written to getExternalFilesDir/steam_debug.txt
@@ -335,6 +380,15 @@ object SteamDepotDownloader {
         // in the finally block so a mid-download CM session loss can be recovered transparently.
         var failure: Throwable? = null
 
+        // "We got real depot data" signal — set once the first chunk/file lands (i.e. we're past the
+        // appInfo/manifest/depot-key CM stage). Drives the finally's retry strategy: NO progress ==
+        // the 0%/60s appinfo-no-reply signature, which means the session is likely ONLINE-but-stale,
+        // so the retry must force a genuinely FRESH session (reconnectAndRelogin) rather than a
+        // plain ensureLoggedIn that would short-circuit true on the same dead session.
+        val gotDepotKeyOrChunk = AtomicBoolean(false)
+        // Throttle FGS notification updates to whole-percent changes (chunks fire far too often).
+        val lastNotifiedPct = AtomicInteger(-1)
+
         downloader.addListener(object : IDownloadListener {
             override fun onDownloadStarted(item: DownloadItem) {
                 dlog("onDownloadStarted: appId=${item.appId}")
@@ -346,6 +400,7 @@ object SteamDepotDownloader {
             }
 
             override fun onFileCompleted(depotId: Int, fileName: String, depotPercentComplete: Float) {
+                gotDepotKeyOrChunk.set(true)   // a completed file means we're well past the appInfo stage
                 val pct = (depotPercentComplete * 100).toInt()
                 dlog("File done: depot=$depotId pct=$pct% file=$fileName")
             }
@@ -356,6 +411,7 @@ object SteamDepotDownloader {
                 compressedBytes: Long,
                 uncompressedBytes: Long,
             ) {
+                gotDepotKeyOrChunk.set(true)   // first chunk = past appInfo/manifest/depot-key; NOT a 0% stall
                 // Both params are cumulative PER DEPOT — keep the latest (monotonic) per
                 // depot, then SUM across depots so multi-depot games climb to the true total.
                 if (uncompressedBytes > (installByDepot[depotId] ?: 0L)) installByDepot[depotId] = uncompressedBytes
@@ -386,6 +442,14 @@ object SteamDepotDownloader {
                         "download=${fmtSize(downloadDone)}/${fmtSize(dTotal)}")
                 emitProgress(installDone, iTotal, downloadDone, dTotal)
                 db.updateDownloadProgress(appId, installDone)
+
+                // FGS notification: honest "Downloading <game> — N%", throttled to whole-percent
+                // changes so chunk spam doesn't thrash the notification. Reverted to the connection
+                // status in the finally (repo.refreshFgsStatus()). Static no-op if the FGS is down.
+                if (lastNotifiedPct.getAndSet(pct) != pct) {
+                    try { SteamForegroundService.setStatusText("Downloading ${row.name} — $pct%") }
+                    catch (_: Throwable) {}
+                }
             }
 
             override fun onDepotCompleted(depotId: Int, compressedBytes: Long, uncompressedBytes: Long) {
@@ -457,6 +521,11 @@ object SteamDepotDownloader {
         // finally block. Cleared for every terminal path (success / fail / cancel / exception).
         repo.setDownloadActive(true)
 
+        // Hold a partial wakelock for the CM+download work so the OEM task-killer can't kill the
+        // process mid-download (the LogonSessionReplaced churn root cause). Released in the finally
+        // next to setDownloadActive(false) — covers every terminal path (success/fail/cancel/exception).
+        acquireDownloadWakelock(ctx)
+
         // --- CM AsyncJob timeout watchdog (10s default -> 60s) --------------------------------
         // The download's internal CM jobs (appinfo/manifest/depot-key/CDN-auth) time out at the
         // hard-coded 10s AsyncJob default with no exposed knob; the only reachable lever is the live
@@ -491,6 +560,8 @@ object SteamDepotDownloader {
         } finally {
             jobWatchdog.set(false)   // stop the AsyncJob-timeout watchdog for this download
             repo.setDownloadActive(false)   // release the CM; resumes any parked library PICS sync
+            releaseDownloadWakelock()       // drop the partial wakelock on EVERY terminal path
+            try { repo.refreshFgsStatus() } catch (_: Throwable) {}  // revert "Downloading … N%" → connection status
             activeDownloads.remove(appId)
             dlog("Closing DepotDownloader")
             try { downloader.close() } catch (_: Exception) {}
@@ -510,14 +581,25 @@ object SteamDepotDownloader {
                         repo.emit("DownloadCancelled:$appId")
                     }
                     else -> {
-                        // Genuine failure. Before surfacing it, give the session a chance to come
-                        // back — Fix A (SteamRepository.onLoggedOff) reconnects+relogins after an
-                        // involuntary CM logoff (the ~1h QR-session case). If it recovers, retry
-                        // this download once as a resume so the in-flight download is not aborted.
+                        // Genuine failure. Before surfacing it, give the session a chance to come back
+                        // and retry this download once as a resume (so the in-flight download is not aborted).
                         if (attempt < MAX_SESSION_RETRIES) {
-                            dlog("finally: failure on attempt ${attempt + 1} — awaiting session recovery")
-                            val ok = repo.ensureLoggedIn(30_000L)
-                            dlog("finally: post-failure ensureLoggedIn → $ok (loggedIn=${repo.isLoggedIn})")
+                            val progressed = gotDepotKeyOrChunk.get()
+                            // Force a genuinely FRESH session (tear down + relogin) when either:
+                            //   (a) we made NO depot progress — the 0%/60s appinfo-no-reply signature, meaning
+                            //       the session is likely ONLINE-but-stale; a plain ensureLoggedIn would
+                            //       short-circuit true on that SAME dead session and fail again; or
+                            //   (b) this is already a retry (attempt > 0) — the earlier lightweight recovery
+                            //       didn't stick, so escalate to a full reconnect.
+                            // Otherwise (real bytes downloaded, THEN the session was lost — the ~1h involuntary
+                            // CM-logoff case) keep the existing lightweight ensureLoggedIn recovery that works.
+                            val forceFresh = !progressed || attempt > 0
+                            dlog("finally: failure on attempt ${attempt + 1} " +
+                                    "(progressed=$progressed, forceFresh=$forceFresh) — awaiting session recovery")
+                            val ok = if (forceFresh) repo.reconnectAndRelogin(30_000L)
+                                     else repo.ensureLoggedIn(30_000L)
+                            dlog("finally: post-failure ${if (forceFresh) "reconnectAndRelogin" else "ensureLoggedIn"}" +
+                                    " → $ok (loggedIn=${repo.isLoggedIn})")
                             if (ok && !cancelled.get() && !paused.get()) {
                                 dlog("finally: session recovered — will retry as resume")
                                 retryAsResume = true
