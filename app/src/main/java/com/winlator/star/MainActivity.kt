@@ -159,7 +159,11 @@ class MainActivity : AppCompatActivity() {
                 val selectedMenuItemId = intent.getIntExtra("selected_menu_item_id", 0)
                 validRouteOrNull(intent.getStringExtra(EXTRA_OPEN_SCREEN))
                     ?: menuItemIdToRoute(selectedMenuItemId)
-                    ?: Screen.Games.route
+                    // User-chosen default landing screen (Settings). Only applies when nothing else
+                    // dictated the route (no deep-link / menu nav / edit-controls). Defaults to
+                    // "games" = the Game Shortcuts page, i.e. the historical default.
+                    ?: if (prefs.getString("default_landing_screen", "games") == "containers")
+                        Screen.Containers.route else Screen.Games.route
             }
         }
 
