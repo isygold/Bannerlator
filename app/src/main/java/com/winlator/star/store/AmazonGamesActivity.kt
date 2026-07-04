@@ -36,6 +36,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -742,13 +743,6 @@ class AmazonGamesActivity : ComponentActivity() {
         private const val CACHE_KEY = "amazon_library_cache"
         private const val VIEW_MODE_KEY = "amazon_view_mode"
 
-        val COLOR_ACCENT = 0xFF0055FF.toInt()
-        val COLOR_ADD = 0xFF0055FF.toInt()
-        val COLOR_CANCEL = 0xFFCC3333.toInt()
-        val COLOR_CARD_BG = 0xFF000000.toInt()
-        val COLOR_HDR_BG = 0xFF000000.toInt()
-        val COLOR_ROOT_BG = 0xFF000000.toInt()
-
         fun viewModeIcon(mode: String): String = when (mode) {
             "grid" -> "\u25A6"
             "poster" -> "\u2630"
@@ -817,41 +811,41 @@ private fun AmazonGamesScreen(
         else games.filter { it.title.contains(searchQuery, ignoreCase = true) }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(AmazonGamesActivity.COLOR_ROOT_BG))) {
+    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(AmazonGamesActivity.COLOR_HDR_BG))
+                .background(MaterialTheme.colorScheme.background)
                 .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Button(
                 onClick = onBack,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0055FF)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.height(40.dp),
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-            ) { Text("\u2190", color = Color.White, fontSize = 16.sp) }
+            ) { Text("\u2190", color = MaterialTheme.colorScheme.onPrimary, fontSize = 16.sp) }
 
             Text(
                 text = "Amazon Games",
                 fontSize = 18.sp,
-                color = Color(AmazonGamesActivity.COLOR_ACCENT),
+                color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f).padding(start = 12.dp),
             )
 
             Button(
                 onClick = onViewModeToggle,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0055FF)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.height(40.dp),
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
             ) {
                 Text(
                     text = AmazonGamesActivity.viewModeIcon(viewMode),
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.onPrimary,
                     fontSize = 16.sp,
                 )
             }
@@ -862,12 +856,12 @@ private fun AmazonGamesScreen(
                 onClick = onRefresh,
                 enabled = refreshEnabled,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (refreshEnabled) Color(0xFF0055FF) else Color(0xFF555555),
+                    containerColor = if (refreshEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                 ),
                 modifier = Modifier.height(40.dp),
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-            ) { Text("\u21BA", color = Color.White, fontSize = 16.sp) }
+            ) { Text("\u21BA", color = MaterialTheme.colorScheme.onPrimary, fontSize = 16.sp) }
 
             // \u2B07 cross-store Download Manager (global active-count badge), trailing the
             // header actions like Steam's list header.
@@ -878,19 +872,19 @@ private fun AmazonGamesScreen(
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchChange,
-            placeholder = { Text("Search games\u2026", color = Color(0xFF666666)) },
+            placeholder = { Text("Search games\u2026", color = MaterialTheme.colorScheme.onSurfaceVariant) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth().padding(0.dp),
             textStyle = androidx.compose.ui.text.TextStyle(
-                color = Color.White,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 14.sp,
             ),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Color(0xFF0055FF),
-                unfocusedBorderColor = Color(0xFF333333),
-                cursorColor = Color(0xFF0055FF),
-                focusedContainerColor = Color.Black,
-                unfocusedContainerColor = Color.Black,
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                cursorColor = MaterialTheme.colorScheme.primary,
+                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
             ),
         )
 
@@ -898,10 +892,10 @@ private fun AmazonGamesScreen(
         val statusColor = when {
             statusText.startsWith("Error") || statusText.startsWith("Not logged in")
                 || statusText.startsWith("Token refresh") || statusText.startsWith("No games") ->
-                Color(0xFFFF6B6B)
+                MaterialTheme.colorScheme.error
             statusText.contains("game") && (statusText.contains("tap") || statusText.contains("cached")) ->
-                Color(0xFF81C784)
-            else -> Color(0xFFCCCCCC)
+                Color(0xFF81C784) // semantic "library ready" green
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
         }
         Text(
             text = statusText,
@@ -909,7 +903,7 @@ private fun AmazonGamesScreen(
             color = statusColor,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.Black)
+                .background(MaterialTheme.colorScheme.background)
                 .padding(horizontal = 12.dp, vertical = 6.dp),
         )
 
@@ -960,7 +954,7 @@ private fun AmazonGamesScreen(
                     text = if (statusText.contains("Error") || statusText.contains("No games"))
                         statusText else "Loading\u2026",
                     fontSize = 14.sp,
-                    color = Color(0xFF666666),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.align(Alignment.Center).padding(24.dp),
                 )
             }
@@ -1024,7 +1018,7 @@ private fun GameCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color(AmazonGamesActivity.COLOR_CARD_BG), RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp))
             .clickable(onClick = onCardClick)
             .padding(10.dp),
     ) {
@@ -1041,7 +1035,7 @@ private fun GameCard(
                 contentDescription = null,
                 modifier = Modifier
                     .size(width = 60.dp, height = 60.dp)
-                    .background(Color.Black, RoundedCornerShape(8.dp)),
+                    .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp)),
                 contentScale = ContentScale.Crop,
             )
 
@@ -1052,7 +1046,7 @@ private fun GameCard(
                     Text(
                         text = game.title,
                         fontSize = 15.sp,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -1062,7 +1056,7 @@ private fun GameCard(
                         Text(
                             text = " \u2713",
                             fontSize = 14.sp,
-                            color = Color(0xFF4CAF50),
+                            color = Color(0xFF4CAF50), // semantic installed-green
                             fontWeight = FontWeight.Bold,
                         )
                     }
@@ -1077,7 +1071,7 @@ private fun GameCard(
                     Text(
                         text = sub,
                         fontSize = 11.sp,
-                        color = Color(0xFF888888),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -1087,7 +1081,7 @@ private fun GameCard(
             Text(
                 text = if (isExpanded) "\u25B2" else "\u25BC",
                 fontSize = 14.sp,
-                color = Color(0xFF888888),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.clickable(onClick = onArrowClick).padding(8.dp, 0.dp, 0.dp, 0.dp),
             )
         }
@@ -1105,13 +1099,14 @@ private fun GameCard(
                 Text(
                     text = meta,
                     fontSize = 11.sp,
-                    color = Color(0xFF888888),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
 
             val checkText = if (updateAvailable) "\u2713 Installed \u2014 Update Available"
             else "\u2713 Installed"
+            // semantic: amber = update-available, installed-green = up to date
             val checkColor = if (updateAvailable) Color(0xFFFFAA00) else Color(0xFF4CAF50)
             if (isInstalled) {
                 Text(
@@ -1131,14 +1126,14 @@ private fun GameCard(
                         .fillMaxWidth()
                         .height(6.dp)
                         .padding(top = 6.dp),
-                    color = Color(AmazonGamesActivity.COLOR_ACCENT),
-                    trackColor = Color(0xFF333333),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 )
                 if (!ds.isComplete) {
                     Text(
                         text = "${ds.progress}%",
                         fontSize = 12.sp,
-                        color = Color(AmazonGamesActivity.COLOR_ACCENT),
+                        color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.Bold,
                     )
                 }
@@ -1146,14 +1141,14 @@ private fun GameCard(
                     Text(
                         text = "Cancelling\u2026",
                         fontSize = 11.sp,
-                        color = Color(0xFFAAAAAA),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 } else {
                     Text(
                         text = ds.statusText,
                         fontSize = 11.sp,
-                        color = Color(0xFFAAAAAA),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
@@ -1161,6 +1156,7 @@ private fun GameCard(
 
             Spacer(Modifier.height(8.dp))
 
+            val isCancelBtn = ds != null && ds.isVisible
             Button(
                 onClick = {
                     if (ds != null && ds.isVisible) {
@@ -1172,11 +1168,8 @@ private fun GameCard(
                     }
                 },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = when {
-                        ds != null && ds.isVisible -> Color(AmazonGamesActivity.COLOR_CANCEL)
-                        isInstalled -> Color(AmazonGamesActivity.COLOR_ADD)
-                        else -> Color(AmazonGamesActivity.COLOR_ACCENT)
-                    },
+                    containerColor = if (isCancelBtn) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.primary,
                 ),
                 modifier = Modifier.fillMaxWidth().height(40.dp),
                 shape = RoundedCornerShape(8.dp),
@@ -1187,7 +1180,8 @@ private fun GameCard(
                         isInstalled -> "Add to Launcher"
                         else -> "Install"
                     },
-                    color = Color.White,
+                    color = if (isCancelBtn) MaterialTheme.colorScheme.onError
+                    else MaterialTheme.colorScheme.onPrimary,
                     fontSize = 13.sp,
                 )
             }
@@ -1254,8 +1248,8 @@ private fun GameGridTile(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.Black)
-            .border(1.dp, Color(0xFF0055FF).copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
             .combinedClickable(
                 onClick = onToggleExpansion,
                 onLongClick = onLongPress,
@@ -1304,7 +1298,7 @@ private fun GameGridTile(
                     Text(
                         text = " \u2713",
                         fontSize = 11.sp,
-                        color = Color(0xFF66BB6A),
+                        color = Color(0xFF66BB6A), // semantic installed-green
                         fontWeight = FontWeight.Bold,
                     )
                 }
@@ -1313,10 +1307,11 @@ private fun GameGridTile(
 
         // Action row (shown on tap)
         if (isExpanded) {
+            val isCancelBtn = downloadState != null && downloadState.isVisible
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF0D0D0D))
+                    .background(MaterialTheme.colorScheme.surface)
                     .padding(horizontal = 6.dp, vertical = 6.dp),
             ) {
                 val ds = downloadState
@@ -1324,8 +1319,8 @@ private fun GameGridTile(
                     LinearProgressIndicator(
                         progress = { ds.progress / 100f },
                         modifier = Modifier.fillMaxWidth().height(3.dp),
-                        color = Color(AmazonGamesActivity.COLOR_ACCENT),
-                        trackColor = Color(0xFF333333),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
                     )
                 }
 
@@ -1336,11 +1331,8 @@ private fun GameGridTile(
                         else onInstallOrLaunch()
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = when {
-                            ds != null && ds.isVisible -> Color(AmazonGamesActivity.COLOR_CANCEL)
-                            isInstalled -> Color(AmazonGamesActivity.COLOR_ADD)
-                            else -> Color(AmazonGamesActivity.COLOR_ACCENT)
-                        },
+                        containerColor = if (isCancelBtn) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.primary,
                     ),
                     modifier = Modifier.fillMaxWidth().height(32.dp),
                     shape = RoundedCornerShape(8.dp),
@@ -1352,7 +1344,8 @@ private fun GameGridTile(
                             isInstalled -> "Add to Launcher"
                             else -> "Install"
                         },
-                        color = Color.White,
+                        color = if (isCancelBtn) MaterialTheme.colorScheme.onError
+                        else MaterialTheme.colorScheme.onPrimary,
                         fontSize = 11.sp,
                     )
                 }
@@ -1410,13 +1403,13 @@ private fun InstallConfirmDialog(
                 Text(
                     text = sizeLabel,
                     fontSize = 14.sp,
-                    color = Color(0xFFCCCCCC),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
                     text = "Available storage:  ${AmazonGamesActivity.formatBytes(freeBytes)}",
                     fontSize = 14.sp,
-                    color = Color(0xFF88CC88),
+                    color = Color(0xFF88CC88), // semantic storage-ok green
                 )
             }
         },
@@ -1456,20 +1449,20 @@ private fun GameDetailDialog(
                 Text(
                     text = msg,
                     fontSize = 14.sp,
-                    color = Color(0xFFCCCCCC),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 if (installedExe != null) {
                     Spacer(Modifier.height(4.dp))
                     Text(
                         text = "\n.exe: ${File(installedExe).name}",
                         fontSize = 12.sp,
-                        color = Color(0xFF888888),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(8.dp))
                     Button(
                         onClick = onSetExe,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF444444)),
-                    ) { Text("Set .exe\u2026", color = Color.White) }
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                    ) { Text("Set .exe\u2026", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 }
             }
         },

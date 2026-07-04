@@ -10,23 +10,19 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -35,20 +31,30 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.winlator.star.store.download.DownloadRegistry
 import com.winlator.star.store.download.DownloadsButton
+import com.winlator.star.store.download.INSTALLED_GREEN
+import com.winlator.star.store.download.InfoChip
 import com.winlator.star.store.download.Store
+import com.winlator.star.store.download.StoreActionButton
+import com.winlator.star.store.download.StoreActionRow
+import com.winlator.star.store.download.StoreBadge
+import com.winlator.star.store.download.StoreDetailHeader
+import com.winlator.star.store.download.StoreDetailState
 import com.winlator.star.store.download.StoreDownloadHooks
+import com.winlator.star.store.download.StoreHero
+import com.winlator.star.store.download.StoreProgressBar
+import com.winlator.star.store.download.StoreSection
+import com.winlator.star.store.download.StoreStatusText
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -155,7 +161,6 @@ class AmazonGameDetailActivity : ComponentActivity() {
                     launchBtnEnabled = launchBtnEnabled,
                     installBtnVisible = installBtnVisible,
                     installBtnText = installBtnText,
-                    installBtnColor = installBtnColor,
                     installBtnEnabled = installBtnEnabled,
                     setExeBtnVisible = setExeBtnVisible,
                     uninstallBtnVisible = uninstallBtnVisible,
@@ -645,6 +650,7 @@ class AmazonGameDetailActivity : ComponentActivity() {
 
 // ─── Composable Screen ─────────────────────────────────────────────────────
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AmazonGameDetailScreen(
     artUrl: String?,
@@ -662,7 +668,6 @@ private fun AmazonGameDetailScreen(
     launchBtnEnabled: Boolean,
     installBtnVisible: Boolean,
     installBtnText: String,
-    installBtnColor: Int,
     installBtnEnabled: Boolean,
     setExeBtnVisible: Boolean,
     uninstallBtnVisible: Boolean,
@@ -685,46 +690,18 @@ private fun AmazonGameDetailScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0D0D0D))
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState()),
     ) {
-        // Header
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFF1A1000))
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Button(
-                onClick = onBack,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A2000)),
-                modifier = Modifier.height(36.dp),
-                shape = RoundedCornerShape(4.dp),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-            ) { Text("\u2190", color = Color.White) }
+        // Header — back + Amazon badge + Download Manager button (Steam parity).
+        StoreDetailHeader(
+            onBack = onBack,
+            storeBadge = { StoreBadge(Store.AMAZON) },
+            actions = { DownloadsButton() },
+        )
 
-            Text(
-                text = titleText ?: "",
-                fontSize = 15.sp,
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(start = 12.dp, end = 8.dp),
-            )
-
-            // ⬇ cross-store Download Manager (live active-count badge) — trailing edge,
-            // matching SteamGameDetailActivity's header placement.
-            DownloadsButton()
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 12.dp),
-        ) {
-            // Cover art
+        // Hero image with the fade into the page background.
+        StoreHero {
             if (!artUrl.isNullOrEmpty()) {
                 AsyncImage(
                     model = ImageRequest.Builder(context)
@@ -732,292 +709,150 @@ private fun AmazonGameDetailScreen(
                         .crossfade(true)
                         .build(),
                     contentDescription = null,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(200.dp)
-                        .background(Color(0xFF1A1000)),
+                    modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
                 )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                )
             }
+        }
 
-            // Game Info section
-            SectionHeader("GAME INFO")
-            InfoCard(
-                developer = developer,
-                publisher = publisher,
-                productId = productId,
-                sizeText = sizeText,
+        // Info section — name + metadata chips + install status.
+        Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)) {
+            Text(
+                text = titleText ?: "",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(8.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                InfoChip(sizeText)
+                if (!developer.isNullOrEmpty()) InfoChip(developer)
+                if (!publisher.isNullOrEmpty()) InfoChip(publisher)
+                if (!productId.isNullOrEmpty()) {
+                    val dot = productId.lastIndexOf('.')
+                    val shortId = if (dot in 0 until productId.length - 1)
+                        productId.substring(dot + 1) else productId
+                    InfoChip("ID: $shortId")
+                }
+            }
+            if (exeNameVisible) {
+                Spacer(Modifier.height(8.dp))
+                StoreStatusText(exeNameText, StoreDetailState.INSTALLED)
+            }
+        }
 
-            // Actions section
-            SectionHeader("ACTIONS")
-            ActionsCard(
-                exeNameText = exeNameText,
-                exeNameVisible = exeNameVisible,
-                progressVisible = progressVisible,
-                progressValue = progressValue,
-                progressLabel = progressLabel,
-                progressLabelVisible = progressLabelVisible,
-                launchBtnVisible = launchBtnVisible,
-                launchBtnEnabled = launchBtnEnabled,
-                installBtnVisible = installBtnVisible,
-                installBtnText = installBtnText,
-                installBtnColor = installBtnColor,
-                installBtnEnabled = installBtnEnabled,
-                setExeBtnVisible = setExeBtnVisible,
-                uninstallBtnVisible = uninstallBtnVisible,
-                onLaunchClick = onLaunchClick,
-                onInstallClick = onInstallClick,
-                onSetExeClick = onSetExeClick,
-                onUninstallClick = onUninstallClick,
+        // Progress — one honest install bar with its label. Byte figures flow into
+        // the Download Manager via StoreDownloadHooks; the label here carries the
+        // current file / status string.
+        if (progressVisible) {
+            StoreProgressBar(
+                pct = progressValue,
+                label = if (progressLabelVisible) progressLabel else null,
             )
-            Spacer(Modifier.height(8.dp))
+        }
 
-            // Updates section
-            SectionHeader("UPDATES")
-            UpdatesCard(
+        // Actions — weighted M3 buttons; Cancel/Uninstall are destructive (error).
+        StoreActionRow {
+            if (launchBtnVisible) {
+                StoreActionButton(
+                    text = "Launch",
+                    onClick = onLaunchClick,
+                    modifier = Modifier.weight(1f),
+                    enabled = launchBtnEnabled,
+                )
+            }
+            if (installBtnVisible) {
+                StoreActionButton(
+                    text = installBtnText,
+                    onClick = onInstallClick,
+                    modifier = Modifier.weight(1f),
+                    enabled = installBtnEnabled,
+                    destructive = installBtnText == "Cancel",
+                )
+            }
+            if (setExeBtnVisible) {
+                StoreActionButton(
+                    text = "Set .exe…",
+                    onClick = onSetExeClick,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            if (uninstallBtnVisible) {
+                StoreActionButton(
+                    text = "Uninstall",
+                    onClick = onUninstallClick,
+                    modifier = Modifier.weight(1f),
+                    destructive = true,
+                )
+            }
+        }
+
+        // Updates
+        StoreSection(title = "Updates") {
+            AmazonUpdatesContent(
                 updateStatusText = updateStatusText,
                 checkUpdatesEnabled = checkUpdatesEnabled,
                 updateBtnVisible = updateBtnVisible,
                 onCheckUpdatesClick = onCheckUpdatesClick,
                 onUpdateNowClick = onUpdateNowClick,
             )
-            Spacer(Modifier.height(8.dp))
+        }
 
-            // DLC section
-            SectionHeader("DLC")
-            DlcCard(
+        // DLC
+        StoreSection(title = "DLC") {
+            AmazonDlcContent(
                 dlcJson = dlcJson,
                 onDlcInstall = onDlcInstall,
             )
-            Spacer(Modifier.height(16.dp))
         }
+
+        Spacer(Modifier.height(16.dp))
     }
 }
 
-// ─── Sub-components ────────────────────────────────────────────────────────
+// ─── Store sections ────────────────────────────────────────────────────────
 
 @Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text = text,
-        fontSize = 11.sp,
-        color = Color(0xFFAA8844),
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 0.08.sp,
-        modifier = Modifier.padding(start = 2.dp, top = 16.dp, bottom = 6.dp),
-    )
-}
-
-@Composable
-private fun InfoCard(
-    developer: String?,
-    publisher: String?,
-    productId: String?,
-    sizeText: String,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                Color(0xFF1A1200),
-                RoundedCornerShape(8.dp),
-            )
-            .padding(14.dp, 12.dp, 14.dp, 12.dp),
-    ) {
-        if (!developer.isNullOrEmpty()) {
-            InfoRow("Developer", developer)
-        }
-        if (!publisher.isNullOrEmpty()) {
-            InfoRow("Publisher", publisher)
-        }
-        if (productId != null) {
-            val dot = productId.lastIndexOf('.')
-            val shortId = if (dot >= 0 && dot < productId.length - 1)
-                productId.substring(dot + 1) else productId
-            InfoRow("ID", shortId)
-        }
-        InfoRow("Install size", sizeText)
-    }
-}
-
-@Composable
-private fun InfoRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-    ) {
-        Text(
-            text = "$label: ",
-            fontSize = 13.sp,
-            color = Color(0xFF888888),
-        )
-        Text(
-            text = value,
-            fontSize = 13.sp,
-            color = Color(0xFFCCCCCC),
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-@Composable
-private fun ActionsCard(
-    exeNameText: String,
-    exeNameVisible: Boolean,
-    progressVisible: Boolean,
-    progressValue: Int,
-    progressLabel: String,
-    progressLabelVisible: Boolean,
-    launchBtnVisible: Boolean,
-    launchBtnEnabled: Boolean,
-    installBtnVisible: Boolean,
-    installBtnText: String,
-    installBtnColor: Int,
-    installBtnEnabled: Boolean,
-    setExeBtnVisible: Boolean,
-    uninstallBtnVisible: Boolean,
-    onLaunchClick: () -> Unit,
-    onInstallClick: () -> Unit,
-    onSetExeClick: () -> Unit,
-    onUninstallClick: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFF1A1200), RoundedCornerShape(8.dp))
-            .padding(14.dp, 12.dp, 14.dp, 12.dp),
-    ) {
-        if (exeNameVisible) {
-            Text(
-                text = exeNameText,
-                fontSize = 12.sp,
-                color = Color(0xFF888888),
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
-        }
-
-        if (progressVisible) {
-            LinearProgressIndicator(
-                progress = { progressValue / 100f },
-                modifier = Modifier.fillMaxWidth().height(4.dp).padding(bottom = 4.dp),
-                color = Color(0xFFFF9900),
-                trackColor = Color(0xFF333333),
-            )
-        }
-
-        if (progressLabelVisible) {
-            Text(
-                text = progressLabel,
-                fontSize = 11.sp,
-                color = Color(0xFFAAAAAA),
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
-        }
-
-        if (launchBtnVisible) {
-            ActionButton(
-                text = "Launch",
-                color = 0xFF2E7D32.toInt(),
-                enabled = launchBtnEnabled,
-                onClick = onLaunchClick,
-            )
-        }
-
-        if (installBtnVisible) {
-            ActionButton(
-                text = installBtnText,
-                color = installBtnColor,
-                enabled = installBtnEnabled,
-                onClick = onInstallClick,
-            )
-        }
-
-        if (setExeBtnVisible) {
-            ActionButton(
-                text = "Set .exe\u2026",
-                color = 0xFF444444.toInt(),
-                onClick = onSetExeClick,
-            )
-        }
-
-        if (uninstallBtnVisible) {
-            ActionButton(
-                text = "Uninstall",
-                color = 0xFF8B0000.toInt(),
-                onClick = onUninstallClick,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ActionButton(
-    text: String,
-    color: Int,
-    enabled: Boolean = true,
-    onClick: () -> Unit,
-) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        colors = ButtonDefaults.buttonColors(containerColor = Color(color)),
-        modifier = Modifier.fillMaxWidth().height(42.dp).padding(bottom = 8.dp),
-        shape = RoundedCornerShape(6.dp),
-    ) {
-        Text(text, color = Color.White, fontSize = 13.sp)
-    }
-}
-
-@Composable
-private fun UpdatesCard(
+private fun AmazonUpdatesContent(
     updateStatusText: String,
     checkUpdatesEnabled: Boolean,
     updateBtnVisible: Boolean,
     onCheckUpdatesClick: () -> Unit,
     onUpdateNowClick: () -> Unit,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFF1A1200), RoundedCornerShape(8.dp))
-            .padding(14.dp, 12.dp, 14.dp, 12.dp),
-    ) {
-        if (updateStatusText.startsWith("Install the game")) {
-            Text(
-                text = updateStatusText,
-                fontSize = 13.sp,
-                color = Color(0xFF554400),
-            )
-            return
-        }
-
-        Text(
-            text = updateStatusText,
-            fontSize = 13.sp,
-            color = Color(0xFFCCCCCC),
-            modifier = Modifier.padding(bottom = 8.dp),
-        )
-
-        if (updateBtnVisible) {
-            ActionButton(
-                text = "Update Now",
-                color = 0xFFCC7700.toInt(),
-                onClick = onUpdateNowClick,
-            )
-        }
-
-        ActionButton(
-            text = "Check for Updates",
-            color = 0xFF332200.toInt(),
-            enabled = checkUpdatesEnabled,
-            onClick = onCheckUpdatesClick,
-        )
+    // Not installed yet — just the muted hint, no buttons.
+    if (updateStatusText.startsWith("Install the game")) {
+        StoreStatusText(updateStatusText)
+        return
     }
+
+    StoreStatusText(updateStatusText)
+    Spacer(Modifier.height(8.dp))
+    if (updateBtnVisible) {
+        StoreActionButton(
+            text = "Update Now",
+            onClick = onUpdateNowClick,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+    }
+    StoreActionButton(
+        text = "Check for Updates",
+        onClick = onCheckUpdatesClick,
+        modifier = Modifier.fillMaxWidth(),
+        enabled = checkUpdatesEnabled,
+    )
 }
 
 @Composable
-private fun DlcCard(
+private fun AmazonDlcContent(
     dlcJson: String,
     onDlcInstall: (eid: String, pid: String, title: String) -> Unit,
 ) {
@@ -1025,123 +860,88 @@ private fun DlcCard(
     val prefs = remember { context.getSharedPreferences("bh_amazon_prefs", 0) }
 
     val dlcArr = remember(dlcJson) {
-        if (dlcJson.isNullOrEmpty() || dlcJson == "[]") null
+        if (dlcJson.isEmpty() || dlcJson == "[]") null
         else runCatching { org.json.JSONArray(dlcJson) }.getOrNull()
     }
     val parseError = remember(dlcJson) {
-        !dlcJson.isNullOrEmpty() && dlcJson != "[]" &&
+        dlcJson.isNotEmpty() && dlcJson != "[]" &&
             runCatching { org.json.JSONArray(dlcJson); false }.getOrDefault(true)
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xFF1A1200), RoundedCornerShape(8.dp))
-            .padding(14.dp, 12.dp, 14.dp, 12.dp),
-    ) {
-        if (parseError) {
-            Text(
-                text = "Error reading DLC data",
-                fontSize = 13.sp,
-                color = Color(0xFF554400),
-            )
-            return
+    if (parseError) {
+        StoreStatusText("Error reading DLC data")
+        return
+    }
+    if (dlcArr == null || dlcArr.length() == 0) {
+        StoreStatusText("No DLCs in your library for this game")
+        return
+    }
+
+    Text(
+        text = "${dlcArr.length()} DLC${if (dlcArr.length() == 1) "" else "s"} owned",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontWeight = FontWeight.Bold,
+    )
+
+    for (i in 0 until dlcArr.length()) {
+        val dlc = dlcArr.optJSONObject(i) ?: continue
+        val dlcEid = dlc.optString("eid", "")
+        val dlcPid = dlc.optString("pid", "")
+        val dlcTitleText = dlc.optString("title", "Unknown DLC")
+
+        val dlcInstalled = dlcPid.isNotEmpty() &&
+            prefs.getString("amazon_exe_$dlcPid", null) != null
+
+        var dlcStatusText by remember { mutableStateOf("") }
+        var dlcBtnText by remember {
+            mutableStateOf(if (dlcInstalled) "Reinstall" else "Install")
         }
 
-        if (dlcArr == null || dlcArr.length() == 0) {
-            Text(
-                text = "No DLCs in your library for this game",
-                fontSize = 13.sp,
-                color = Color(0xFF554400),
-            )
-            return
-        }
-
-        Text(
-            text = "${dlcArr.length()} DLC${if (dlcArr.length() == 1) "" else "s"} owned",
-            fontSize = 12.sp,
-            color = Color(0xFF888888),
-            fontWeight = FontWeight.Bold,
-        )
-
-        for (i in 0 until dlcArr.length()) {
-            val dlc = dlcArr.optJSONObject(i) ?: continue
-            val dlcEid = dlc.optString("eid", "")
-            val dlcPid = dlc.optString("pid", "")
-            val dlcTitleText = dlc.optString("title", "Unknown DLC")
-
-            val dlcInstalled = dlcPid.isNotEmpty() &&
-                prefs.getString("amazon_exe_$dlcPid", null) != null
-
-            var dlcStatusText by remember { mutableStateOf("") }
-            var dlcBtnText by remember {
-                mutableStateOf(if (dlcInstalled) "Reinstall" else "Install")
-            }
-            var dlcBtnColor by remember {
-                mutableIntStateOf(if (dlcInstalled) 0xFF2A3A00.toInt() else 0xFFCC7700.toInt())
-            }
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
-                    .background(Color(0xFF1A1200), RoundedCornerShape(4.dp))
-                    .padding(8.dp, 6.dp, 8.dp, 6.dp),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+        Spacer(Modifier.height(8.dp))
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = dlcTitleText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                )
+                if (dlcInstalled) {
                     Text(
-                        text = dlcTitleText,
-                        fontSize = 13.sp,
-                        color = Color(0xFFDDDDDD),
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (dlcInstalled) {
-                        Text(
-                            text = "\u2713",
-                            fontSize = 13.sp,
-                            color = Color(0xFF4CAF50),
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-
-                if (dlcStatusText.isNotEmpty()) {
-                    Text(
-                        text = dlcStatusText,
-                        fontSize = 11.sp,
-                        color = Color(0xFF886600),
-                        modifier = Modifier.padding(top = 3.dp),
+                        text = "✓",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = INSTALLED_GREEN,
+                        fontWeight = FontWeight.Bold,
                     )
                 }
-
-                if (dlcEid.isNotEmpty()) {
-                    Spacer(Modifier.height(4.dp))
-                    Button(
-                        onClick = {
-                            if (dlcBtnText == "Downloading\u2026") return@Button
-                            dlcBtnText = "Downloading\u2026"
-                            dlcBtnColor = 0xFF444444.toInt()
-                            dlcStatusText = "Starting\u2026"
-                            onDlcInstall(dlcEid, dlcPid, dlcTitleText)
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(dlcBtnColor),
-                        ),
-                        modifier = Modifier.fillMaxWidth().height(36.dp),
-                        shape = RoundedCornerShape(4.dp),
-                    ) {
-                        Text(
-                            text = dlcBtnText,
-                            color = Color.White,
-                            fontSize = 13.sp,
-                        )
-                    }
-                }
             }
 
-            Spacer(Modifier.height(6.dp))
+            if (dlcStatusText.isNotEmpty()) {
+                Spacer(Modifier.height(3.dp))
+                StoreStatusText(dlcStatusText)
+            }
+
+            if (dlcEid.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                StoreActionButton(
+                    text = dlcBtnText,
+                    onClick = {
+                        if (dlcBtnText == "Downloading…") return@StoreActionButton
+                        dlcBtnText = "Downloading…"
+                        dlcStatusText = "Starting…"
+                        onDlcInstall(dlcEid, dlcPid, dlcTitleText)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = dlcBtnText != "Downloading…",
+                )
+            }
         }
     }
 }

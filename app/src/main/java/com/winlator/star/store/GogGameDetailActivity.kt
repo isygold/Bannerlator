@@ -14,23 +14,18 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -41,14 +36,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.winlator.star.store.download.DownloadsButton
+import com.winlator.star.store.download.INSTALLED_GREEN
+import com.winlator.star.store.download.InfoChip
+import com.winlator.star.store.download.Store
+import com.winlator.star.store.download.StoreActionButton
+import com.winlator.star.store.download.StoreActionRow
+import com.winlator.star.store.download.StoreBadge
+import com.winlator.star.store.download.StoreDetailHeader
+import com.winlator.star.store.download.StoreDetailState
+import com.winlator.star.store.download.StoreHero
+import com.winlator.star.store.download.StoreProgressBar
+import com.winlator.star.store.download.StoreSection
+import com.winlator.star.store.download.StoreStatusText
 import com.winlator.star.ui.theme.WinlatorTheme
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -199,7 +205,6 @@ class GogGameDetailActivity : ComponentActivity() {
                     launchVisible = launchVisible,
                     installVisible = installVisible,
                     installBtnText = installBtnText,
-                    installBtnColor = installBtnColor,
                     setExeVisible = setExeVisible,
                     uninstallVisible = uninstallVisible,
                     copyVisible = copyVisible,
@@ -568,6 +573,7 @@ private data class ExePickerStateGame(
 
 // ── Composable Screen ──────────────────────────────────────────────────────
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GogGameDetailScreen(
     headerBitmap: Bitmap?,
@@ -581,7 +587,6 @@ private fun GogGameDetailScreen(
     launchVisible: Boolean,
     installVisible: Boolean,
     installBtnText: String,
-    installBtnColor: Int,
     setExeVisible: Boolean,
     uninstallVisible: Boolean,
     copyVisible: Boolean,
@@ -615,261 +620,153 @@ private fun GogGameDetailScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0D0D0D))
+            .background(MaterialTheme.colorScheme.background)
             .verticalScroll(rememberScrollState()),
     ) {
-        // Fixed header bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFF1A1A2E))
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(onClick = onBack) { Text("\u2190", color = Color.White, fontSize = 18.sp) }
-            Text(
-                text = title,
-                fontSize = 15.sp,
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                modifier = Modifier.padding(start = 12.dp, end = 8.dp).weight(1f),
-            )
-            // ⬇ cross-store Download Manager (global active-count badge), trailing edge.
-            DownloadsButton()
-        }
+        // Header — back + GOG badge + Download Manager button (Steam parity).
+        StoreDetailHeader(
+            onBack = onBack,
+            storeBadge = { StoreBadge(Store.GOG) },
+            actions = { DownloadsButton() },
+        )
 
-        // Cover art
-        Box(
-            modifier = Modifier.fillMaxWidth().height(200.dp),
-            contentAlignment = Alignment.Center,
-        ) {
+        // Hero image with the fade into the page background. GOG loads its cover as a
+        // raw Bitmap (loadHeaderImage) rather than via Coil.
+        StoreHero {
             if (headerBitmap != null) {
                 Image(
-                    bitmap = headerBitmap!!.asImageBitmap(),
+                    bitmap = headerBitmap.asImageBitmap(),
                     contentDescription = null,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
                 )
             } else {
                 Box(
-                    modifier = Modifier.fillMaxSize().background(Color(0xFF111122)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(32.dp),
-                        color = Color(0xFF0055FF),
-                        strokeWidth = 3.dp,
-                    )
-                }
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                )
             }
         }
 
-        // Info Section
-        SectionHeader("GAME INFO")
-        InfoCard(generation, developer, category, description, sizeText)
-
-        // Actions Section
-        SectionHeader("ACTIONS")
-        ActionsCard(
-            exeNameText = exeNameText,
-            exeNameVisible = exeNameVisible,
-            launchVisible = launchVisible,
-            installVisible = installVisible,
-            installBtnText = installBtnText,
-            installBtnColor = installBtnColor,
-            setExeVisible = setExeVisible,
-            uninstallVisible = uninstallVisible,
-            copyVisible = copyVisible,
-            progressVisible = progressVisible,
-            progressValue = progressValue,
-            progressLabel = progressLabel,
-            progressLabelVisible = progressLabelVisible,
-            onLaunch = onLaunch,
-            onInstall = onInstall,
-            onSetExe = onSetExe,
-            onUninstall = onUninstall,
-            onCopy = onCopy,
-        )
-
-        // Updates Section
-        SectionHeader("UPDATES")
-        UpdatesCard(
-            installed = updatesInstalled,
-            updateStatusText = updateStatusText,
-            checkUpdateEnabled = checkUpdateEnabled,
-            updateBtnVisible = updateBtnVisible,
-            onCheckUpdate = onCheckUpdate,
-            onUpdateNow = onUpdateNow,
-        )
-
-        // DLC Section
-        SectionHeader("DLC")
-        DlcCard(dlcJson = dlcJson)
-
-        // Cloud Saves Section
-        SectionHeader("CLOUD SAVES")
-        CloudSavesCard(
-            saveDirText = cloudSaveDirText,
-            saveDirColor = cloudSaveDirColor,
-            statusText = cloudSaveStatusText,
-            statusVisible = cloudSaveStatusVisible,
-            btnsEnabled = cloudBtnsEnabled,
-            onBrowse = onBrowseCloud,
-            onUpload = onUploadSaves,
-            onDownload = onDownloadSaves,
-        )
-
-        Spacer(Modifier.height(24.dp))
-    }
-}
-
-@Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text = text,
-        fontSize = 11.sp,
-        color = Color(0xFF8888AA),
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 0.08.sp,
-        modifier = Modifier.padding(start = 2.dp, top = 16.dp, end = 0.dp, bottom = 6.dp),
-    )
-}
-
-@Composable
-private fun InfoCard(
-    generation: Int,
-    developer: String,
-    category: String,
-    description: String,
-    sizeText: String,
-) {
-    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            if (generation > 0) {
-                Text(
-                    text = "Gen $generation",
-                    fontSize = 11.sp,
-                    color = Color.White,
-                    modifier = Modifier
-                        .background(
-                            color = if (generation == 2) Color(0xFF0277BD) else Color(0xFFE65100),
-                            shape = RoundedCornerShape(4.dp),
-                        )
-                        .padding(horizontal = 8.dp, vertical = 3.dp),
-                )
-                Spacer(Modifier.height(8.dp))
+        // Info section — name + metadata chips + description + install status.
+        Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(8.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                InfoChip(sizeText)
+                if (developer.isNotEmpty()) InfoChip(developer)
+                if (category.isNotEmpty()) InfoChip(category)
+                if (generation > 0) InfoChip("Gen $generation")
             }
-            if (developer.isNotEmpty()) {
-                InfoRow("Developer", developer)
-            }
-            if (category.isNotEmpty()) {
-                InfoRow("Genre", category)
-            }
-            InfoRow("Install size", sizeText)
             if (description.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = Html.fromHtml(description, Html.FROM_HTML_MODE_COMPACT).toString(),
-                    fontSize = 13.sp,
-                    color = Color(0xFFCCCCCC),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            if (exeNameVisible) {
+                Spacer(Modifier.height(8.dp))
+                StoreStatusText(exeNameText, StoreDetailState.INSTALLED)
             }
         }
-    }
-}
 
-@Composable
-private fun InfoRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)) {
-        Text("$label: ", fontSize = 13.sp, color = Color(0xFF888888))
-        Text(value, fontSize = 13.sp, color = Color(0xFFCCCCCC))
-    }
-}
+        // Progress — one honest install bar with its label (file / status string).
+        if (progressVisible) {
+            StoreProgressBar(
+                pct = progressValue,
+                label = if (progressLabelVisible) progressLabel else null,
+            )
+        }
 
-@Composable
-private fun ActionsCard(
-    exeNameText: String,
-    exeNameVisible: Boolean,
-    launchVisible: Boolean,
-    installVisible: Boolean,
-    installBtnText: String,
-    installBtnColor: Int,
-    setExeVisible: Boolean,
-    uninstallVisible: Boolean,
-    copyVisible: Boolean,
-    progressVisible: Boolean,
-    progressValue: Int,
-    progressLabel: String,
-    progressLabelVisible: Boolean,
-    onLaunch: () -> Unit,
-    onInstall: () -> Unit,
-    onSetExe: () -> Unit,
-    onUninstall: () -> Unit,
-    onCopy: () -> Unit,
-) {
-    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            if (exeNameVisible) {
-                Text(
-                    text = exeNameText,
-                    fontSize = 12.sp,
-                    color = Color(0xFF888888),
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-            }
-
-            if (progressVisible) {
-                LinearProgressIndicator(
-                    progress = { progressValue / 100f },
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-                    color = Color(0xFFFF9800),
-                    trackColor = Color(0xFF2A2A2A),
-                )
-            }
-            if (progressLabelVisible) {
-                Text(
-                    text = progressLabel,
-                    fontSize = 11.sp,
-                    color = Color(0xFFAAAAAA),
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-            }
-
+        // Actions — weighted M3 buttons; Cancel/Uninstall are destructive (error).
+        StoreActionRow {
             if (launchVisible) {
-                ActionButton("Launch", 0xFF2E7D32.toInt(), onClick = onLaunch)
+                StoreActionButton(
+                    text = "Launch",
+                    onClick = onLaunch,
+                    modifier = Modifier.weight(1f),
+                )
             }
             if (installVisible) {
-                ActionButton(installBtnText, installBtnColor, onClick = onInstall)
+                StoreActionButton(
+                    text = installBtnText,
+                    onClick = onInstall,
+                    modifier = Modifier.weight(1f),
+                    destructive = installBtnText == "Cancel",
+                )
             }
             if (setExeVisible) {
-                ActionButton("Set .exe\u2026", 0xFF444444.toInt(), onClick = onSetExe)
+                StoreActionButton(
+                    text = "Set .exe…",
+                    onClick = onSetExe,
+                    modifier = Modifier.weight(1f),
+                )
             }
             if (uninstallVisible) {
-                ActionButton("Uninstall", 0xFF8B0000.toInt(), onClick = onUninstall)
+                StoreActionButton(
+                    text = "Uninstall",
+                    onClick = onUninstall,
+                    modifier = Modifier.weight(1f),
+                    destructive = true,
+                )
             }
             if (copyVisible) {
-                ActionButton("Copy to Downloads", 0xFF333333.toInt(), onClick = onCopy)
+                StoreActionButton(
+                    text = "Copy to Downloads",
+                    onClick = onCopy,
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
+
+        // Updates
+        StoreSection(title = "Updates") {
+            GogUpdatesContent(
+                installed = updatesInstalled,
+                updateStatusText = updateStatusText,
+                checkUpdateEnabled = checkUpdateEnabled,
+                updateBtnVisible = updateBtnVisible,
+                onCheckUpdate = onCheckUpdate,
+                onUpdateNow = onUpdateNow,
+            )
+        }
+
+        // DLC
+        StoreSection(title = "DLC") {
+            GogDlcContent(dlcJson = dlcJson)
+        }
+
+        // Cloud Saves
+        StoreSection(title = "Cloud Saves") {
+            GogCloudSavesContent(
+                saveDirText = cloudSaveDirText,
+                saveDirColor = cloudSaveDirColor,
+                statusText = cloudSaveStatusText,
+                statusVisible = cloudSaveStatusVisible,
+                btnsEnabled = cloudBtnsEnabled,
+                onBrowse = onBrowseCloud,
+                onUpload = onUploadSaves,
+                onDownload = onDownloadSaves,
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
     }
 }
 
-@Composable
-private fun ActionButton(text: String, color: Int, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(containerColor = Color(color)),
-        modifier = Modifier.fillMaxWidth().height(42.dp),
-        shape = RoundedCornerShape(6.dp),
-    ) {
-        Text(text, color = Color.White, fontSize = 13.sp)
-    }
-    Spacer(Modifier.height(8.dp))
-}
+// ─── Store sections ────────────────────────────────────────────────────────
 
 @Composable
-private fun UpdatesCard(
+private fun GogUpdatesContent(
     installed: Boolean,
     updateStatusText: String,
     checkUpdateEnabled: Boolean,
@@ -877,100 +774,82 @@ private fun UpdatesCard(
     onCheckUpdate: () -> Unit,
     onUpdateNow: () -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            if (!installed) {
-                Text(
-                    "Install the game first to check for updates.",
-                    fontSize = 13.sp,
-                    color = Color(0xFF555577),
-                )
-            } else {
-                Text(
-                    text = updateStatusText,
-                    fontSize = 13.sp,
-                    color = Color(0xFFCCCCCC),
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-                if (updateBtnVisible) {
-                    ActionButton("Update Now", 0xFF0277BD.toInt(), onClick = onUpdateNow)
-                }
-                ActionButton("Check for Updates", 0xFF333355.toInt(), enabled = checkUpdateEnabled, onClick = onCheckUpdate)
-            }
-        }
+    // Not installed yet — just the muted hint, no buttons.
+    if (!installed) {
+        StoreStatusText("Install the game first to check for updates.")
+        return
     }
-}
 
-@Composable
-private fun ActionButton(text: String, color: Int, enabled: Boolean = true, onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        colors = ButtonDefaults.buttonColors(containerColor = Color(color)),
-        modifier = Modifier.fillMaxWidth().height(42.dp),
-        shape = RoundedCornerShape(6.dp),
-    ) {
-        Text(text, color = Color.White, fontSize = 13.sp)
-    }
+    StoreStatusText(updateStatusText)
     Spacer(Modifier.height(8.dp))
+    if (updateBtnVisible) {
+        StoreActionButton(
+            text = "Update Now",
+            onClick = onUpdateNow,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+    }
+    StoreActionButton(
+        text = "Check for Updates",
+        onClick = onCheckUpdate,
+        modifier = Modifier.fillMaxWidth(),
+        enabled = checkUpdateEnabled,
+    )
 }
 
 @Composable
-private fun DlcCard(dlcJson: String?) {
-    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            if (dlcJson == null || dlcJson == "[]" || dlcJson.isEmpty()) {
-                Text("No DLCs in your library for this game", fontSize = 13.sp, color = Color(0xFF555577))
-            } else {
-                val arr = runCatching { org.json.JSONArray(dlcJson) }.getOrNull()
-                if (arr == null || arr.length() == 0) {
-                    Text("No DLCs in your library for this game", fontSize = 13.sp, color = Color(0xFF555577))
-                } else {
-                    Text(
-                        "${arr.length()} DLC${if (arr.length() == 1) "" else "s"} owned",
-                        fontSize = 12.sp,
-                        color = Color(0xFF888888),
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        "DLC content is included in gen2 game installs.",
-                        fontSize = 11.sp,
-                        color = Color(0xFF555577),
-                        modifier = Modifier.padding(top = 3.dp, bottom = 6.dp),
-                    )
-                    for (i in 0 until arr.length()) {
-                        val dlc = arr.optJSONObject(i) ?: continue
-                        val dlcTitle = dlc.optString("title", "Unknown DLC")
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color(0xFF1E1E2E), RoundedCornerShape(4.dp))
-                                .padding(horizontal = 8.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                dlcTitle,
-                                fontSize = 13.sp,
-                                color = Color(0xFFDDDDDD),
-                                modifier = Modifier.weight(1f),
-                            )
-                            Text(
-                                "Owned",
-                                fontSize = 11.sp,
-                                color = Color(0xFF4CAF50),
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                        Spacer(Modifier.height(4.dp))
-                    }
-                }
-            }
+private fun GogDlcContent(dlcJson: String?) {
+    val arr = remember(dlcJson) {
+        if (dlcJson.isNullOrEmpty() || dlcJson == "[]") null
+        else runCatching { org.json.JSONArray(dlcJson) }.getOrNull()
+    }
+    if (arr == null || arr.length() == 0) {
+        StoreStatusText("No DLCs in your library for this game")
+        return
+    }
+
+    Text(
+        text = "${arr.length()} DLC${if (arr.length() == 1) "" else "s"} owned",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontWeight = FontWeight.Bold,
+    )
+    Text(
+        text = "DLC content is included in gen2 game installs.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 3.dp, bottom = 6.dp),
+    )
+    for (i in 0 until arr.length()) {
+        val dlc = arr.optJSONObject(i) ?: continue
+        val dlcTitle = dlc.optString("title", "Unknown DLC")
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(6.dp))
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = dlcTitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "Owned",
+                style = MaterialTheme.typography.labelSmall,
+                color = INSTALLED_GREEN,
+                fontWeight = FontWeight.Bold,
+            )
         }
+        Spacer(Modifier.height(4.dp))
     }
 }
 
 @Composable
-private fun CloudSavesCard(
+private fun GogCloudSavesContent(
     saveDirText: String,
     saveDirColor: Int,
     statusText: String,
@@ -980,57 +859,41 @@ private fun CloudSavesCard(
     onUpload: () -> Unit,
     onDownload: () -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = saveDirText,
-                    fontSize = 12.sp,
-                    color = Color(saveDirColor),
-                    maxLines = 2,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(8.dp))
-                Button(
-                    onClick = onBrowse,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333355)),
-                    modifier = Modifier.height(36.dp),
-                    shape = RoundedCornerShape(6.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp),
-                ) {
-                    Text("Browse", color = Color.White, fontSize = 13.sp)
-                }
-            }
-            if (statusVisible) {
-                Text(
-                    text = statusText,
-                    fontSize = 12.sp,
-                    color = Color(0xFF8888AA),
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-            }
-            ActionButton("Upload Saves", 0xFF0277BD.toInt(), enabled = btnsEnabled, onClick = onUpload)
-            ActionButton("Download Saves", 0xFF2E7D32.toInt(), enabled = btnsEnabled, onClick = onDownload)
-        }
+    // saveDirColor carries the "no folder set" sentinel — map it to a muted token.
+    val dirMuted = saveDirColor == 0xFF555577.toInt()
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = saveDirText,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (dirMuted) MaterialTheme.colorScheme.onSurfaceVariant
+            else MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            modifier = Modifier.weight(1f),
+        )
+        StoreActionButton(text = "Browse", onClick = onBrowse)
     }
-}
-
-@Composable
-private fun Card(
-    modifier: Modifier = Modifier,
-    content: @Composable () -> Unit,
-) {
-    androidx.compose.material3.Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
-        colors = androidx.compose.material3.CardDefaults.cardColors(
-            containerColor = Color(0xFF161622),
-        ),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2A2A3A)),
-    ) { content() }
+    if (statusVisible) {
+        Spacer(Modifier.height(8.dp))
+        StoreStatusText(statusText)
+    }
+    Spacer(Modifier.height(8.dp))
+    StoreActionButton(
+        text = "Upload Saves",
+        onClick = onUpload,
+        modifier = Modifier.fillMaxWidth(),
+        enabled = btnsEnabled,
+    )
+    Spacer(Modifier.height(8.dp))
+    StoreActionButton(
+        text = "Download Saves",
+        onClick = onDownload,
+        modifier = Modifier.fillMaxWidth(),
+        enabled = btnsEnabled,
+    )
 }
 
 @Composable

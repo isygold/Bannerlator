@@ -37,6 +37,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -566,49 +567,49 @@ private fun EpicGamesScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black),
+            .background(MaterialTheme.colorScheme.background),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.Black)
+                .background(MaterialTheme.colorScheme.background)
                 .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Button(
                 onClick = onBack,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0055FF)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.height(40.dp),
-            ) { Text("\u2190", color = Color.White, fontSize = 16.sp) }
+            ) { Text("\u2190", color = MaterialTheme.colorScheme.onPrimary, fontSize = 16.sp) }
             Text(
                 text = "Epic Games",
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color(0xFF0055FF),
+                color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.weight(1f).padding(start = 12.dp),
             )
             Button(
                 onClick = onViewToggle,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0055FF)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.height(40.dp),
-            ) { Text("\u25A6", color = Color.White, fontSize = 16.sp) }
+            ) { Text("\u25A6", color = MaterialTheme.colorScheme.onPrimary, fontSize = 16.sp) }
             Spacer(Modifier.width(4.dp))
             Button(
                 onClick = onRefresh,
                 enabled = refreshEnabled,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0055FF)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.height(40.dp),
-            ) { Text("\u21ba", color = Color.White, fontSize = 16.sp) }
+            ) { Text("\u21ba", color = MaterialTheme.colorScheme.onPrimary, fontSize = 16.sp) }
             Spacer(Modifier.width(4.dp))
             Button(
                 onClick = onFreeGames,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0055FF)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 shape = RoundedCornerShape(8.dp),
                 modifier = Modifier.height(40.dp),
-            ) { Text("FREE", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
+            ) { Text("FREE", color = MaterialTheme.colorScheme.onPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold) }
             // ⬇ cross-store Download Manager (global active-count badge).
             DownloadsButton()
         }
@@ -616,17 +617,17 @@ private fun EpicGamesScreen(
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchChange,
-            placeholder = { Text("Search games\u2026", color = Color(0xFF666666)) },
+            placeholder = { Text("Search games\u2026", color = MaterialTheme.colorScheme.onSurfaceVariant) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                cursorColor = Color.White,
-                focusedContainerColor = Color.Black,
-                unfocusedContainerColor = Color.Black,
-                focusedBorderColor = Color(0xFF0055FF),
-                unfocusedBorderColor = Color(0xFF333333),
+                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                cursorColor = MaterialTheme.colorScheme.onSurface,
+                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
             ),
             textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp),
         )
@@ -635,13 +636,13 @@ private fun EpicGamesScreen(
             text = syncText,
             fontSize = 13.sp,
             color = when {
-                syncText.startsWith("Error") || syncText.startsWith("Not logged in") || syncText.startsWith("No games") -> Color(0xFFFF6B6B)
-                syncText.contains("game") && (syncText.contains("tap") || syncText.contains("cached")) -> Color(0xFF81C784)
-                else -> Color(0xFF0055FF)
+                syncText.startsWith("Error") || syncText.startsWith("Not logged in") || syncText.startsWith("No games") -> MaterialTheme.colorScheme.error
+                syncText.contains("game") && (syncText.contains("tap") || syncText.contains("cached")) -> Color(0xFF81C784) // semantic "library ready" green
+                else -> MaterialTheme.colorScheme.primary
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.Black)
+                .background(MaterialTheme.colorScheme.background)
                 .padding(horizontal = 12.dp, vertical = 6.dp),
         )
 
@@ -732,7 +733,7 @@ private fun EmptyState(query: String) {
         text = if (query.isBlank()) "Your Epic library is empty"
         else "No results for \"$query\"",
         fontSize = 14.sp,
-        color = Color(0xFF666666),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 32.dp).fillMaxWidth(),
     )
 }
@@ -752,7 +753,7 @@ private fun GameListCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 8.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.Black),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
         shape = RoundedCornerShape(12.dp),
     ) {
         Column(modifier = Modifier.padding(10.dp)) {
@@ -767,7 +768,7 @@ private fun GameListCard(
                     modifier = Modifier
                         .size(60.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(Color.Black),
+                    .background(MaterialTheme.colorScheme.surface),
                 ) {
                     val imageUrl = if (game.artCover.isNotEmpty()) game.artCover else game.artSquare
                     if (imageUrl.isNotEmpty()) {
@@ -786,20 +787,20 @@ private fun GameListCard(
                             text = game.title,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false),
                         )
                         if (downloadState.installed) {
-                            Text(" \u2713", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
+                            Text(" \u2713", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50)) // semantic installed-green
                         }
                     }
                     if (game.developer.isNotEmpty()) {
                         Text(
                             text = game.developer,
                             fontSize = 11.sp,
-                            color = Color(0xFF888888),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -809,7 +810,7 @@ private fun GameListCard(
                 Text(
                     text = if (expanded) "\u25B2" else "\u25BC",
                     fontSize = 14.sp,
-                    color = Color(0xFF888888),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
@@ -818,7 +819,7 @@ private fun GameListCard(
                     Text(
                         text = game.developer,
                         fontSize = 11.sp,
-                        color = Color(0xFF888888),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 6.dp),
                     )
                 }
@@ -826,7 +827,7 @@ private fun GameListCard(
                     Text(
                         text = "\u2713 Installed",
                         fontSize = 10.sp,
-                        color = Color(0xFF4CAF50),
+                        color = Color(0xFF4CAF50), // semantic installed-green
                         modifier = Modifier.padding(top = 4.dp),
                     )
                 }
@@ -834,14 +835,14 @@ private fun GameListCard(
                     LinearProgressIndicator(
                         progress = { downloadState.progress / 100f },
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(6.dp),
-                        color = Color(0xFF0055FF),
-                        trackColor = Color(0xFF2A2A2A),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
                     )
                     if (downloadState.status.isNotEmpty()) {
                         Text(
                             text = downloadState.status,
                             fontSize = 11.sp,
-                            color = Color(0xFFAAAAAA),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 2.dp),
                         )
                     }
@@ -853,11 +854,8 @@ private fun GameListCard(
                         else onInstall()
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = when {
-                            downloadState.isActive -> Color(0xFFCC3333)
-                            downloadState.installed -> Color(0xFF0055FF)
-                            else -> Color(0xFF0055FF)
-                        },
+                        containerColor = if (downloadState.isActive) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.primary,
                     ),
                     modifier = Modifier.fillMaxWidth().height(40.dp).padding(top = 8.dp),
                     shape = RoundedCornerShape(8.dp),
@@ -868,7 +866,8 @@ private fun GameListCard(
                             downloadState.installed -> "Add to Launcher"
                             else -> "Install"
                         },
-                        color = Color.White,
+                        color = if (downloadState.isActive) MaterialTheme.colorScheme.onError
+                        else MaterialTheme.colorScheme.onPrimary,
                         fontSize = 13.sp,
                     )
                 }
@@ -892,8 +891,8 @@ private fun GameGridTile(
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.Black)
-            .border(1.dp, Color(0xFF0055FF).copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
             .clickable {
                 showAction = if (showAction) false else true
             },
@@ -936,7 +935,7 @@ private fun GameGridTile(
                     modifier = Modifier.weight(1f),
                 )
                 if (downloadState.installed) {
-                    Text(" \u2713", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF66BB6A))
+                    Text(" \u2713", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF66BB6A)) // semantic installed-green
                 }
             }
         }
@@ -945,15 +944,15 @@ private fun GameGridTile(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF0D0D0D))
+                    .background(MaterialTheme.colorScheme.surface)
                     .padding(horizontal = 6.dp, vertical = 6.dp),
             ) {
                 if (downloadState.showProgress) {
                     LinearProgressIndicator(
                         progress = { downloadState.progress / 100f },
                         modifier = Modifier.fillMaxWidth().height(3.dp),
-                        color = Color(0xFF0055FF),
-                        trackColor = Color(0xFF2A2A2A),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
                     )
                 }
                 Button(
@@ -963,11 +962,8 @@ private fun GameGridTile(
                         else onInstall()
                     },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = when {
-                            downloadState.isActive -> Color(0xFFCC3333)
-                            downloadState.installed -> Color(0xFF0055FF)
-                            else -> Color(0xFF0055FF)
-                        },
+                        containerColor = if (downloadState.isActive) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.primary,
                     ),
                     modifier = Modifier.fillMaxWidth().height(32.dp).padding(top = 4.dp),
                     shape = RoundedCornerShape(8.dp),
@@ -979,7 +975,8 @@ private fun GameGridTile(
                             downloadState.installed -> "Add to Launcher"
                             else -> "Install"
                         },
-                        color = Color.White,
+                        color = if (downloadState.isActive) MaterialTheme.colorScheme.onError
+                        else MaterialTheme.colorScheme.onPrimary,
                         fontSize = 11.sp,
                     )
                 }

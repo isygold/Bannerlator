@@ -37,6 +37,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -747,33 +748,33 @@ private fun GogGamesScreen(
     onCancelClick: (GogGame) -> Unit,
     onAddToLauncher: (GogGame) -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.Black)
+                .background(MaterialTheme.colorScheme.background)
                 .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Button(
                 onClick = onBack,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0055FF)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.height(40.dp),
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp),
-            ) { Text("\u2190", color = Color.White, fontSize = 16.sp) }
+            ) { Text("\u2190", color = MaterialTheme.colorScheme.onPrimary, fontSize = 16.sp) }
             Spacer(Modifier.width(8.dp))
             Text(
                 "GOG Library",
                 fontSize = 18.sp,
-                color = Color(0xFF0055FF),
+                color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.weight(1f),
             )
             Button(
                 onClick = onViewToggle,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0055FF)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.height(40.dp),
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp),
@@ -784,18 +785,18 @@ private fun GogGamesScreen(
                         "poster" -> "\u2630"
                         else -> "\u229E"
                     },
-                    color = Color.White, fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onPrimary, fontSize = 16.sp,
                 )
             }
             Spacer(Modifier.width(4.dp))
             Button(
                 onClick = onRefresh,
                 enabled = !isSyncing,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0055FF)),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                 modifier = Modifier.height(40.dp),
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp),
-            ) { Text("\u21ba", color = Color.White, fontSize = 16.sp) }
+            ) { Text("\u21ba", color = MaterialTheme.colorScheme.onPrimary, fontSize = 16.sp) }
             // \u2b07 cross-store Download Manager (global active-count badge).
             DownloadsButton()
         }
@@ -804,21 +805,21 @@ private fun GogGamesScreen(
         OutlinedTextField(
             value = searchQuery,
             onValueChange = onSearchChange,
-            placeholder = { Text("Search games\u2026", color = Color(0xFF666666)) },
+            placeholder = { Text("Search games\u2026", color = MaterialTheme.colorScheme.onSurfaceVariant) },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { onSearchChange(searchQuery) }),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 0.dp),
             colors = OutlinedTextFieldDefaults.colors(
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White,
-                focusedBorderColor = Color(0xFF0055FF),
-                unfocusedBorderColor = Color(0xFF333333),
-                cursorColor = Color.White,
-                focusedContainerColor = Color.Black,
-                unfocusedContainerColor = Color.Black,
-                focusedPlaceholderColor = Color(0xFF666666),
-                unfocusedPlaceholderColor = Color(0xFF666666),
+                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                cursorColor = MaterialTheme.colorScheme.onSurface,
+                focusedContainerColor = MaterialTheme.colorScheme.surface,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surface,
+                focusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                unfocusedPlaceholderColor = MaterialTheme.colorScheme.onSurfaceVariant,
             ),
         )
 
@@ -826,10 +827,10 @@ private fun GogGamesScreen(
         Text(
             text = syncText,
             fontSize = 13.sp,
-            color = Color(syncTextColor),
+            color = Color(syncTextColor), // semantic status colour (error red / ready green / neutral) set in setSync()
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.Black)
+                .background(MaterialTheme.colorScheme.background)
                 .padding(horizontal = 12.dp, vertical = 6.dp),
         )
 
@@ -888,7 +889,7 @@ private fun GogGamesScreen(
                 Text(
                     text = "Your GOG library is empty",
                     fontSize = 14.sp,
-                    color = Color(0xFF666666),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.align(Alignment.Center).padding(24.dp),
                 )
             }
@@ -896,7 +897,7 @@ private fun GogGamesScreen(
             if (isSyncing) {
                 CircularProgressIndicator(
                     modifier = Modifier.align(Alignment.Center).size(32.dp),
-                    color = Color(0xFF0055FF),
+                    color = MaterialTheme.colorScheme.primary,
                     strokeWidth = 3.dp,
                 )
             }
@@ -919,7 +920,7 @@ private fun GameListCard(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(if (isExpanded) Color(0xFF0D0D0D) else Color.Black)
+            .background(if (isExpanded) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant)
             .clickable(onClick = onClick)
             .padding(10.dp),
     ) {
@@ -927,7 +928,7 @@ private fun GameListCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
             // Cover
             Box(
-                modifier = Modifier.size(60.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black),
+                modifier = Modifier.size(60.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surface),
             ) {
                 if (game.imageUrl.isNotEmpty()) {
                     AsyncImage(
@@ -950,13 +951,13 @@ private fun GameListCard(
                     Text(
                         text = game.title,
                         fontSize = 15.sp,
-                        color = Color.White,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (downloadState?.isInstalled == true) {
-                        Text(" \u2713", fontSize = 14.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold)
+                        Text(" \u2713", fontSize = 14.sp, color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold) // semantic installed-green
                     }
                 }
                 if (game.developer.isNotEmpty() || game.category.isNotEmpty()) {
@@ -968,7 +969,7 @@ private fun GameListCard(
                     Text(
                         text = sub,
                         fontSize = 11.sp,
-                        color = Color(0xFF888888),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -978,7 +979,7 @@ private fun GameListCard(
             Text(
                 text = if (isExpanded) "\u25B2" else "\u25BC",
                 fontSize = 14.sp,
-                color = Color(0xFF888888),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 8.dp).clickable { onExpandToggle() },
             )
         }
@@ -1011,7 +1012,7 @@ private fun ExpandedSection(
                 game.developer.isEmpty() -> game.category
                 else -> "${game.category} \u00B7 ${game.developer}"
             }
-            Text(meta, fontSize = 11.sp, color = Color(0xFF888888), modifier = Modifier.padding(top = 6.dp))
+            Text(meta, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 6.dp))
         }
 
         val isInstalled = downloadState?.isInstalled == true
@@ -1020,7 +1021,7 @@ private fun ExpandedSection(
             Text(
                 "\u2713 Installed",
                 fontSize = 10.sp,
-                color = Color(0xFF4CAF50),
+                color = Color(0xFF4CAF50), // semantic installed-green
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
@@ -1029,19 +1030,19 @@ private fun ExpandedSection(
             LinearProgressIndicator(
                 progress = { (downloadState.progress.coerceIn(0, 100)) / 100f },
                 modifier = Modifier.fillMaxWidth().height(6.dp).padding(top = 6.dp),
-                color = Color(0xFF0055FF),
-                trackColor = Color(0xFF2A2A2A),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
             )
             Text(
                 "${downloadState.progress}%",
                 fontSize = 12.sp,
-                color = Color(0xFF0055FF),
+                color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold,
             )
             Text(
                 downloadState.status,
                 fontSize = 11.sp,
-                color = Color(0xFFAAAAAA),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
@@ -1050,8 +1051,9 @@ private fun ExpandedSection(
 
         val btnText = downloadState?.buttonText
             ?: if (isInstalled) "Add to Launcher" else "Install"
-        val btnColor = downloadState?.buttonColor
-            ?: if (isInstalled) 0xFF0055FF.toInt() else 0xFF0055FF.toInt()
+        // Container/content derived from theme at call site (btnText carries the intent);
+        // "Cancel" is the only destructive action \u2192 error, everything else \u2192 primary.
+        val isCancelBtn = btnText == "Cancel"
 
         Button(
             onClick = {
@@ -1061,10 +1063,20 @@ private fun ExpandedSection(
                     else -> onInstallClick()
                 }
             },
-            colors = ButtonDefaults.buttonColors(containerColor = Color(btnColor)),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isCancelBtn) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.primary,
+            ),
             modifier = Modifier.fillMaxWidth().height(40.dp),
             shape = RoundedCornerShape(8.dp),
-        ) { Text(btnText, color = Color.White, fontSize = 13.sp) }
+        ) {
+            Text(
+                btnText,
+                color = if (isCancelBtn) MaterialTheme.colorScheme.onError
+                else MaterialTheme.colorScheme.onPrimary,
+                fontSize = 13.sp,
+            )
+        }
     }
 }
 
@@ -1083,8 +1095,8 @@ private fun GameGridTile(
     Column(
         modifier = Modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.Black)
-            .border(1.dp, Color(0xFF0055FF).copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick),
     ) {
         // Art area
@@ -1112,12 +1124,14 @@ private fun GameGridTile(
                         .align(Alignment.TopStart)
                         .padding(start = 4.dp, top = 4.dp)
                         .background(
-                            if (game.generation == 2) Color(0xCC0055FF) else Color(0xCC0044CC),
+                            // Gen badge = informational (not brand); themed accent, translucent over art.
+                            // gen1/gen2 no longer differ by hue — the "Gen N" label carries the distinction.
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
                             RoundedCornerShape(3.dp),
                         )
                         .padding(horizontal = 4.dp, vertical = 2.dp),
                 ) {
-                    Text("Gen ${game.generation}", fontSize = 8.sp, color = Color.White)
+                    Text("Gen ${game.generation}", fontSize = 8.sp, color = MaterialTheme.colorScheme.onPrimary)
                 }
             }
 
@@ -1144,7 +1158,7 @@ private fun GameGridTile(
                     modifier = Modifier.weight(1f),
                 )
                 if (downloadState?.isInstalled == true) {
-                    Text(" \u2713", fontSize = 11.sp, color = Color(0xFF66BB6A), fontWeight = FontWeight.Bold)
+                    Text(" \u2713", fontSize = 11.sp, color = Color(0xFF66BB6A), fontWeight = FontWeight.Bold) // semantic installed-green
                 }
             }
         }
@@ -1154,21 +1168,21 @@ private fun GameGridTile(
             val isInstalled = downloadState?.isInstalled == true
             val btnText = downloadState?.buttonText
                 ?: if (isInstalled) "Add to Launcher" else "Install"
-            val btnColor = downloadState?.buttonColor
-                ?: 0xFF0055FF.toInt()
+            // "Cancel" is the only destructive action \u2192 error; everything else \u2192 primary.
+            val isCancelBtn = btnText == "Cancel"
 
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF0D0D0D))
+                    .background(MaterialTheme.colorScheme.surface)
                     .padding(horizontal = 6.dp, vertical = 6.dp),
             ) {
                 if (downloadState?.progressVisible == true) {
                     LinearProgressIndicator(
                         progress = { (downloadState.progress.coerceIn(0, 100)) / 100f },
                         modifier = Modifier.fillMaxWidth().height(3.dp),
-                        color = Color(0xFF0055FF),
-                        trackColor = Color(0xFF2A2A2A),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
                     )
                 }
                 Button(
@@ -1179,11 +1193,21 @@ private fun GameGridTile(
                             else -> onInstallClick()
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(btnColor)),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isCancelBtn) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.primary,
+                    ),
                     modifier = Modifier.fillMaxWidth().height(32.dp),
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(0.dp),
-                ) { Text(btnText, color = Color.White, fontSize = 11.sp) }
+                ) {
+                    Text(
+                        btnText,
+                        color = if (isCancelBtn) MaterialTheme.colorScheme.onError
+                        else MaterialTheme.colorScheme.onPrimary,
+                        fontSize = 11.sp,
+                    )
+                }
             }
         }
     }
@@ -1194,10 +1218,11 @@ private fun GenBadge(generation: Int) {
     Text(
         text = "Gen $generation",
         fontSize = 10.sp,
-        color = Color.White,
+        color = MaterialTheme.colorScheme.onPrimary,
         modifier = Modifier
             .background(
-                if (generation == 2) Color(0xFF0055FF) else Color(0xFF0044CC),
+                // informational gen badge (not brand); gen1/gen2 distinction carried by the label
+                MaterialTheme.colorScheme.primary,
                 RoundedCornerShape(3.dp),
             )
             .padding(horizontal = 5.dp, vertical = 2.dp),
@@ -1245,26 +1270,27 @@ private fun InstallConfirmDialog(
             Column {
                 val sizeText = if (gameSize > 0) "Game size:  ${GogDownloadManager.formatBytes(gameSize)}"
                 else "Game size:  Fetching\u2026"
-                val sizeColor = if (gameSize > 0 && freeBytes > 0 && gameSize > freeBytes) 0xFFFF5252.toInt()
-                else 0xFFCCCCCC.toInt()
+                val notEnoughSpace = gameSize > 0 && freeBytes > 0 && gameSize > freeBytes
+                val sizeColor = if (notEnoughSpace) MaterialTheme.colorScheme.error
+                else MaterialTheme.colorScheme.onSurfaceVariant
                 Text(
                     text = sizeText,
                     fontSize = 14.sp,
-                    color = Color(sizeColor),
+                    color = sizeColor,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
                     text = "Available storage:  ${GogDownloadManager.formatBytes(freeBytes)}",
                     fontSize = 14.sp,
-                    color = if (gameSize > 0 && freeBytes > 0 && gameSize > freeBytes) Color(0xFFFF5252)
-                    else Color(0xFF88CC88),
+                    color = if (notEnoughSpace) MaterialTheme.colorScheme.error
+                    else Color(0xFF88CC88), // semantic storage-ok green
                 )
-                if (gameSize > 0 && freeBytes > 0 && gameSize > freeBytes) {
+                if (notEnoughSpace) {
                     Spacer(Modifier.height(4.dp))
                     Text(
                         text = "\u26A0 Not enough space",
                         fontSize = 14.sp,
-                        color = Color(0xFFFF5252),
+                        color = MaterialTheme.colorScheme.error,
                     )
                 }
             }
@@ -1274,10 +1300,10 @@ private fun InstallConfirmDialog(
             TextButton(
                 onClick = onConfirm,
                 enabled = canInstall,
-            ) { Text("Install", color = if (canInstall) Color(0xFF0055FF) else Color(0xFF666666)) }
+            ) { Text("Install", color = if (canInstall) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel", color = Color(0xFFAAAAAA)) }
+            TextButton(onClick = onDismiss) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         },
     )
 }
@@ -1304,12 +1330,12 @@ private fun DetailDialog(
                 Text(
                     text = msg.trim(),
                     fontSize = 12.sp,
-                    color = Color(0xFFCCCCCC),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Close", color = Color(0xFFAAAAAA)) }
+            TextButton(onClick = onDismiss) { Text("Close", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         },
     )
 }
