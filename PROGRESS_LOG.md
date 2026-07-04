@@ -2,6 +2,13 @@
 
 ---
 
+## 2026-07-04 — ✅ Batch 1 build GREEN + APK delivered (CI 28692248319, SHA 6b91f13)
+
+> **CI `28692248319` SUCCESS** on `6b91f13`. APK byte-verified (589,504,606 B) + media-scanned to `/sdcard/Download/Bannerlator-standard-batch1-28692248319.apk`. Awaiting device test.
+> **Test:** Force Stop app (self-collision is Batch 2, not yet fixed — swipe-close leaves the FGS process) → open → HL2 → Install. Capture `hl2_capture.py` still running. **Expect:** Install pauses the library sync → HL2 appInfo/depot-keys land fast (no 60s timeout) → real bytes → ~8.4 GB → correct Installed size → few/no CLEARTEXT errors. Success = merge-gate #1 satisfied → Batch 2.
+
+---
+
 ## 2026-07-04 — ✅ Batch 1 committed, build started (CI 28692248319)
 
 > **Commit `6b91f13`** on `feat/steam-goldberg-patcher`. CI build-artifacts.yml run **`28692248319`** in_progress on HEAD `6b91f13` (~16 min). Native-steam agent implemented; diff reviewed — clean + compile-correct.
