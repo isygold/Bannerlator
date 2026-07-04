@@ -2,6 +2,16 @@
 
 ---
 
+## 2026-07-04 — 🎉 MERGE-GATE #1 MET: full HL2 download completed E2E (Batch 1 device-proven) + exe-picker scroll fix
+
+> **THE download saga is FIXED.** After Force Stop → single process → HL2 Install on Batch 1 (`6b91f13`): library-sync pause worked, appInfo/depot-keys landed (no 60s timeout), all depots pulled real bytes. Log: `Total downloaded: 5,967,673,520 B (10,684,397,022 uncompressed) from 8 depots` → `Download complete`. **On-disk HL2 = 10 GB** (was 822 MB). UI "100% (8.5 GB / 8.4 GB) · Installed". False-complete guard correctly did NOT trip.
+> **Minor/cosmetic:** (a) bar went past 100% — PICS `SizeOnDisk` 8.4 GB underestimates the real ~10 GB; polish = grow the install denominator past the PICS estimate. (b) depots: 221(main)/222(materials)/340(Lost Coast bonus) real; 233/234/380/389/420 = 0 B (other-OS/other-language, filtered).
+> **NEW UI BUG FIXED (`c298534`, CI `28694211242`):** launch "Select executable" picker dumped HL2's dozens of `bin/*.exe` SDK tools in a non-scrollable Column → couldn't reach hl2.exe. Fixed both pickers with `heightIn(420dp)+verticalScroll` (scrolls portrait+landscape).
+> **Follow-up polish (not done):** picker should filter/rank OUT the bin SDK tools (surface hl2.exe); install-denominator underestimate.
+> **NEXT:** deliver `c298534` build → confirm picker scrolls + Launch HL2 → **BATCH 2** (single Steam session across the app's own processes; appInfo-no-reply→reconnect+retry; wakelock/keep-FGS-alive).
+
+---
+
 ## 2026-07-04 — ✅ Batch 1 build GREEN + APK delivered (CI 28692248319, SHA 6b91f13)
 
 > **CI `28692248319` SUCCESS** on `6b91f13`. APK byte-verified (589,504,606 B) + media-scanned to `/sdcard/Download/Bannerlator-standard-batch1-28692248319.apk`. Awaiting device test.
