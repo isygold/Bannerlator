@@ -17,7 +17,7 @@
 
 > GOG device-test: card + notification work, but the **GOG detail page shows "Install" during a live download** (ELDERBORN: card 55%+Cancel, notif 58%, detail = Install). Cause: `GogGameDetailActivity.refreshActionState()` (and `AmazonGameDetailActivity.refreshActionState()` — same latent bug on main) read install PREFS only, never the DownloadRegistry → opening the detail mid-download (or list-started) shows Install, not progress+Cancel. +card showed "0 KB / 0 KB" (GOG pct-only).
 > **Fix (dispatched):** both GOG+Amazon detail pages observe `DownloadRegistry.entries` for their game key → reflect DOWNLOADING as progress+Cancel (live pct), Cancel wired to the registry entry (works for list-started DLs); DL card suppresses the byte pair when `installTotal==0`. Epic folded into its Phase C spec (items 9-10).
-> **✅ FIXED `72dbed1`, build `28727937666` running (warm off main caches):** GOG+Amazon detail added `observeRegistry()` collector (DownloadRegistry.entries → progress+Cancel live, Cancel routes to registry entry w/ recursion-guard); card gates bar+byte-text on `hasBytes` (fixes GOG 0KB + latent bar-stuck-at-0). NEXT: green → deliver → re-test GOG detail sync.
+> **✅ FIXED `72dbed1`, build `28727937666` running (warm off main caches):** GOG+Amazon detail added `observeRegistry()` collector (DownloadRegistry.entries → progress+Cancel live, Cancel routes to registry entry w/ recursion-guard); card gates bar+byte-text on `hasBytes` (fixes GOG 0KB + latent bar-stuck-at-0). NEXT: green → deliver `bannerlator-gog-detailsync-72dbed1-standard.apk` (watcher `bly53jgay`) → re-test GOG detail sync (list-started DL → open detail → live progress+Cancel; card shows just %). Epic Phase C spec ready (waits: GOG proven → merge → Epic).
 
 ---
 
