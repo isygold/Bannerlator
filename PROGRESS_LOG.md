@@ -13,6 +13,10 @@
 
 ---
 
+## 2026-07-05 — 🤝 Mali/BCn-layer test build handed off to @kylinzang
+
+> Mali/BCn-layer feature (branch `feat/mali-bcn-layer`, `79ee0ae`, CI run `28748542841` green, 3 flavors, artifacts expire 2026-07-12) **handed off for Mali device testing**: posted the build link + how-to (new "Wrapper + bcn_layer" driver + BCn Layer Settings mapped to his #54 env-var spec) on kylinzang's issue #54 → https://github.com/The412Banner/Bannerlator/issues/54#issuecomment-4887015807. Asked him to confirm the driver loads, a BC-texture game that crashed now runs, ETC2-vs-ASTC, and the debug log. **NOT merged, NOT in 2.3.** If it works → rebase onto post-2.3 main + bump `2.4-pre1`/vc39 (merge or public prerelease). Offered a prerelease APK if he can't pull CI artifacts. Awaiting his results — ball in his court.
+
 ## 2026-07-05 — ✅ STABLE RELEASE 2.3 (versionCode 38) — PUBLISHED + LATEST
 
 > **✅ LIVE:** https://github.com/The412Banner/Bannerlator/releases/tag/2.3 — tag `2.3` (→ `4c50df4`; APKs built from `fa488af`, app code identical, the tag just sits one docs(log) commit ahead), prerelease:false, **make_latest:true → releases/latest resolves to 2.3**. Release run **`28749102771`** SUCCESS. Body overwritten with polished `release_2.3_body.md` via `gh release edit`. **update.json verified: versionCode 38 / versionName 2.3**, per-flavor APK map correct. Assets attached: `Bannerlator-2.3-standard.apk` (589,576,141 B), `-ludashi` (589,576,164 B), `-pubg` (589,576,122 B), update.json (885 B). All caches hit (warm build). No release_notes double-quote trap (notes were single-line, clean).
