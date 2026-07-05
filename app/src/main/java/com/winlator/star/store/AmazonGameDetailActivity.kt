@@ -42,6 +42,7 @@ import coil.request.ImageRequest
 import com.winlator.star.R
 import com.winlator.star.store.download.DownloadRegistry
 import com.winlator.star.store.download.DownloadScope
+import com.winlator.star.store.download.DownloadState
 import com.winlator.star.store.download.DownloadsButton
 import com.winlator.star.store.download.formatDownloadSize
 import com.winlator.star.store.download.INSTALLED_GREEN
@@ -59,6 +60,7 @@ import com.winlator.star.store.download.StoreSection
 import com.winlator.star.store.download.StoreStatusText
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -145,6 +147,7 @@ class AmazonGameDetailActivity : ComponentActivity() {
         AmazonLibrarySync.seed(this)
 
         refreshActionState()
+        observeRegistry()
         loadDlcData()
         loadInstallSize()
         loadUpdateStatus()
@@ -200,6 +203,44 @@ class AmazonGameDetailActivity : ComponentActivity() {
     }
 
     // ── State refresh ─────────────────────────────────────────────────────
+
+    /**
+     * Make the detail page a live reflection of [DownloadRegistry] for THIS game. Without this,
+     * opening the page while a download is live (started from the games list, or after the Activity
+     * was recreated) showed "Install" even though the DL-manager card + shade notification were
+     * progressing. Runs on the main dispatcher (lifecycleScope default) so the Compose state writes
+     * are main-thread-safe. Mirrors GogGameDetailActivity.observeRegistry.
+     */
+    private fun observeRegistry() {
+        val pid = productId ?: return
+        val myKey = "${Store.AMAZON}:$pid"
+        lifecycleScope.launch {
+            DownloadRegistry.entries.collect { list ->
+                val e = list.firstOrNull { it.key == myKey }
+                if (e != null && (e.state == DownloadState.DOWNLOADING || e.state == DownloadState.PAUSED)) {
+                    progressVisible = true
+                    progressValue = e.pct
+                    installBtnVisible = true
+                    installBtnText = "Cancel"
+                    installBtnColor = 0xFFCC3333.toInt()
+                    installBtnEnabled = true
+                    launchBtnEnabled = false
+                    setExeBtnVisible = false
+                    uninstallBtnVisible = false
+                    // Route Cancel to the registry entry so it works for a list-started download —
+                    // but ONLY if we don't already hold the real canceller (a locally-started
+                    // download sets it in onInstallClicked); overwriting would make the registry
+                    // entry's cancel (which calls cancelDownload) recurse into itself.
+                    if (cancelDownload == null) cancelDownload = { e.cancel?.invoke() }
+                } else {
+                    // No active entry (absent / INSTALLED / FAILED / CANCELLED): settle from prefs.
+                    progressVisible = false
+                    progressLabelVisible = false
+                    refreshActionState()
+                }
+            }
+        }
+    }
 
     private fun refreshActionState() {
         val exe = prefs!!.getString("amazon_exe_$productId", null)

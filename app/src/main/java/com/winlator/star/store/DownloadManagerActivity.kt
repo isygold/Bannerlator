@@ -547,7 +547,11 @@ private fun ActiveContent(
     onCancel: (DownloadEntry) -> Unit,
     onPauseResume: (DownloadEntry) -> Unit,
 ) {
-    val installFrac = if (entry.installTotal > 0)
+    // Byte-driven fraction only when the store actually feeds byte progress (installDone > 0);
+    // pct-only stores (GOG reports pct with no byte pairs) fall back to entry.pct so the bar
+    // isn't stuck at 0 when a size happens to be known (installTotal > 0 but installDone == 0).
+    val hasBytes = entry.installTotal > 0 && entry.installDone > 0
+    val installFrac = if (hasBytes)
         (entry.installDone.toFloat() / entry.installTotal) else (entry.pct / 100f)
     val downloadFrac = if (entry.downloadTotal > 0)
         (entry.downloadDone.toFloat() / entry.downloadTotal) else installFrac
@@ -580,11 +584,14 @@ private fun ActiveContent(
         )
     }
     Spacer(Modifier.height(4.dp))
+    // Byte pair only for byte-feeding stores; pct-only stores (GOG) show just the percentage
+    // instead of a misleading "(0 KB / 0 KB)".
+    val sizePart = if (hasBytes) "  (${fmtSizeDm(entry.installDone)} / ${fmtSizeDm(entry.installTotal)})" else ""
     Text(
         text = when (entry.state) {
-            DownloadState.PAUSED -> "Paused — $pct%  (${fmtSizeDm(entry.installDone)} / ${fmtSizeDm(entry.installTotal)})"
+            DownloadState.PAUSED -> "Paused — $pct%$sizePart"
             DownloadState.QUEUED -> "Queued…"
-            else -> "Downloading… $pct%  (${fmtSizeDm(entry.installDone)} / ${fmtSizeDm(entry.installTotal)})"
+            else -> "Downloading… $pct%$sizePart"
         },
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,

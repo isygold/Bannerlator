@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.winlator.star.store.download.DownloadRegistry
+import com.winlator.star.store.download.DownloadState
 import com.winlator.star.store.download.DownloadsButton
 import com.winlator.star.store.download.INSTALLED_GREEN
 import com.winlator.star.store.download.StoreDownloadHooks
@@ -60,6 +61,7 @@ import com.winlator.star.store.download.StoreStatusText
 import com.winlator.star.ui.theme.WinlatorTheme
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -201,6 +203,7 @@ class GogGameDetailActivity : ComponentActivity() {
         cloudBtnsEnabled = cloudSaveDir != null
 
         refreshActionState()
+        observeRegistry()
         loadInstallSize()
 
         setContent {
@@ -512,6 +515,43 @@ class GogGameDetailActivity : ComponentActivity() {
                 setResult(RESULT_REFRESH)
                 refreshActionState()
                 resultBarMsg = "$title uninstalled"
+            }
+        }
+    }
+
+    /**
+     * Make the detail page a live reflection of [DownloadRegistry] for THIS game. Without this,
+     * opening the page while a download is live (started from the games list, or after the Activity
+     * was recreated) showed "Install" even though the DL-manager card + shade notification were
+     * progressing — the page only read install prefs. Runs on the main dispatcher (lifecycleScope
+     * default) so the Compose state writes are main-thread-safe.
+     */
+    private fun observeRegistry() {
+        val myKey = "${Store.GOG}:$gameId"
+        lifecycleScope.launch {
+            DownloadRegistry.entries.collect { list ->
+                val e = list.firstOrNull { it.key == myKey }
+                if (e != null && (e.state == DownloadState.DOWNLOADING || e.state == DownloadState.PAUSED)) {
+                    progressVisible = true
+                    progressValue = e.pct
+                    installVisible = true
+                    installBtnText = "Cancel"
+                    installBtnColor = 0xFFCC3333.toInt()
+                    launchVisible = false
+                    setExeVisible = false
+                    uninstallVisible = false
+                    copyVisible = false
+                    // Route Cancel to the registry entry so it works for a list-started download —
+                    // but ONLY if we don't already hold the real engine canceller (a locally-started
+                    // download sets it in startInstall). Overwriting it would make the registry
+                    // entry's cancel (which calls cancelDownload) recurse into itself.
+                    if (cancelDownload == null) cancelDownload = Runnable { e.cancel?.invoke() }
+                } else {
+                    // No active entry (absent / INSTALLED / FAILED / CANCELLED): settle from prefs.
+                    progressVisible = false
+                    progressLabelVisible = false
+                    refreshActionState()
+                }
             }
         }
     }
