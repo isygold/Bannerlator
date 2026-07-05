@@ -13,6 +13,11 @@
 
 ---
 
+## 2026-07-05 — ✅✅ Restore DEVICE-PROVEN + 🐞→✅ phantom-shortcut fix (rebuild in flight)
+
+> **RESTORE PROVEN END-TO-END on device** (user, build `bc7d4dc`): restored the GameHub Titanfall 2 zip via ⋮→Backup/Restore save→Restore→GameHub backup→pick zip→confirm → launched TF2 → **campaign continued from the restored save.** On-disk: `xuser-1/.wine/drive_c/users/xuser/Documents/Respawn/Titanfall2/profile/savegames/savegame.sav` = 27,160,835 B — the steamuser→xuser remap landed it in the real profile the game reads. Backup direction still un-tested.
+> **🐞→✅ Phantom "FlightCore" game card FIXED (`a8ddf7d`).** Faithful restore also wrote the zip's Desktop launcher shortcut `users/steamuser/Desktop/FlightCore.lnk` → remapped to `users/xuser/Desktop/FlightCore.lnk`; **`ContainerManager.loadShortcuts()` scans the container Desktop dir and auto-imports every `.lnk` as a game card** (ContainerManager.java:226) → a FlightCore card (TF2/Northstar mod launcher) appeared in Games on its own. Fix = new `GameSaveBackup.isFrontendShortcut()`: skip `proton_shortcuts/` + Desktop `*.lnk/*.desktop/*.url` on restore (never save data). Existing phantom cleaned on device via root bridge (rm'd the 2 Desktop files + proton_shortcuts on xuser-1; **bridge CAN write/delete /data/data as uid=0**; grid drops the card on next loadShortcuts refresh). Pushed; **rebuild `28757508619` in flight** → stage updated APK on green. No release cut (2.4-preN candidate).
+
 ## 2026-07-05 — ✅ Backup / Restore game save — BUILT GREEN + APK STAGED (checkpoint)
 
 > **New feature: "Backup / Restore save" on the container overflow (⋮) menu.** Two-way, GameHub-compatible. Branch **`feat/save-backup-restore`** off post-2.3 main `f7905be`; committed The412Banner **`bc7d4dc`**, pushed. CI build **`28756937615` GREEN** (compiles clean). Standard APK STAGED **`/sdcard/Download/bannerlator-save-backup-restore-bc7d4dc-standard.apk`** (589,592,834 B, md5 `79a7a4938ddf4a1fcbf2063509633b8a`, bit-identical to CI). **⚠️ Code-proven only — NOT device-tested yet. No release cut** (2.4-preN candidate if proven, per versioning rule).
