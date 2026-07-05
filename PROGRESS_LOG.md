@@ -16,7 +16,7 @@
 ## 2026-07-04 — Goldberg risk warning + warm build confirmed
 
 > Added a user-facing caveat to the Steam Emulator (Goldberg) section (`2ab915c`, error-color Text under the subtitle): "Please note: this is not a fix for all Steam games that require a Steam client to run. It is not a guaranteed fix-all — use at your own risk!"
-> Detail-sync build `28727937666` (72dbed1) GREEN **8m14s** — first fully-warm build off main's populated caches (~16min→8m14s, ~48% faster; confirms the caching). Combined build `28728128024` (detail-sync + warning, sha 2ab915c) running → deliver `bannerlator-gog-warn-2ab915c`.
+> Detail-sync build `28727937666` (72dbed1) GREEN **8m14s** — first fully-warm build off main's populated caches (~16min→8m14s, ~48% faster; confirms the caching). Combined build `28728128024` (detail-sync + warning, sha 2ab915c) **GREEN 8m13s (warm) → APK DELIVERED** `/sdcard/Download/bannerlator-gog-warn-2ab915c-standard.apk` (sha `9a197a39…642c8b1ba`, bit-identical, on-device). ⏳ user device-testing GOG detail sync + Goldberg warning.
 
 ---
 
