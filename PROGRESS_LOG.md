@@ -13,6 +13,15 @@
 
 ---
 
+## 2026-07-05 — 🚀 STABLE RELEASE 2.3 (versionCode 38) — CUTTING
+
+> **The storefronts release.** Bump commit `fa488af` (versionCode 37→38, versionName 2.2.2→2.3), release.yml run **`28749102771`** RUNNING (make_prerelease=false → plain tag `2.3`, make_latest, all 3 flavors + update.json vc38). Changelog range `d837036..5d324a6` (2.2.2 was ReShade; ALL of this landed after it). **Entirely app-side — NO ImageFS reinstall** (verified: zero bundled-asset changes since 2.2.2).
+> **Ships:** built-in **Steam store** (JavaSteam depot engine, username/password OR QR login, session hardening/CM-logoff recovery, GameNative-style 4-tier speed, status pill, depot OOM fix, "Log debug session" toggle); **Goldberg auto-patch** (Regular/Experimental/ColdClient, use-at-own-risk); **cross-store Download Manager** (Steam/Epic/GOG/Amazon, background downloads + shade notif via FGS, two-bar progress, single-source install-state, verified uninstall, Default-screen setting); **Epic + Amazon stores** added, **GOG** wired in, all non-Steam pages M3-restyled; **security hardening** (StoreLog.redactUrl scrubs signed URLs/OAuth codes/GOG client_secret+refresh_token/identity IDs from logcat + diagnostic files) + **third-party-login/use-at-own-risk/share-logs-carefully disclaimer**; **Steam QR re-enabled** + advisory.
+> **README updated** (What's New 2.3, all-4-stores + DL Manager section, new 🔒 Security Hardening section, Disclaimer extended) + **credits** added JavaSteam (Longi94 + joshuatam depotdownloader), Goldberg/gbe_fork (Mr_Goldberg/Detanup01), Pluvia (oxters168); expanded GameNative (session-hardening + DownloadSpeedConfig speed tiers) + The412Banner (2.3 original engineering); no AI credited. Release body drafted `/home/claude-user/scratchpad/release_2.3_body.md`, updater note `release_2.3_notes.txt` (double-quote-safe).
+> **PENDING on build green:** `gh release edit 2.3 --notes-file release_2.3_body.md --latest` (polished body) → verify tag `2.3` + update.json vc38 + 3 APKs + releases/latest→2.3 → record run/SHA/md5s → hand out credits (done in notes/README). **NOT on main:** Mali/BCn-layer (`feat/mali-bcn-layer`, awaiting Mali tester). QR is code-proven, verified-in-the-wild per user.
+
+---
+
 ## 2026-07-05 — 🎮 Re-enable Steam QR sign-in + fallback advisory (BUILDING)
 
 > **Branch `feat/reenable-steam-qr`** (off main `75ba43c`, commit `483b88c`, CI build `28747478670` running). QR login had been UI-gated OFF (`SteamLoginActivity.kt` `TextButton enabled=false`, "temporarily unavailable") over a concern that QR-originated sessions get dropped by the Steam CM after ~1h. **Verified the disable's stated precondition ("re-enable once the logoff-recovery path is device-proven") is now met at code level:** QR success calls `SteamQrAuthManager.saveSession(username, refreshToken)` — the SAME session shape as a password login — so it's recovered by the SAME path (`SteamRepository.onLoggedOff`/`reconnectNow`/`loginWithToken(username, refresh_token)`, bounded `MAX_LOGOFF_RECOVERY=3`/`MAX_RECONNECT_ATTEMPTS=5`). Recovery is refresh-token-based and agnostic to how you first authed → a QR session recovers like a password one.
