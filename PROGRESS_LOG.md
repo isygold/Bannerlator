@@ -13,6 +13,14 @@
 
 ---
 
+## 2026-07-05 — 🎮 Re-enable Steam QR sign-in + fallback advisory (BUILDING)
+
+> **Branch `feat/reenable-steam-qr`** (off main `75ba43c`, commit `483b88c`, CI build `28747478670` running). QR login had been UI-gated OFF (`SteamLoginActivity.kt` `TextButton enabled=false`, "temporarily unavailable") over a concern that QR-originated sessions get dropped by the Steam CM after ~1h. **Verified the disable's stated precondition ("re-enable once the logoff-recovery path is device-proven") is now met at code level:** QR success calls `SteamQrAuthManager.saveSession(username, refreshToken)` — the SAME session shape as a password login — so it's recovered by the SAME path (`SteamRepository.onLoggedOff`/`reconnectNow`/`loginWithToken(username, refresh_token)`, bounded `MAX_LOGOFF_RECOVERY=3`/`MAX_RECONNECT_ATTEMPTS=5`). Recovery is refresh-token-based and agnostic to how you first authed → a QR session recovers like a password one.
+> **Change = UI-only** (no auth/session logic touched): `SteamLoginActivity` button re-enabled + label back to "Sign in with QR Code"; NEW on-screen advisory on `QrLoginActivity` — "if downloads or your session keep dropping after signing in with QR, sign out and use Username + Password instead (the more reliable sign-in)". ⚠️ **code-proven, NOT yet device-proven for QR specifically** (recovery was device-proven on the password path; needs QR→wait ~1h/force-logoff→confirm reconnect on-device).
+> **Also in flight:** main build `28747347502` (log-redaction complete build off `75ba43c`). **User decision: HOLD staging/merge until BOTH builds finish, then decide.** No release cut (vc37/2.2.2).
+
+---
+
 ## 2026-07-05 — 🔒 Store logcat credential-leak audit + redaction fix (BUILT + STAGED)
 
 > **✅ CI build `28746951190` GREEN** (~8m, cached; SHA `2a2c5a96`). **Standard APK STAGED** `/sdcard/Download/bannerlator-log-redaction-2a2c5a9-standard.apk` (589,575,792 B, sha256 `4a80c30f…941c992b`, bit-identical to CI, on-device). ONE combined build = 4-store Download Manager COMPLETE + log redaction. **⏳ Awaiting user device-test:** all 4 store logins still work + a game download still works (confirms redaction-only), then diff logcat before/after to see credentials/signed-URLs now redacted. Then merge `fix/store-log-redaction`→main (clean FF off `a0ef2ee`), no release cut (vc37/2.2.2).
