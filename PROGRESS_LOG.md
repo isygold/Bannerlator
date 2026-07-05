@@ -13,7 +13,12 @@
 
 ---
 
-## 2026-07-05 — 🚀 STABLE RELEASE 2.3 (versionCode 38) — CUTTING
+## 2026-07-05 — ✅ STABLE RELEASE 2.3 (versionCode 38) — PUBLISHED + LATEST
+
+> **✅ LIVE:** https://github.com/The412Banner/Bannerlator/releases/tag/2.3 — tag `2.3` (→ `4c50df4`; APKs built from `fa488af`, app code identical, the tag just sits one docs(log) commit ahead), prerelease:false, **make_latest:true → releases/latest resolves to 2.3**. Release run **`28749102771`** SUCCESS. Body overwritten with polished `release_2.3_body.md` via `gh release edit`. **update.json verified: versionCode 38 / versionName 2.3**, per-flavor APK map correct. Assets attached: `Bannerlator-2.3-standard.apk` (589,576,141 B), `-ludashi` (589,576,164 B), `-pubg` (589,576,122 B), update.json (885 B). All caches hit (warm build). No release_notes double-quote trap (notes were single-line, clean).
+> Credits handed out (release body + README): JavaSteam (Longi94 + joshuatam), Goldberg/gbe_fork (Mr_Goldberg/Detanup01), Pluvia (oxters168), GameNative (expanded: session-hardening + speed tiers), The412Banner (2.3 original engineering); no AI credited — satisfies [[project_bannerlator_steam_branch_release_credits]].
+
+## 2026-07-05 — 🚀 STABLE RELEASE 2.3 (versionCode 38) — CUTTING (superseded by PUBLISHED above)
 
 > **The storefronts release.** Bump commit `fa488af` (versionCode 37→38, versionName 2.2.2→2.3), release.yml run **`28749102771`** RUNNING (make_prerelease=false → plain tag `2.3`, make_latest, all 3 flavors + update.json vc38). Changelog range `d837036..5d324a6` (2.2.2 was ReShade; ALL of this landed after it). **Entirely app-side — NO ImageFS reinstall** (verified: zero bundled-asset changes since 2.2.2).
 > **Ships:** built-in **Steam store** (JavaSteam depot engine, username/password OR QR login, session hardening/CM-logoff recovery, GameNative-style 4-tier speed, status pill, depot OOM fix, "Log debug session" toggle); **Goldberg auto-patch** (Regular/Experimental/ColdClient, use-at-own-risk); **cross-store Download Manager** (Steam/Epic/GOG/Amazon, background downloads + shade notif via FGS, two-bar progress, single-source install-state, verified uninstall, Default-screen setting); **Epic + Amazon stores** added, **GOG** wired in, all non-Steam pages M3-restyled; **security hardening** (StoreLog.redactUrl scrubs signed URLs/OAuth codes/GOG client_secret+refresh_token/identity IDs from logcat + diagnostic files) + **third-party-login/use-at-own-risk/share-logs-carefully disclaimer**; **Steam QR re-enabled** + advisory.
