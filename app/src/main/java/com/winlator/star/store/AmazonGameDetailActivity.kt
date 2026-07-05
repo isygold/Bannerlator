@@ -220,6 +220,12 @@ class AmazonGameDetailActivity : ComponentActivity() {
                 if (e != null && (e.state == DownloadState.DOWNLOADING || e.state == DownloadState.PAUSED)) {
                     progressVisible = true
                     progressValue = e.pct
+                    // Live label on the detail page, matching the Manager card. Registry-driven so
+                    // it's live for a list-started / reopened download, not just this Activity's.
+                    progressLabel = if (e.installTotal > 0 && e.installDone > 0)
+                        "${e.pct}%  (${formatDownloadSize(e.installDone)} / ${formatDownloadSize(e.installTotal)})"
+                    else "Downloading… ${e.pct}%"
+                    progressLabelVisible = true
                     installBtnVisible = true
                     installBtnText = "Cancel"
                     installBtnColor = 0xFFCC3333.toInt()

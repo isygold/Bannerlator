@@ -425,7 +425,10 @@ class GogGameDetailActivity : ComponentActivity() {
                 if (!isDestroyed && !isFinishing) runOnUiThread {
                     if (isDestroyed || isFinishing) return@runOnUiThread
                     progressValue = pct
-                    progressLabel = msg
+                    // Same live-% label the registry collector shows, so a locally-started
+                    // download reads identically to a list-started one (no flicker between the
+                    // engine status string and the "$pct%" the Manager/notification show).
+                    progressLabel = "Downloading… $pct%"
                 }
             }
             override fun onComplete(exePath: String) {
@@ -534,6 +537,11 @@ class GogGameDetailActivity : ComponentActivity() {
                 if (e != null && (e.state == DownloadState.DOWNLOADING || e.state == DownloadState.PAUSED)) {
                     progressVisible = true
                     progressValue = e.pct
+                    // Live percentage on the detail page, matching the Download Manager card and
+                    // the notification (GOG is pct-only). Registry-driven so it stays live for a
+                    // list-started / reopened download, not just the one this Activity launched.
+                    progressLabel = "Downloading… ${e.pct}%"
+                    progressLabelVisible = true
                     installVisible = true
                     installBtnText = "Cancel"
                     installBtnColor = 0xFFCC3333.toInt()
