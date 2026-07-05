@@ -34,7 +34,18 @@ import java.util.zip.ZipOutputStream
  */
 object GameSaveBackup {
 
-    private const val PROTON_USER = "steamuser"
+    /**
+     * Target on-disk layout for a backup zip. The file walk is identical across layouts — the ONLY
+     * difference is how each entry is rooted, which is what makes a game "see" its save in the tool
+     * you're restoring into.
+     *
+     *  - [GAMEHUB]  → "/drive_c/users/steamuser/…"  (GameHub / Proton, the default)
+     *  - [WINLATOR] → "drive_c/users/xuser/…"       (sibling Winlator / WinNative / Bannerlator builds)
+     *
+     * Both re-import into OUR builds regardless: [remapForRestore] rewrites any non-Public user
+     * segment to [ImageFs.USER], so steamuser→xuser and xuser→xuser both land correctly.
+     */
+    enum class BackupLayout { GAMEHUB, WINLATOR }
 
     data class RestoreResult(val ok: Boolean, val filesWritten: Int, val error: String?)
     data class BackupResult(val ok: Boolean, val path: String?, val fileCount: Int, val error: String?)
@@ -136,16 +147,33 @@ object GameSaveBackup {
     // ---------------------------------------------------------------- backup (export)
 
     /**
-     * Zips this container's Wine user profile (drive_c/users/xuser) into a GameHub-compatible
-     * archive under Downloads/Winlator/Backups/GameSaves, translating xuser → steamuser so the
-     * result restores in GameHub and other builds. Runs off the UI thread; posts [onResult] on
-     * the main thread.
+     * Whole-container backup in the default GameHub layout — thin delegate kept for existing
+     * callers; equivalent to [backup] with `roots = null`, `gameName = null`, GAMEHUB.
      */
-    fun backup(context: Context, container: Container, onResult: (BackupResult) -> Unit) {
-        val appContext = context.applicationContext
+    fun backup(context: Context, container: Container, onResult: (BackupResult) -> Unit) =
+        backup(context, container, null, null, BackupLayout.GAMEHUB, onResult)
+
+    /**
+     * Zips a container's saves into an archive under Downloads/Winlator/Backups/GameSaves, off the
+     * UI thread (posts [onResult] on the main thread).
+     *
+     *  - [roots] == null  → the whole xuser profile (whole-container backup).
+     *  - [roots] != null  → only those subtrees under the xuser profile (per-game backup); each
+     *    entry is a path relative to xuser (e.g. "Documents/My Games/Elden Ring").
+     *  - [gameName] names the zip ("&lt;name&gt;_&lt;epoch&gt;.zip"); falls back to the container name.
+     *  - [layout] chooses how each entry is rooted (see [BackupLayout]).
+     */
+    fun backup(
+        context: Context,
+        container: Container,
+        roots: List<String>?,
+        gameName: String?,
+        layout: BackupLayout,
+        onResult: (BackupResult) -> Unit,
+    ) {
         Thread {
             val res = try {
-                doBackup(container)
+                doBackup(container, roots, gameName, layout)
             } catch (e: Exception) {
                 BackupResult(false, null, 0, e.message ?: e.javaClass.simpleName)
             }
@@ -153,35 +181,54 @@ object GameSaveBackup {
         }.start()
     }
 
-    private fun doBackup(container: Container): BackupResult {
+    private fun doBackup(
+        container: Container,
+        roots: List<String>?,
+        gameName: String?,
+        layout: BackupLayout,
+    ): BackupResult {
         val profile = File(container.rootDir, ".wine/drive_c/users/${ImageFs.USER}")
         if (!profile.isDirectory) {
             return BackupResult(false, null, 0, "No save profile found in this container")
         }
+
+        // The only per-layout state: the entry root prefix + which user segment to write.
+        val (rootPrefix, userSeg) = when (layout) {
+            BackupLayout.GAMEHUB -> "/drive_c/" to "steamuser"
+            BackupLayout.WINLATOR -> "drive_c/" to ImageFs.USER
+        }
+
+        // Subtrees to walk: the whole profile when unscoped, else each existing scoped root.
+        val scopeDirs: List<File> = if (roots == null) listOf(profile)
+        else roots.map { File(profile, it) }.filter { it.exists() }
 
         val outDir = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
             "Winlator/Backups/GameSaves"
         )
         outDir.mkdirs()
-        val safeName = sanitize(container.name.ifBlank { "container-${container.id}" })
+        val safeName = sanitize((gameName ?: container.name).ifBlank { "container-${container.id}" })
         val outFile = File(outDir, "${safeName}_${System.currentTimeMillis()}.zip")
 
         var count = 0
         ZipOutputStream(BufferedOutputStream(FileOutputStream(outFile))).use { zos ->
             val stack = ArrayDeque<File>()
-            profile.listFiles()?.forEach { stack.addLast(it) }
+            scopeDirs.forEach { d ->
+                if (d.isDirectory) d.listFiles()?.forEach { stack.addLast(it) }
+                else if (d.isFile) stack.addLast(d)
+            }
             while (stack.isNotEmpty()) {
                 val f = stack.removeLast()
-                // Skip volatile noise that isn't a save — keeps backups small and GameHub-clean.
+                // Skip volatile noise that isn't a save — keeps backups small and GameHub-clean,
+                // even inside a scoped root.
                 if (f.isDirectory && isNoiseDir(profile, f)) continue
                 if (f.isDirectory) {
                     f.listFiles()?.forEach { stack.addLast(it) }
                     continue
                 }
-                // Relative path inside the xuser profile, re-rooted at the Proton layout.
+                // Relative path inside the xuser profile, re-rooted per the chosen layout.
                 val rel = f.relativeTo(profile).path.replace(File.separatorChar, '/')
-                val entryName = "/drive_c/users/$PROTON_USER/$rel"
+                val entryName = "${rootPrefix}users/$userSeg/$rel"
                 zos.putNextEntry(ZipEntry(entryName))
                 f.inputStream().use { it.copyTo(zos) }
                 zos.closeEntry()
