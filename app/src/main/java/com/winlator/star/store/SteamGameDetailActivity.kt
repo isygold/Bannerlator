@@ -891,6 +891,13 @@ private fun GoldbergSection(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = "Please note: this is not a fix for all Steam games that require a " +
+                "Steam client to run. It is not a guaranteed fix-all — use at your own risk!",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error,
+        )
 
         if (!installed) {
             // Component not downloaded yet — offer the one-time global download.
