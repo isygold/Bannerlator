@@ -13,6 +13,14 @@
 
 ---
 
+## 2026-07-04 — 🐞→✅ Black-box Toast on Amazon uninstall (device-test of 6e089ce)
+
+> **`6e089ce` device-tested: all 5 launch/routing/dialog fixes WORK.** Last bug: uninstall shows an unreadable **black box** at the bottom (screenshot = Amazon detail page). Same ROM/targetSDK-28 issue Steam already fixed — system `Toast` renders as a black box; Steam uses the themed `UninstallResultBar` (`StoreUninstaller.kt:65`).
+> **Fix (`4b8d28b`):** `AmazonGameDetailActivity` + `AmazonGamesActivity` — added `resultBarMsg` state + `UninstallResultBar` overlay; uninstall confirmations (both entry points) + the detail "No .exe found" launch message now render through the themed bar instead of Toast. Also refresh `loadUpdateStatus()` on uninstall so the stale "Installed: v…" line clears. CI `28725198746` running → deliver `bannerlator-toast-fix-4b8d28b`.
+> **Known follow-up:** other Amazon Toasts (download-fail, login-required) + all Epic/GOG store-screen Toasts still black-box on this ROM — offered to sweep.
+
+---
+
 ## 2026-07-04 — 🐞×4 Amazon launch/completion/routing/dialog (device-test of cceba57)
 
 > **`cceba57` device-tested. ✅ WINS:** cover art on DL card, detail progress label "68% (2.7 GB / 3.9 GB)", **shade notification works** ("Downloading — Dread Templar — 82% (3.2 GB / 3.9 GB)"). **4 NEW bugs (crash captured via `getlog.py exec logcat -b crash`):**
