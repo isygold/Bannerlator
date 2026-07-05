@@ -18,6 +18,7 @@
 > On `feat/gog-download-producer`. **GOG wired into the cross-store Download Manager** (`70ebfef`, mirrors Amazon; `GogDownloadManager.java` untouched): new `GogInstallState` (purge) + `GogLibrarySync` (seed + self-heal + cachedDetail); producer hooks in `GogGameDetailActivity` + `GogGamesActivity` (both download entry points); `DownloadManagerActivity` openDetail + purgeNativeInstall GOG branches. Cover `//`→https normalized. **Deviation (correct): no DownloadScope — GOG engine spawns its own thread, so FGS+appContext give background survival.** update-available=false (GOG check is network-only). Verified compile-critical refs exist + imports/Kotlin-Java direction clean.
 > **Parallel:** cache-warming build `28727169152` on `main` (cold, populates main-scope caches for all future runs); GOG build `28727381558` dispatched alongside (cold this once, warm off main afterward).
 > **NEXT:** builds green → deliver GOG APK → device-test → Phase C (Epic, last; also fix its LandscapeLauncher launch crash).
+> **⏸️ CHECKPOINT (2026-07-04): both builds still in-flight (main warm `28727169152` + GOG `28727381558`); watchers active. GOG code committed `70ebfef` on `feat/gog-download-producer` (off main `180c2c8`). Resume = wait for build notifications → deliver GOG APK for device test. Full GOG detail in memory `project_bannerlator_download_manager_stores`.**
 
 ---
 
