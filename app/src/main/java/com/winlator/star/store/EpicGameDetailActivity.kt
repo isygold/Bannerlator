@@ -39,6 +39,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.winlator.star.store.download.DownloadRegistry
+import com.winlator.star.store.download.DownloadScope
+import com.winlator.star.store.download.DownloadState
 import com.winlator.star.store.download.DownloadsButton
 import com.winlator.star.store.download.INSTALLED_GREEN
 import com.winlator.star.store.download.InfoChip
@@ -50,12 +53,13 @@ import com.winlator.star.store.download.StoreDetailHeader
 import com.winlator.star.store.download.StoreDetailState
 import com.winlator.star.store.download.StoreHero
 import com.winlator.star.store.download.StoreProgressBar
+import com.winlator.star.store.download.StoreDownloadHooks
 import com.winlator.star.store.download.StoreSection
 import com.winlator.star.store.download.StoreStatusText
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import androidx.lifecycle.lifecycleScope
 import java.io.File
@@ -112,6 +116,12 @@ class EpicGameDetailActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("bh_epic_prefs", 0)
+
+        // Cross-store Download Manager (Phase C): Epic can download without the Steam foreground
+        // service ever running, so init the registry + seed/self-heal the installed library here
+        // (idempotent) — mirrors Amazon/GOG.
+        DownloadRegistry.init(this)
+        EpicLibrarySync.seed(this)
 
         appName = intent.getStringExtra("app_name")
         title = intent.getStringExtra("title")
@@ -188,12 +198,55 @@ class EpicGameDetailActivity : ComponentActivity() {
         }
 
         refreshActionState()
+        observeRegistry()
         loadInstallSize()
     }
 
     override fun onBackPressed() {
-        cancelDownload?.run()
+        // Leaving the detail page no longer cancels the download: it keeps running on DownloadScope
+        // with the foreground-service notification, and can still be cancelled from the Download
+        // Manager. Mirrors Amazon/GOG. (Epic's cancel is best-effort anyway — see startInstallInternal.)
         super.onBackPressed()
+    }
+
+    /**
+     * Make the detail page a live reflection of [DownloadRegistry] for THIS game. Without this,
+     * opening the page while a download is live (started from the games list, or after the Activity
+     * was recreated) showed "Install" even though the DL-manager card + shade notification were
+     * progressing — the page only read install prefs. Runs on the main dispatcher (lifecycleScope
+     * default) so the Compose state writes are main-thread-safe. Mirrors GogGameDetailActivity.
+     */
+    private fun observeRegistry() {
+        val an = appName ?: return
+        val myKey = "${Store.EPIC}:$an"
+        lifecycleScope.launch {
+            DownloadRegistry.entries.collect { list ->
+                val e = list.firstOrNull { it.key == myKey }
+                if (e != null && (e.state == DownloadState.DOWNLOADING || e.state == DownloadState.PAUSED)) {
+                    progressVisible = true
+                    progressValue = e.pct
+                    // Epic is pct-only → live "$pct%" label (matches the DL card + notification, and
+                    // the local onProgress below, so a list-started/reopened DL reads identically).
+                    progressLabelText = "Downloading… ${e.pct}%"
+                    progressLabelVisible = true
+                    installBtnVisible = true
+                    installBtnText = "Cancel"
+                    installBtnColor = 0xFFCC3333.toInt()
+                    launchBtnVisible = false
+                    setExeBtnVisible = false
+                    uninstallBtnVisible = false
+                    // Route Cancel to the registry entry so it works for a list-started download —
+                    // but ONLY if we don't already hold the local canceller (a locally-started
+                    // download sets it in startInstallInternal); guards against any recursion.
+                    if (cancelDownload == null) cancelDownload = Runnable { e.cancel?.invoke() }
+                } else {
+                    // No active entry (absent / INSTALLED / FAILED / CANCELLED): settle from prefs.
+                    progressVisible = false
+                    progressLabelVisible = false
+                    refreshActionState()
+                }
+            }
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -233,6 +286,7 @@ class EpicGameDetailActivity : ComponentActivity() {
     }
 
     private fun startInstallInternal() {
+        val an = appName ?: return
         installBtnText = "Cancel"
             installBtnColor = 0xFFCC3333.toInt()
         progressVisible = true
@@ -241,33 +295,56 @@ class EpicGameDetailActivity : ComponentActivity() {
         setExeBtnVisible = false
         progressLabelText = ""
 
+        // WEAK CANCEL (Epic-only): install() takes no cancel checker, so flipping this flag can't
+        // abort mid-download \u2014 it's only read AFTER install() returns, at which point the finished
+        // download is discarded. The registry row/notification clear then. Honest, best-effort.
         val cancelled = AtomicBoolean(false)
         cancelDownload = Runnable { cancelled.set(true) }
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        // Publish into the cross-store Download Manager (shade notification + process kept alive).
+        // Epic reports pct only \u2192 single honest bar (byte pairs left at 0).
+        StoreDownloadHooks.registerDownload(
+            store = Store.EPIC,
+            id = an,
+            name = title ?: an,
+            cover = artCover,
+            supportsPause = false,
+            installTotal = prefs!!.getLong("epic_size_$an", 0L),
+            cancel = { cancelled.set(true) },
+        )
+
+        // applicationContext + DownloadScope.io (NOT lifecycleScope): install() is a synchronous
+        // blocking call, so the download now survives this Activity being destroyed / backgrounded.
+        // Registry hooks are Activity-independent; only the mutableState UI writes are lifecycle-guarded.
+        val appCtx = applicationContext
+        DownloadScope.io.launch {
             try {
-                val token = EpicCredentialStore.getValidAccessToken(this@EpicGameDetailActivity)
+                val token = EpicCredentialStore.getValidAccessToken(appCtx)
                 if (token == null) { onInstallError("Login required"); return@launch }
 
-                withContext(Dispatchers.Main) { progressLabelText = "Fetching manifest\u2026" }
-                val manifestJson = EpicApiClient.getManifestApiJson(token, namespace, catalogItemId, appName)
+                if (!isDestroyed && !isFinishing) runOnUiThread { progressLabelText = "Fetching manifest\u2026" }
+                val manifestJson = EpicApiClient.getManifestApiJson(token, namespace, catalogItemId, an)
                 if (manifestJson == null) { onInstallError("Failed to fetch manifest"); return@launch }
 
                 var sanitized = (title ?: "").replace(Regex("[^a-zA-Z0-9 \\-_]"), "").trim()
-                if (sanitized.isEmpty()) sanitized = "epic_${appName.hashCode()}"
+                if (sanitized.isEmpty()) sanitized = "epic_${an.hashCode()}"
                 val installDir = File(File(filesDir, "epic_games"), sanitized)
-                prefs!!.edit().putString("epic_dir_$appName", installDir.absolutePath).apply()
+                prefs!!.edit().putString("epic_dir_$an", installDir.absolutePath).apply()
 
                 val ok = EpicDownloadManager.install(
-                    this@EpicGameDetailActivity,
+                    appCtx,
                     manifestJson,
                     token,
                     installDir.absolutePath,
-                ) { msg, pct ->
+                ) { _, pct ->
+                    // Freeze the card/label the moment the user hits Cancel (the download itself
+                    // can't be stopped \u2014 see WEAK CANCEL above).
                     if (!cancelled.get()) {
-                        runOnUiThread {
+                        StoreDownloadHooks.tick(Store.EPIC, an, pct)
+                        if (!isDestroyed && !isFinishing) runOnUiThread {
+                            if (isDestroyed || isFinishing) return@runOnUiThread
                             progressValue = pct
-                            progressLabelText = msg
+                            progressLabelText = "Downloading\u2026 $pct%"
                         }
                     }
                 }
@@ -278,7 +355,7 @@ class EpicGameDetailActivity : ComponentActivity() {
                 try {
                     val vid = JSONObject(manifestJson).optString("versionId", "")
                     if (vid.isNotEmpty()) {
-                        prefs!!.edit().putString("epic_manifest_version_$appName", vid).apply()
+                        prefs!!.edit().putString("epic_manifest_version_$an", vid).apply()
                     }
                 } catch (_: Exception) {}
 
@@ -291,19 +368,12 @@ class EpicGameDetailActivity : ComponentActivity() {
                     AmazonLaunchHelper.scoreExe(b, lowerTitle) - AmazonLaunchHelper.scoreExe(a, lowerTitle)
                 }
 
-                if (exeFiles.size == 1) {
-                    prefs!!.edit().putString("epic_exe_$appName", exeFiles[0].absolutePath).apply()
-                    onInstallComplete()
-                } else {
-                    val candidates = exeFiles.map { it.absolutePath }
-                    withContext(Dispatchers.Main) {
-                        showExePicker(candidates) { selected ->
-                            val chosen = if (!selected.isNullOrEmpty()) selected else exeFiles[0].absolutePath
-                            prefs!!.edit().putString("epic_exe_$appName", chosen).apply()
-                            onInstallComplete()
-                        }
-                    }
-                }
+                // Completion NEVER shows a dialog: auto-record the best-scored exe (list already
+                // sorted best-first) and finalize \u2014 mirrors the Amazon/GOG fix that unwedged the
+                // 100%-stuck card when the user wasn't on the detail page. Exe choice stays
+                // available via "Set .exe\u2026".
+                prefs!!.edit().putString("epic_exe_$an", exeFiles[0].absolutePath).apply()
+                onInstallComplete()
             } catch (e: Exception) {
                 if (!cancelled.get()) onInstallError(e.message ?: "Unknown error")
             }
@@ -312,7 +382,19 @@ class EpicGameDetailActivity : ComponentActivity() {
 
     private fun onInstallComplete() {
         cancelDownload = null
-        runOnUiThread {
+        // Finalize into the registry regardless of which screen is showing (fixes the 100% wedge).
+        appName?.let { an ->
+            prefs!!.getString("epic_dir_$an", null)?.let { dir ->
+                StoreDownloadHooks.markInstalled(
+                    store = Store.EPIC,
+                    id = an,
+                    installPath = dir,
+                    bytes = prefs!!.getLong("epic_size_$an", 0L),
+                )
+            }
+        }
+        if (!isDestroyed && !isFinishing) runOnUiThread {
+            if (isDestroyed || isFinishing) return@runOnUiThread
             progressVisible = false
             progressLabelVisible = false
             setResult(RESULT_REFRESH)
@@ -322,7 +404,9 @@ class EpicGameDetailActivity : ComponentActivity() {
 
     private fun onInstallError(msg: String) {
         cancelDownload = null
-        runOnUiThread {
+        appName?.let { StoreDownloadHooks.markFailed(Store.EPIC, it, msg) }
+        if (!isDestroyed && !isFinishing) runOnUiThread {
+            if (isDestroyed || isFinishing) return@runOnUiThread
             progressVisible = false
             progressLabelVisible = false
             installBtnText = "Install"
@@ -335,7 +419,9 @@ class EpicGameDetailActivity : ComponentActivity() {
 
     private fun onInstallCancelled() {
         cancelDownload = null
-        runOnUiThread {
+        appName?.let { StoreDownloadHooks.markCancelled(Store.EPIC, it) }
+        if (!isDestroyed && !isFinishing) runOnUiThread {
+            if (isDestroyed || isFinishing) return@runOnUiThread
             progressVisible = false
             progressLabelVisible = false
             installBtnText = "Install"
@@ -350,13 +436,15 @@ class EpicGameDetailActivity : ComponentActivity() {
             .setTitle("Uninstall $title?")
             .setMessage("This will delete all installed game files.")
             .setPositiveButton("Uninstall") { _, _ ->
-                val dir = prefs!!.getString("epic_dir_$appName", null) ?: return@setPositiveButton
+                val an = appName ?: return@setPositiveButton
+                val dir = prefs!!.getString("epic_dir_$an", null) ?: return@setPositiveButton
                 lifecycleScope.launch(Dispatchers.IO) {
                     deleteDir(File(dir))
-                    prefs!!.edit()
-                        .remove("epic_exe_$appName")
-                        .remove("epic_dir_$appName")
-                        .apply()
+                    // Purge the FULL native install record via the canonical helper + clear the DL
+                    // manager's registry/library row, so the store list and Download Manager stay in
+                    // sync. Mirrors Amazon/GOG.
+                    EpicInstallState.purge(applicationContext, an)
+                    StoreDownloadHooks.markUninstalled(Store.EPIC, an)
                     runOnUiThread {
                         setResult(RESULT_REFRESH)
                         refreshActionState()

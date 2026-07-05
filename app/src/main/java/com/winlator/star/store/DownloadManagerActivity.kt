@@ -111,6 +111,7 @@ class DownloadManagerActivity : ComponentActivity() {
         // Idempotent; never throws into startup.
         AmazonLibrarySync.seed(this)
         GogLibrarySync.seed(this)
+        EpicLibrarySync.seed(this)
 
         setContent {
             WinlatorTheme {
@@ -226,9 +227,24 @@ class DownloadManagerActivity : ComponentActivity() {
                     },
                 )
             }
-            // TODO(EPIC): route to EpicGameDetailActivity once its producer populates the registry —
-            // same hydrate-from-cache shape as Amazon/GOG.
-            Store.EPIC -> { /* detail routing lands with the Epic producer */ }
+            Store.EPIC -> {
+                // Hydrate the detail extras from epic_cache; fall back to the entry's own fields so
+                // the page still opens even if the cache is unavailable.
+                val d = EpicLibrarySync.cachedDetail(this, entry.id)
+                val title = d?.title?.takeIf { it.isNotEmpty() } ?: entry.name
+                val art = d?.artCover?.takeIf { it.isNotEmpty() } ?: entry.cover ?: ""
+                startActivity(
+                    Intent(this, EpicGameDetailActivity::class.java).apply {
+                        putExtra("app_name", entry.id)
+                        putExtra("title", title)
+                        putExtra("description", d?.description ?: "")
+                        putExtra("developer", d?.developer ?: "")
+                        putExtra("art_cover", art)
+                        putExtra("namespace", d?.namespace ?: "")
+                        putExtra("catalog_item_id", d?.catalogItemId ?: "")
+                    },
+                )
+            }
         }
     }
 
@@ -306,9 +322,7 @@ class DownloadManagerActivity : ComponentActivity() {
         when (entry.store) {
             Store.AMAZON -> AmazonInstallState.purge(this, entry.id)
             Store.GOG -> GogInstallState.purge(this, entry.id)
-            // TODO(EPIC): clear its native install record here when the Epic producer lands,
-            // mirroring Amazon/GOG (same shape: remove the store's per-game keys).
-            Store.EPIC -> Unit
+            Store.EPIC -> EpicInstallState.purge(this, entry.id)
             Store.STEAM -> Unit   // handled via SteamRepository.markUninstalled in `mark`
         }
     }

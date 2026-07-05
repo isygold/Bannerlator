@@ -57,7 +57,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.winlator.star.store.download.DownloadRegistry
+import com.winlator.star.store.download.DownloadScope
 import com.winlator.star.store.download.DownloadsButton
+import com.winlator.star.store.download.Store
+import com.winlator.star.store.download.StoreDownloadHooks
 import com.winlator.star.ui.theme.WinlatorTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -106,6 +110,11 @@ class EpicGamesActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences(PREFS_NAME, 0)
         viewMode = prefs!!.getString(VIEW_MODE_KEY, "grid") ?: "grid"
+
+        // Cross-store Download Manager (Phase C): init the registry + seed/self-heal the installed
+        // Epic library here (idempotent), mirroring Amazon/GOG.
+        DownloadRegistry.init(this)
+        EpicLibrarySync.seed(this)
 
         setContent {
             WinlatorTheme {
@@ -365,13 +374,30 @@ class EpicGamesActivity : ComponentActivity() {
         val appName = game.appName
         downloadStates[appName] = GameDownloadState(isActive = true, showProgress = true)
 
+        // WEAK CANCEL (Epic-only): install() has no cancel checker, so this flag only takes effect
+        // AFTER install() returns (the finished download is then discarded). Best-effort.
         val cancelled = AtomicBoolean(false)
         cancelRunnables[appName] = Runnable { cancelled.set(true) }
 
-        lifecycleScope.launch(Dispatchers.IO) {
+        // Publish into the cross-store Download Manager (shade notification + background survival).
+        StoreDownloadHooks.registerDownload(
+            store = Store.EPIC,
+            id = appName,
+            name = game.title,
+            cover = game.artCover.ifEmpty { game.artSquare },
+            supportsPause = false,
+            installTotal = prefs!!.getLong("epic_size_$appName", 0L),
+            cancel = { cancelled.set(true) },
+        )
+
+        // applicationContext + DownloadScope.io: install() blocks synchronously, so the download now
+        // survives this list Activity being destroyed / the app backgrounded.
+        val appCtx = applicationContext
+        DownloadScope.io.launch {
             try {
-                val token = EpicCredentialStore.getValidAccessToken(this@EpicGamesActivity)
+                val token = EpicCredentialStore.getValidAccessToken(appCtx)
                 if (token == null) {
+                    StoreDownloadHooks.markFailed(Store.EPIC, appName, "Login required")
                     withContext(Dispatchers.Main) {
                         downloadStates[appName] = GameDownloadState()
                         resultBarMsg = "Login required"
@@ -386,6 +412,7 @@ class EpicGamesActivity : ComponentActivity() {
                     token, game.namespace, game.catalogItemId, game.appName,
                 )
                 if (manifestJson == null) {
+                    StoreDownloadHooks.markFailed(Store.EPIC, appName, "Failed to fetch manifest")
                     withContext(Dispatchers.Main) {
                         downloadStates[appName] = GameDownloadState()
                         resultBarMsg = "Failed to fetch manifest. If this is Fortnite, it is not supported."
@@ -399,18 +426,20 @@ class EpicGamesActivity : ComponentActivity() {
                 prefs!!.edit().putString("epic_dir_${game.appName}", installDir.absolutePath).apply()
 
                 val ok = EpicDownloadManager.install(
-                    this@EpicGamesActivity,
+                    appCtx,
                     manifestJson,
                     token,
                     installDir.absolutePath,
                 ) { msg, pct ->
                     if (!cancelled.get()) {
+                        StoreDownloadHooks.tick(Store.EPIC, appName, pct)
                         downloadStates[appName] = downloadStates[appName]?.copy(progress = pct, status = msg)
                             ?: GameDownloadState(isActive = true, progress = pct, status = msg, showProgress = true)
                     }
                 }
 
                 if (cancelled.get()) {
+                    StoreDownloadHooks.markCancelled(Store.EPIC, appName)
                     withContext(Dispatchers.Main) {
                         cancelRunnables.remove(appName)
                         downloadStates[appName] = GameDownloadState()
@@ -418,6 +447,7 @@ class EpicGamesActivity : ComponentActivity() {
                     return@launch
                 }
                 if (!ok) {
+                    StoreDownloadHooks.markFailed(Store.EPIC, appName, "Download failed")
                     withContext(Dispatchers.Main) {
                         cancelRunnables.remove(appName)
                         downloadStates[appName] = GameDownloadState()
@@ -430,6 +460,7 @@ class EpicGamesActivity : ComponentActivity() {
                 AmazonLaunchHelper.collectExe(installDir, exeFiles)
 
                 if (exeFiles.isEmpty()) {
+                    StoreDownloadHooks.markFailed(Store.EPIC, appName, "No executable found")
                     withContext(Dispatchers.Main) {
                         cancelRunnables.remove(appName)
                         downloadStates[appName] = GameDownloadState()
@@ -443,26 +474,24 @@ class EpicGamesActivity : ComponentActivity() {
                     AmazonLaunchHelper.scoreExe(b, lowerTitle) - AmazonLaunchHelper.scoreExe(a, lowerTitle)
                 }
 
-                if (exeFiles.size == 1) {
-                    val path = exeFiles[0].absolutePath
-                    prefs!!.edit().putString("epic_exe_${game.appName}", path).apply()
-                    withContext(Dispatchers.Main) {
-                        cancelRunnables.remove(appName)
-                        downloadStates[appName] = GameDownloadState(progress = 100, installed = true)
-                    }
-                    return@launch
-                }
-
-                val candidates = exeFiles.map { it.absolutePath }
-                showExePicker(candidates) { selected ->
-                    val chosen = if (!selected.isNullOrEmpty()) selected else exeFiles[0].absolutePath
-                    prefs!!.edit().putString("epic_exe_${game.appName}", chosen).apply()
+                // Completion NEVER shows a picker: auto-record the best-scored exe and finalize \u2014
+                // mirrors the Amazon/GOG fix (a dialog on a stopped Activity wedged the card at 100%).
+                val path = exeFiles[0].absolutePath
+                prefs!!.edit().putString("epic_exe_${game.appName}", path).apply()
+                StoreDownloadHooks.markInstalled(
+                    store = Store.EPIC,
+                    id = appName,
+                    installPath = installDir.absolutePath,
+                    bytes = prefs!!.getLong("epic_size_$appName", 0L),
+                )
+                withContext(Dispatchers.Main) {
                     cancelRunnables.remove(appName)
                     downloadStates[appName] = GameDownloadState(progress = 100, installed = true)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "startEpicDownload failed", e)
                 if (!cancelled.get()) {
+                    StoreDownloadHooks.markFailed(Store.EPIC, appName, e.message ?: "Unknown error")
                     withContext(Dispatchers.Main) {
                         cancelRunnables.remove(appName)
                         downloadStates[appName] = GameDownloadState()
@@ -523,19 +552,6 @@ class EpicGamesActivity : ComponentActivity() {
             }
             list
         } catch (e: Exception) { Log.e(TAG, "loadCachedGames failed", e); null }
-    }
-
-    private fun showExePicker(candidates: List<String>, onSelected: (String?) -> Unit) {
-        val labels = candidates.map { path ->
-            val f = File(path)
-            val parent = f.parentFile
-            (if (parent != null) "${parent.name}/${f.name}" else f.name)
-        }.toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("Select game executable")
-            .setItems(labels) { _, which -> onSelected(candidates[which]) }
-            .setCancelable(false)
-            .show()
     }
 
     private fun formatBytes(bytes: Long): String = when {
