@@ -13,6 +13,15 @@
 
 ---
 
+## 2026-07-04 — ⚙️ CI build-speed: cloned cached workflow under test (build-artifacts-fast.yml)
+
+> User asked about speeding up the ~13-16 min CI build (zero caching today). Decided: **ALWAYS build all 3 flavors** (no standard-only), so speedups = caching + drop redundant JDK only. Built a PARALLEL cloned workflow to validate WITHOUT touching the primary `build-artifacts.yml`.
+> **New `.github/workflows/build-artifacts-fast.yml`** (feature branch `8cae1e7`; registered dispatch-only on `main` `2df37ab` because `workflow_dispatch` requires the file on the default branch): same 3-flavor output/artifact names + adds `setup-java` (drop apt JDK), `setup-gradle` (dep+build cache), NDK+cmake cache (key=version), JavaSteam-JAR cache (key=upstream commit via `git ls-remote`), LSFG `.so` cache (key=source+script hash). Each cache guarded so a miss still builds.
+> **Cache invalidation:** JavaSteam(upstream commit)/LSFG(source hash)/Gradle(build-file hash) auto-detect changes → rebuild+recache, else use cache; NDK version-pinned (re-downloads only when we bump the version). Est. warm build ~8-10 min (3× APK packaging is the uncacheable floor).
+> **COLD run `28726206582` dispatched** (populates caches, ~baseline time); WARM run next → measure before/after. See memory `project_bannerlator_ci_build_speedup`.
+
+---
+
 ## 2026-07-04 — 🐞→✅ Black-box Toast on Amazon uninstall (device-test of 6e089ce)
 
 > **`6e089ce` device-tested: all 5 launch/routing/dialog fixes WORK.** Last bug: uninstall shows an unreadable **black box** at the bottom (screenshot = Amazon detail page). Same ROM/targetSDK-28 issue Steam already fixed — system `Toast` renders as a black box; Steam uses the themed `UninstallResultBar` (`StoreUninstaller.kt:65`).
