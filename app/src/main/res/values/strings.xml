@@ -688,7 +688,7 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <!-- Per-game save backup -->
     <string name="save_backup_scope_title">Back up this save</string>
     <string name="save_backup_scope_prompt">What do you want to back up?</string>
-    <string name="save_backup_scope_whole">This whole container</string>
+    <string name="save_backup_scope_whole">All game saves (whole profile)</string>
     <string name="save_backup_scope_game">A specific game</string>
     <string name="save_backup_pick_game_title">Pick a game</string>
     <string name="save_backup_pick_game_empty">No games found in this container.</string>
