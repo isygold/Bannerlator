@@ -13,6 +13,14 @@
 
 ---
 
+## 2026-07-04 — 🎮 GOG Phase B implemented (producer wiring) + parallel cache-warm on main
+
+> On `feat/gog-download-producer`. **GOG wired into the cross-store Download Manager** (`70ebfef`, mirrors Amazon; `GogDownloadManager.java` untouched): new `GogInstallState` (purge) + `GogLibrarySync` (seed + self-heal + cachedDetail); producer hooks in `GogGameDetailActivity` + `GogGamesActivity` (both download entry points); `DownloadManagerActivity` openDetail + purgeNativeInstall GOG branches. Cover `//`→https normalized. **Deviation (correct): no DownloadScope — GOG engine spawns its own thread, so FGS+appContext give background survival.** update-available=false (GOG check is network-only). Verified compile-critical refs exist + imports/Kotlin-Java direction clean.
+> **Parallel:** cache-warming build `28727169152` on `main` (cold, populates main-scope caches for all future runs); GOG build `28727381558` dispatched alongside (cold this once, warm off main afterward).
+> **NEXT:** builds green → deliver GOG APK → device-test → Phase C (Epic, last; also fix its LandscapeLauncher launch crash).
+
+---
+
 ## 2026-07-04 — ✅ MERGED Amazon Phase A → main + cached both CI workflows + branched for GOG
 
 > **Toast sweep DEVICE-PROVEN** (user "toast sweep good") → all of Amazon Phase A + shared infra is device-proven. **Merged `feat/download-manager-stores` → `main`** (merge `88e2360` + cleanup `180c2c8` removing the redundant `build-artifacts-fast.yml`). **No release cut** (stays vc37/2.2.2). Merged content: Amazon DownloadRegistry producer, non-Steam store restyle, ⬇ button, notification + background-download foreground service, install-state one-source-of-truth (uninstall purge + self-heal), launch/detail-routing/dialog fixes + Epic launch-crash fix, full black-box Toast sweep.
