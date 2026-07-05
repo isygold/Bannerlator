@@ -13,6 +13,14 @@
 
 ---
 
+## 2026-07-04 — 🐞 GOG (+Amazon) detail page not synced with download-manager progress
+
+> GOG device-test: card + notification work, but the **GOG detail page shows "Install" during a live download** (ELDERBORN: card 55%+Cancel, notif 58%, detail = Install). Cause: `GogGameDetailActivity.refreshActionState()` (and `AmazonGameDetailActivity.refreshActionState()` — same latent bug on main) read install PREFS only, never the DownloadRegistry → opening the detail mid-download (or list-started) shows Install, not progress+Cancel. +card showed "0 KB / 0 KB" (GOG pct-only).
+> **Fix (dispatched):** both GOG+Amazon detail pages observe `DownloadRegistry.entries` for their game key → reflect DOWNLOADING as progress+Cancel (live pct), Cancel wired to the registry entry (works for list-started DLs); DL card suppresses the byte pair when `installTotal==0`. Epic folded into its Phase C spec (items 9-10).
+> **NEXT:** review → commit → build → deliver → re-test GOG detail sync.
+
+---
+
 ## 2026-07-04 — 🎮 GOG Phase B implemented (producer wiring) + parallel cache-warm on main
 
 > On `feat/gog-download-producer`. **GOG wired into the cross-store Download Manager** (`70ebfef`, mirrors Amazon; `GogDownloadManager.java` untouched): new `GogInstallState` (purge) + `GogLibrarySync` (seed + self-heal + cachedDetail); producer hooks in `GogGameDetailActivity` + `GogGamesActivity` (both download entry points); `DownloadManagerActivity` openDetail + purgeNativeInstall GOG branches. Cover `//`→https normalized. **Deviation (correct): no DownloadScope — GOG engine spawns its own thread, so FGS+appContext give background survival.** update-available=false (GOG check is network-only). Verified compile-critical refs exist + imports/Kotlin-Java direction clean.
