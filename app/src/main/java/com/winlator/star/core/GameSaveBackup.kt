@@ -108,6 +108,7 @@ object GameSaveBackup {
     private fun remapForRestore(rawName: String): String? {
         val segs = splitDriveC(rawName) ?: return null
         if (segs.isEmpty()) return null
+        if (isFrontendShortcut(segs)) return null
         // users/<name>/... where <name> is a profile other than the shared "Public" → xuser.
         if (segs.size >= 2 &&
             segs[0].equals("users", ignoreCase = true) &&
@@ -116,6 +117,20 @@ object GameSaveBackup {
             segs[1] = ImageFs.USER
         }
         return segs.joinToString("/")
+    }
+
+    /**
+     * GameHub bundles launcher shortcuts in its backups — a "proton_shortcuts/" tree (its own
+     * frontend) and .lnk/.desktop files on the Wine Desktop. Restoring the Desktop ones drops
+     * phantom game cards into Bannerlator's Games grid, because ContainerManager.loadShortcuts()
+     * scans the container's Desktop dir and auto-imports every .lnk as a shortcut. These are
+     * never save data, so skip them on restore.
+     */
+    private fun isFrontendShortcut(segs: List<String>): Boolean {
+        if (segs[0].equals("proton_shortcuts", ignoreCase = true)) return true
+        val last = segs.last().lowercase()
+        val isShortcutFile = last.endsWith(".lnk") || last.endsWith(".desktop") || last.endsWith(".url")
+        return isShortcutFile && segs.any { it.equals("Desktop", ignoreCase = true) }
     }
 
     // ---------------------------------------------------------------- backup (export)
