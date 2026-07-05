@@ -17,7 +17,8 @@
 
 > **`6e089ce` device-tested: all 5 launch/routing/dialog fixes WORK.** Last bug: uninstall shows an unreadable **black box** at the bottom (screenshot = Amazon detail page). Same ROM/targetSDK-28 issue Steam already fixed — system `Toast` renders as a black box; Steam uses the themed `UninstallResultBar` (`StoreUninstaller.kt:65`).
 > **Fix (`4b8d28b`):** `AmazonGameDetailActivity` + `AmazonGamesActivity` — added `resultBarMsg` state + `UninstallResultBar` overlay; uninstall confirmations (both entry points) + the detail "No .exe found" launch message now render through the themed bar instead of Toast. Also refresh `loadUpdateStatus()` on uninstall so the stale "Installed: v…" line clears. CI `28725198746` running → deliver `bannerlator-toast-fix-4b8d28b`.
-> **Known follow-up:** other Amazon Toasts (download-fail, login-required) + all Epic/GOG store-screen Toasts still black-box on this ROM — offered to sweep.
+> **✅ SWEEP DONE (`71590ab`, CI `28725602812` running):** 63 Toasts across 15 files converted — 58 Compose→`UninstallResultBar`; GogLogin(WebView)+FolderPickerActivity.java→themed `AlertDialog(StoreAlertDialogDark)`. Finding: `StarLaunchBridge.showToast()` was already a readable custom dark Toast (not black-box), left as-is. Verified no stray Toasts, bars wired, R/style refs resolve, braces balanced. Combined build (uninstall fix + sweep) → deliver `bannerlator-toast-sweep-71590ab`.
+> **✅ GOG Phase B TEED UP** (spec ready `/home/claude-user/scratchpad/gog_phase_b_spec.md`) — mirror Amazon exactly; dispatch on user greenlight after they device-test `71590ab`. Then Phase C = Epic.
 
 ---
 
