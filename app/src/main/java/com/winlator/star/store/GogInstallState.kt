@@ -36,4 +36,18 @@ object GogInstallState {
             .remove("gog_cover_$gameId")
             .apply()
     }
+
+    /**
+     * Disk-truth "is this game installed?" — the SAME record the detail page reads
+     * ([GogGameDetailActivity.refreshActionState]: `gog_exe_ != null && gog_dir_ != null`). Lets the
+     * store list resolve install-state on a COLD start (no live download this session), instead of
+     * only trusting the in-memory download map. [purge] clears both keys, so an uninstalled game
+     * flips back to false.
+     */
+    fun isInstalled(ctx: Context, gameId: String): Boolean {
+        val prefs = ctx.applicationContext
+            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getString("gog_exe_$gameId", null) != null &&
+            prefs.getString("gog_dir_$gameId", null) != null
+    }
 }

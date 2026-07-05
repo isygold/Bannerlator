@@ -34,4 +34,17 @@ object EpicInstallState {
             .remove("epic_size_$appName")
             .apply()
     }
+
+    /**
+     * Disk-truth "is this game installed?" — the SAME record the detail page reads
+     * ([EpicGameDetailActivity.refreshActionState]: `epic_exe_ != null`). The in-memory
+     * [EpicGame.isInstalled] is never re-derived from prefs on a COLD start (the install-complete
+     * path only updates the live download map, not the cached game), so the list must ask disk
+     * directly or an already-installed game shows "Install". [purge] clears the key, so an
+     * uninstalled game flips back to false.
+     */
+    fun isInstalled(ctx: Context, appName: String): Boolean =
+        ctx.applicationContext
+            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString("epic_exe_$appName", null) != null
 }

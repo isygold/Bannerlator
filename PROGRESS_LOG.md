@@ -13,6 +13,16 @@
 
 ---
 
+## 2026-07-05 — 🐞→✅ Store-list cold-start install-state (GOG confirmed + Epic latent) FIXED
+
+> **Device report (user, 6 screenshots on Epic build `4cf2b8f`): Epic Phase C WORKING end-to-end** — Brawlhalla shows on the detail bar (10%), the DL-manager card *with cover art* (44%), AND the FGS shade notification (59%). Epic inherited the shared StoreDownloadHooks→FGS→notif→DL-manager plumbing correctly. **🐞 BUG spotted: GOG Library LIST shows "Install" on an already-installed game** (ELDERBORN) while the GOG *detail page* and the *cross-store DL-manager* both correctly show it Installed.
+> **Root cause:** the GOG list card is driven purely by the in-memory `downloadStates` map, only written by a LIVE download this session; it's NEVER seeded from disk-truth on cold start. `GogLibrarySync.seed()` seeds the DownloadRegistry (DL-manager) but not this Activity's local map → prior-session install = null entry → falls to "Install". Detail was correct because it reads `gog_exe_`/`gog_dir_` prefs directly.
+> **Epic audit found the IDENTICAL latent bug** (not the assumed "already fine"): `EpicGame.isInstalled` is only ever set from cache/refresh-merge, never re-derived from `epic_exe_` on cold start (install-complete only updates the live map), so the old `?: GameDownloadState(installed = game.isInstalled)` fallback was always false.
+> **Fix (mirror across both, disk-truth fallback):** new `GogInstallState.isInstalled(ctx,id)` = `gog_exe_ != null && gog_dir_ != null`; new `EpicInstallState.isInstalled(ctx,appName)` = `epic_exe_ != null` (exact records the detail pages read). List/grid/poster cards fall back to a synthesized installed state when the live map is empty. GOG **must** also set `buttonText="Add to Launcher"` (card reads `downloadState.buttonText` before the isInstalled fallback, ~line 1099); Epic drives label off its single `installed` field so no buttonText coupling. Uninstall→`purge` clears the keys → flips back to "Install". Files: `GogInstallState.kt`, `EpicInstallState.kt`, `GogGamesActivity.kt` (+LocalContext import, dead `val isInstalled=false` removed), `EpicGamesActivity.kt` (+LocalContext import, 3 fallback sites). Engine/DownloadRegistry/DL-manager/versionCode untouched. Known pre-existing edge (not introduced): install→detail-uninstall in the SAME session leaves a stale live-map entry that wins over disk until Activity recreate; cold-start (the target) fully covered.
+> **NEXT:** commit (The412Banner) → push branch `feat/epic-download-producer` → CI build → deliver APK → user device-test: cold-restart GOG list shows ELDERBORN Installed + "Add to Launcher"; Epic list same for an installed Epic game; uninstall flips both back. On pass → merge Epic branch→main (clean FF) = Download Manager COMPLETE across all 4 stores.
+
+---
+
 ## 2026-07-04 — ✅ GOG live-% device-proven → GOG merged to main; 🎮 Epic Phase C built + building
 
 > **GOG live-% DEVICE-PROVEN** (user screenshot: GOG ELDERBORN detail shows "Downloading… 49%" under the bar, matches manager + notification). **→ GOG Phase B fully done + MERGED TO MAIN** (fast-forward `180c2c8..17f58ae` via push, non-disruptive to the Epic branch/build; NO release cut, still vc37/2.2.2). main now `17f58ae`.

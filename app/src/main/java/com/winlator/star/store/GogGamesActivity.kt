@@ -54,6 +54,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -891,9 +892,17 @@ private fun GogGamesScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         items(games, key = { it.gameId }) { game ->
+                            // No live download this session → fall back to disk-truth so an
+                            // already-installed game shows Installed + "Add to Launcher" instead of
+                            // "Install" (mirrors EpicGamesActivity's `?: GameDownloadState(...)`).
+                            // buttonText MUST be set here: line ~1099 reads downloadState.buttonText
+                            // directly, so a bare default would render "Install" despite isInstalled.
+                            val context = LocalContext.current
                             val dlState = downloadStates[game.gameId]
+                                ?: if (GogInstallState.isInstalled(context, game.gameId))
+                                    GameDownloadState(isInstalled = true, buttonText = "Add to Launcher")
+                                else null
                             val isExpanded = expandedGameId == game.gameId
-                            val isInstalled = false // read from prefs in composable? 
                             GameListCard(
                                 game = game,
                                 isExpanded = isExpanded,
@@ -916,7 +925,13 @@ private fun GogGamesScreen(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         items(games, key = { it.gameId }) { game ->
+                            // Disk-truth fallback (see the list branch above) so a prior-session
+                            // install renders Installed + "Add to Launcher", not "Install".
+                            val context = LocalContext.current
                             val dlState = downloadStates[game.gameId]
+                                ?: if (GogInstallState.isInstalled(context, game.gameId))
+                                    GameDownloadState(isInstalled = true, buttonText = "Add to Launcher")
+                                else null
                             val isExpanded = expandedGameId == game.gameId
                             GameGridTile(
                                 game = game,

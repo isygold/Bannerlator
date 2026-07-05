@@ -52,6 +52,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -672,8 +673,14 @@ private fun EpicGamesScreen(
                         contentPadding = PaddingValues(8.dp),
                     ) {
                         items(games, key = { it.appName }) { game ->
+                            // No live download this session → disk-truth (epic_exe_ present), the
+                            // same record the detail page reads. game.isInstalled is never re-derived
+                            // from prefs on a cold start, so trusting it alone left installed games
+                            // showing "Install".
                             val ds = downloadStates[game.appName]
-                                ?: EpicGamesActivity.GameDownloadState(installed = game.isInstalled)
+                                ?: EpicGamesActivity.GameDownloadState(
+                                    installed = EpicInstallState.isInstalled(LocalContext.current, game.appName),
+                                )
                             GameListCard(
                                 game = game,
                                 downloadState = ds,
@@ -697,8 +704,14 @@ private fun EpicGamesScreen(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         items(games, key = { it.appName }) { game ->
+                            // No live download this session → disk-truth (epic_exe_ present), the
+                            // same record the detail page reads. game.isInstalled is never re-derived
+                            // from prefs on a cold start, so trusting it alone left installed games
+                            // showing "Install".
                             val ds = downloadStates[game.appName]
-                                ?: EpicGamesActivity.GameDownloadState(installed = game.isInstalled)
+                                ?: EpicGamesActivity.GameDownloadState(
+                                    installed = EpicInstallState.isInstalled(LocalContext.current, game.appName),
+                                )
                             GameGridTile(
                                 game = game,
                                 downloadState = ds,
@@ -723,8 +736,14 @@ private fun EpicGamesScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         items(games, key = { it.appName }) { game ->
+                            // No live download this session → disk-truth (epic_exe_ present), the
+                            // same record the detail page reads. game.isInstalled is never re-derived
+                            // from prefs on a cold start, so trusting it alone left installed games
+                            // showing "Install".
                             val ds = downloadStates[game.appName]
-                                ?: EpicGamesActivity.GameDownloadState(installed = game.isInstalled)
+                                ?: EpicGamesActivity.GameDownloadState(
+                                    installed = EpicInstallState.isInstalled(LocalContext.current, game.appName),
+                                )
                             GameGridTile(
                                 game = game,
                                 downloadState = ds,
