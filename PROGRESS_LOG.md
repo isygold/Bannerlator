@@ -17,7 +17,7 @@
 
 > **GOG live-% DEVICE-PROVEN** (user screenshot: GOG ELDERBORN detail shows "Downloading… 49%" under the bar, matches manager + notification). **→ GOG Phase B fully done + MERGED TO MAIN** (fast-forward `180c2c8..17f58ae` via push, non-disruptive to the Epic branch/build; NO release cut, still vc37/2.2.2). main now `17f58ae`.
 > **🎮 EPIC PHASE C implemented + committed `4cf2b8f` (build `28728770633` running):** new `EpicInstallState`(purge) + `EpicLibrarySync`(seed+self-heal+cachedDetail); producer hooks both Epic entry points, DownloadScope.io+appContext (Amazon-shaped blocking install()), no-dialog completion, `observeRegistry()` live "$pct%" label, uninstall→purge+markUninstalled; DownloadManagerActivity last 2 `Store.EPIC` branches filled → **all 4 stores live producers, no stubs.** WEAK CANCEL (Epic engine has no checker): UI freezes immediately, transfer runs to completion then discarded (documented).
-> **NEXT:** Epic build green → deliver → device-test all 4 stores → merge Epic branch (stacked on GOG) → main (clean FF).
+> **✅ Epic build `28728770633` GREEN 8m18s → APK DELIVERED** `/sdcard/Download/bannerlator-epic-4cf2b8f-standard.apk` (sha `4f3cae6b…fb0c1801`, bit-identical, on-device); ⏳ user device-testing all 4 stores. Then merge Epic branch (stacked on GOG) → main (clean FF) = Download Manager COMPLETE. 🗑️ Dropped (user 2026-07-05): vc38 pre-release, GOG installed-build cosmetic, dialog accent; Goldberg all tiers proven.
 
 ---
 
