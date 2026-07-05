@@ -21,7 +21,7 @@
 > 3. **Container-picker dialog unthemed** ("old menu style" white) — `StarLaunchBridge.java:129` uses default-light `AlertDialog.Builder`. Fix: dark+pink themed dialog (shared infra → fixes all stores).
 > 4. **Download hangs at 100% + auto-exe-picker on completion** — `AmazonGameDetailActivity:330-350` shows the exe picker on completion when >1 exe, gating `markInstalled`; if user isn't on the detail page the dialog queues on the stopped Activity → card stuck at 100%. Fix: completion auto-records best-scored exe + markInstalled (NO dialog, both entry points); move exe picker to the **Launch** flow (before the container picker).
 >
-> All 4 = one coherent Amazon completion→launch flow fix + DL routing + dialog theme. **Dispatched to native-steam-engineer (bg); NEXT: report → review → commit → CI → deliver → device-test all 4.**
+> All 4 = one coherent Amazon completion→launch flow fix + DL routing + dialog theme. **✅ FIXED + COMMITTED `6e089ce`, CI `28724462856` running.** `openDetail`→AMAZON via new `AmazonLibrarySync.cachedDetail`; `AmazonGameDetailActivity` launch reworked to `StarLaunchBridge.addToLauncher` + completion auto-finalizes (no dialog); `AmazonGamesActivity` completion same; dark `StoreAlertDialogDark` picker. **+ fixed the IDENTICAL Epic detail-launch crash** (`EpicGameDetailActivity.kt:367`, same hardcoded `LandscapeLauncherMainActivity`) — Epic detail is reachable today; GOG detail was already correct. **Known nit (deferred):** dialog accent = legacy blue, not preset pink (framework dialog can't read the Compose preset). **NEXT:** green → deliver `bannerlator-launch-fixes-6e089ce` → device-test all 5.
 
 ---
 
