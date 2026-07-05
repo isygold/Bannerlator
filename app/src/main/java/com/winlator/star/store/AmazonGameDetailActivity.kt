@@ -3,7 +3,6 @@ package com.winlator.star.store
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -373,7 +372,7 @@ class AmazonGameDetailActivity : ComponentActivity() {
         productId?.let { StoreDownloadHooks.markFailed(Store.AMAZON, it, msg) }
         // applicationContext: this handler can run after the Activity is gone (download now
         // outlives it), and the registry/notification updates above must still happen.
-        Toast.makeText(applicationContext, "Error: $msg", Toast.LENGTH_LONG).show()
+        resultBarMsg = "Error: $msg"
     }
 
     private fun onInstallCancelled() {
@@ -396,11 +395,7 @@ class AmazonGameDetailActivity : ComponentActivity() {
             AmazonLaunchHelper.collectExe(File(dir), exeFiles)
             if (exeFiles.isEmpty()) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@AmazonGameDetailActivity,
-                        "No .exe files found",
-                        Toast.LENGTH_SHORT,
-                    ).show()
+                    resultBarMsg = "No .exe files found"
                 }
                 return@launch
             }
@@ -413,11 +408,7 @@ class AmazonGameDetailActivity : ComponentActivity() {
                             .apply()
                         setResult(RESULT_REFRESH)
                         refreshActionState()
-                        Toast.makeText(
-                            this@AmazonGameDetailActivity,
-                            "Exe set: ${File(selected).name}",
-                            Toast.LENGTH_SHORT,
-                        ).show()
+                        resultBarMsg = "Exe set: ${File(selected).name}"
                     }
                 }
             }

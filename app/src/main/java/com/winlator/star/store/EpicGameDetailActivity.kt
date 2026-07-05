@@ -5,7 +5,6 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.text.Html
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -106,6 +105,10 @@ class EpicGameDetailActivity : ComponentActivity() {
     private var cloudSaveStatusVisible by mutableStateOf(false)
     private var cloudButtonsEnabled by mutableStateOf(true)
 
+    // Themed auto-dismiss bar — system Toasts render as an unreadable black box on this ROM
+    // (targetSDK 28); reuse the shared UninstallResultBar for readable feedback.
+    private var resultBarMsg by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("bh_epic_prefs", 0)
@@ -180,6 +183,7 @@ class EpicGameDetailActivity : ComponentActivity() {
                     onCloudUpload = { cloudUpload() },
                     onCloudDownload = { cloudDownload() },
                 )
+                resultBarMsg?.let { UninstallResultBar(it) { resultBarMsg = null } }
             }
         }
 
@@ -201,7 +205,7 @@ class EpicGameDetailActivity : ComponentActivity() {
                 cloudSaveDirText = shortenPath(selectedPath)
                 cloudSaveDirColor = 0xFFCCCCCC.toInt()
                 cloudButtonsEnabled = true
-                Toast.makeText(this, "Save folder set", Toast.LENGTH_SHORT).show()
+                resultBarMsg = "Save folder set"
             }
         }
     }
@@ -325,7 +329,7 @@ class EpicGameDetailActivity : ComponentActivity() {
             installBtnColor = 0xFF1A73E8.toInt()
             launchBtnVisible = true
             setExeBtnVisible = true
-            Toast.makeText(this@EpicGameDetailActivity, "Error: $msg", Toast.LENGTH_LONG).show()
+            resultBarMsg = "Error: $msg"
         }
     }
 
@@ -356,7 +360,7 @@ class EpicGameDetailActivity : ComponentActivity() {
                     runOnUiThread {
                         setResult(RESULT_REFRESH)
                         refreshActionState()
-                        Toast.makeText(this@EpicGameDetailActivity, "$title uninstalled", Toast.LENGTH_SHORT).show()
+                        resultBarMsg = "$title uninstalled"
                     }
                 }
             }
@@ -378,7 +382,7 @@ class EpicGameDetailActivity : ComponentActivity() {
             val exeFiles = mutableListOf<File>()
             AmazonLaunchHelper.collectExe(File(dir), exeFiles)
             if (exeFiles.isEmpty()) {
-                runOnUiThread { Toast.makeText(this@EpicGameDetailActivity, "No .exe files found", Toast.LENGTH_SHORT).show() }
+                runOnUiThread { resultBarMsg = "No .exe files found" }
                 return@launch
             }
             val candidates = exeFiles.map { it.absolutePath }
@@ -388,7 +392,7 @@ class EpicGameDetailActivity : ComponentActivity() {
                         prefs!!.edit().putString("epic_exe_$appName", selected).apply()
                         refreshActionState()
                         setResult(RESULT_REFRESH)
-                        Toast.makeText(this@EpicGameDetailActivity, "Exe set: ${File(selected).name}", Toast.LENGTH_SHORT).show()
+                        resultBarMsg = "Exe set: ${File(selected).name}"
                     }
                 }
             }
@@ -467,13 +471,13 @@ class EpicGameDetailActivity : ComponentActivity() {
             try {
                 val token = EpicCredentialStore.getValidAccessToken(this@EpicGameDetailActivity)
                 if (token == null) {
-                    runOnUiThread { Toast.makeText(this@EpicGameDetailActivity, "Login required", Toast.LENGTH_SHORT).show() }
+                    runOnUiThread { resultBarMsg = "Login required" }
                     return@launch
                 }
 
                 val manifestJson = EpicApiClient.getManifestApiJson(token, dlcNs, dlcCat, dlcApp)
                 if (manifestJson == null) {
-                    runOnUiThread { Toast.makeText(this@EpicGameDetailActivity, "Failed to fetch manifest for DLC", Toast.LENGTH_SHORT).show() }
+                    runOnUiThread { resultBarMsg = "Failed to fetch manifest for DLC" }
                     return@launch
                 }
 
@@ -489,7 +493,7 @@ class EpicGameDetailActivity : ComponentActivity() {
                     installDir.absolutePath,
                 ) { _, _ -> }
                 if (!ok) {
-                    runOnUiThread { Toast.makeText(this@EpicGameDetailActivity, "DLC download failed", Toast.LENGTH_SHORT).show() }
+                    runOnUiThread { resultBarMsg = "DLC download failed" }
                     return@launch
                 }
 
@@ -506,17 +510,17 @@ class EpicGameDetailActivity : ComponentActivity() {
                 runOnUiThread {
                     setResult(RESULT_REFRESH)
                     refreshActionState()
-                    Toast.makeText(this@EpicGameDetailActivity, "$dlcTitle installed", Toast.LENGTH_SHORT).show()
+                    resultBarMsg = "$dlcTitle installed"
                 }
             } catch (e: Exception) {
-                runOnUiThread { Toast.makeText(this@EpicGameDetailActivity, "DLC install error: ${e.message}", Toast.LENGTH_LONG).show() }
+                runOnUiThread { resultBarMsg = "DLC install error: ${e.message}" }
             }
         }
     }
 
     private fun cloudUpload() {
         val dir = prefs!!.getString("epic_save_dir_$appName", null)
-        if (dir == null) { Toast.makeText(this, "Set a save folder first", Toast.LENGTH_SHORT).show(); return }
+        if (dir == null) { resultBarMsg = "Set a save folder first"; return }
         cloudButtonsEnabled = false
         cloudSaveStatusText = "Preparing upload\u2026"
         cloudSaveStatusVisible = true
@@ -529,7 +533,7 @@ class EpicGameDetailActivity : ComponentActivity() {
 
     private fun cloudDownload() {
         val dir = prefs!!.getString("epic_save_dir_$appName", null)
-        if (dir == null) { Toast.makeText(this, "Set a save folder first", Toast.LENGTH_SHORT).show(); return }
+        if (dir == null) { resultBarMsg = "Set a save folder first"; return }
         cloudButtonsEnabled = false
         cloudSaveStatusText = "Preparing download\u2026"
         cloudSaveStatusVisible = true

@@ -288,7 +288,7 @@ class SteamGamesActivity : ComponentActivity(), SteamRepository.SteamEventListen
 
     private fun launchInstalledGame(game: SteamGame) {
         if (game.installDir.isEmpty()) {
-            android.widget.Toast.makeText(this, "Install directory not set", android.widget.Toast.LENGTH_SHORT).show()
+            uninstallResult = "Install directory not set"
             return
         }
         val installDir = java.io.File(game.installDir)
@@ -297,7 +297,7 @@ class SteamGamesActivity : ComponentActivity(), SteamRepository.SteamEventListen
             AmazonLaunchHelper.collectExe(installDir, exeFiles)
             if (exeFiles.isEmpty()) {
                 runOnUiThread {
-                    android.widget.Toast.makeText(this, "No .exe found in install directory", android.widget.Toast.LENGTH_LONG).show()
+                    uninstallResult = "No .exe found in install directory"
                 }
                 return@Thread
             }

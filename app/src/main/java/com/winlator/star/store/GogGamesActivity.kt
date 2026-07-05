@@ -3,7 +3,6 @@ package com.winlator.star.store
 import android.content.Intent
 import android.os.Bundle
 import android.os.StatFs
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -137,6 +136,10 @@ class GogGamesActivity : ComponentActivity() {
     private var showExePicker by mutableStateOf<ExePickerDataGog?>(null)
     private var showInstallDialog by mutableStateOf<InstallDialogData?>(null)
     private var showDetailDialog by mutableStateOf<DetailDialogData?>(null)
+
+    // Themed auto-dismiss bar — system Toasts render as an unreadable black box on this ROM
+    // (targetSDK 28); reuse the shared UninstallResultBar for readable feedback.
+    private var resultBarMsg by mutableStateOf<String?>(null)
     private val downloadStates = mutableStateMapOf<String, GameDownloadState>()
 
     private val detailLauncher = registerForActivityResult(
@@ -220,6 +223,7 @@ class GogGamesActivity : ComponentActivity() {
                         onCopyToDownloads = { data.onCopyToDownloads() },
                     )
                 }
+                resultBarMsg?.let { UninstallResultBar(it) { resultBarMsg = null } }
             }
         }
 
@@ -563,7 +567,7 @@ class GogGamesActivity : ComponentActivity() {
                 runOnUiThread {
                     downloadStates.remove(game.gameId)
                     applyFilter(searchQuery)
-                    Toast.makeText(this@GogGamesActivity, "Error: $msg", Toast.LENGTH_LONG).show()
+                    resultBarMsg = "Error: $msg"
                 }
             }
             override fun onCancelled() {
@@ -637,7 +641,7 @@ class GogGamesActivity : ComponentActivity() {
                         val candidates = GogDownloadManager.collectExeCandidates(installPath)
                         if (candidates.isEmpty()) {
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(this@GogGamesActivity, "No .exe files found in install directory", Toast.LENGTH_SHORT).show()
+                                resultBarMsg = "No .exe files found in install directory"
                             }
                             return@launch
                         }
@@ -645,7 +649,7 @@ class GogGamesActivity : ComponentActivity() {
                             showExePicker = ExePickerDataGog(candidates) { selected ->
                                 if (selected.isNotEmpty()) {
                                     prefs.edit().putString("gog_exe_${game.gameId}", selected).apply()
-                                    Toast.makeText(this@GogGamesActivity, "Exe set to: ${java.io.File(selected).name}", Toast.LENGTH_SHORT).show()
+                                    resultBarMsg = "Exe set to: ${java.io.File(selected).name}"
                                 }
                             }
                         }
@@ -664,18 +668,18 @@ class GogGamesActivity : ComponentActivity() {
                             .apply()
                         withContext(Dispatchers.Main) {
                             applyFilter(searchQuery)
-                            Toast.makeText(this@GogGamesActivity, "${game.title} uninstalled", Toast.LENGTH_SHORT).show()
+                            resultBarMsg = "${game.title} uninstalled"
                         }
                     }
                 }
             },
             onCopyToDownloads = {
-                Toast.makeText(this@GogGamesActivity, "Copying to Downloads\u2026", Toast.LENGTH_SHORT).show()
+                resultBarMsg = "Copying to Downloads\u2026"
                 lifecycleScope.launch(Dispatchers.IO) {
                     val dest = GogDownloadManager.copyToDownloads(this@GogGamesActivity, game.gameId)
                     withContext(Dispatchers.Main) {
-                        if (dest != null) Toast.makeText(this@GogGamesActivity, "Copied to: $dest", Toast.LENGTH_LONG).show()
-                        else Toast.makeText(this@GogGamesActivity, "Copy failed \u2014 check storage permission", Toast.LENGTH_SHORT).show()
+                        resultBarMsg = if (dest != null) "Copied to: $dest"
+                        else "Copy failed \u2014 check storage permission"
                     }
                 }
             },

@@ -4,7 +4,6 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.util.Log
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -235,11 +234,7 @@ class AmazonGamesActivity : ComponentActivity() {
                 setSync("Not logged in", true)
                 enableRefresh()
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@AmazonGamesActivity,
-                        "Please log in to Amazon Games first",
-                        Toast.LENGTH_SHORT,
-                    ).show()
+                    resultBarMsg = "Please log in to Amazon Games first"
                     finish()
                 }
                 return
@@ -433,11 +428,7 @@ class AmazonGamesActivity : ComponentActivity() {
             val token = AmazonCredentialStore.getValidAccessToken(this@AmazonGamesActivity)
             if (token == null) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@AmazonGamesActivity,
-                        "Login required",
-                        Toast.LENGTH_SHORT,
-                    ).show()
+                    resultBarMsg = "Login required"
                 }
                 removeDownloadState(game.productId)
                 return@launch
@@ -490,11 +481,7 @@ class AmazonGamesActivity : ComponentActivity() {
             }
             if (!ok) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@AmazonGamesActivity,
-                        "Error: Download failed",
-                        Toast.LENGTH_LONG,
-                    ).show()
+                    resultBarMsg = "Error: Download failed"
                 }
                 StoreDownloadHooks.markFailed(Store.AMAZON, game.productId, "Download failed")
                 removeDownloadState(game.productId)
@@ -506,11 +493,7 @@ class AmazonGamesActivity : ComponentActivity() {
 
             if (exeFiles.isEmpty()) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@AmazonGamesActivity,
-                        "Error: No executable found after install",
-                        Toast.LENGTH_LONG,
-                    ).show()
+                    resultBarMsg = "Error: No executable found after install"
                 }
                 StoreDownloadHooks.markFailed(Store.AMAZON, game.productId, "No executable found")
                 removeDownloadState(game.productId)
@@ -595,18 +578,14 @@ class AmazonGamesActivity : ComponentActivity() {
     private fun openExePicker(game: AmazonGame) {
         val installedDir = prefs!!.getString("amazon_dir_${game.productId}", null)
         if (installedDir == null) {
-            Toast.makeText(this, "Install directory not found", Toast.LENGTH_SHORT).show()
+            resultBarMsg = "Install directory not found"
             return
         }
         lifecycleScope.launch(Dispatchers.IO) {
             val dir = File(installedDir)
             if (!dir.isDirectory) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@AmazonGamesActivity,
-                        "Install directory not found",
-                        Toast.LENGTH_SHORT,
-                    ).show()
+                    resultBarMsg = "Install directory not found"
                 }
                 return@launch
             }
@@ -614,11 +593,7 @@ class AmazonGamesActivity : ComponentActivity() {
             AmazonLaunchHelper.collectExe(dir, exeFiles)
             if (exeFiles.isEmpty()) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@AmazonGamesActivity,
-                        "No .exe files found",
-                        Toast.LENGTH_SHORT,
-                    ).show()
+                    resultBarMsg = "No .exe files found"
                 }
                 return@launch
             }
@@ -632,11 +607,7 @@ class AmazonGamesActivity : ComponentActivity() {
                                 .putString("amazon_exe_${game.productId}", selected)
                                 .apply()
                             refreshFromCache()
-                            Toast.makeText(
-                                this@AmazonGamesActivity,
-                                "Exe set: ${File(selected).name}",
-                                Toast.LENGTH_SHORT,
-                            ).show()
+                            resultBarMsg = "Exe set: ${File(selected).name}"
                         }
                     },
                 )

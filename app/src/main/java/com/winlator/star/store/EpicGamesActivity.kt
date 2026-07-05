@@ -7,7 +7,6 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.BorderStroke
@@ -96,6 +95,10 @@ class EpicGamesActivity : ComponentActivity() {
     private var viewMode by mutableStateOf("list")
     private var refreshEnabled by mutableStateOf(true)
     private var scrollVisible by mutableStateOf(false)
+
+    // Themed auto-dismiss bar — system Toasts render as an unreadable black box on this ROM
+    // (targetSDK 28); reuse the shared UninstallResultBar for readable feedback.
+    private var resultBarMsg by mutableStateOf<String?>(null)
     private val downloadStates = mutableStateMapOf<String, GameDownloadState>()
     private val cancelRunnables = mutableMapOf<String, Runnable>()
 
@@ -144,6 +147,7 @@ class EpicGamesActivity : ComponentActivity() {
                         }
                     },
                 )
+                resultBarMsg?.let { UninstallResultBar(it) { resultBarMsg = null } }
             }
         }
 
@@ -178,7 +182,7 @@ class EpicGamesActivity : ComponentActivity() {
                 setSync("Not logged in")
                 withContext(Dispatchers.Main) {
                     enableRefresh()
-                    Toast.makeText(this@EpicGamesActivity, "Please log in to Epic Games first", Toast.LENGTH_SHORT).show()
+                    resultBarMsg = "Please log in to Epic Games first"
                     finish()
                 }
                 return
@@ -370,7 +374,7 @@ class EpicGamesActivity : ComponentActivity() {
                 if (token == null) {
                     withContext(Dispatchers.Main) {
                         downloadStates[appName] = GameDownloadState()
-                        Toast.makeText(this@EpicGamesActivity, "Login required", Toast.LENGTH_SHORT).show()
+                        resultBarMsg = "Login required"
                     }
                     return@launch
                 }
@@ -384,9 +388,7 @@ class EpicGamesActivity : ComponentActivity() {
                 if (manifestJson == null) {
                     withContext(Dispatchers.Main) {
                         downloadStates[appName] = GameDownloadState()
-                        Toast.makeText(this@EpicGamesActivity,
-                            "Failed to fetch manifest. If this is Fortnite, it is not supported.",
-                            Toast.LENGTH_LONG).show()
+                        resultBarMsg = "Failed to fetch manifest. If this is Fortnite, it is not supported."
                     }
                     return@launch
                 }
@@ -419,7 +421,7 @@ class EpicGamesActivity : ComponentActivity() {
                     withContext(Dispatchers.Main) {
                         cancelRunnables.remove(appName)
                         downloadStates[appName] = GameDownloadState()
-                        Toast.makeText(this@EpicGamesActivity, "Download failed", Toast.LENGTH_LONG).show()
+                        resultBarMsg = "Download failed"
                     }
                     return@launch
                 }
@@ -431,7 +433,7 @@ class EpicGamesActivity : ComponentActivity() {
                     withContext(Dispatchers.Main) {
                         cancelRunnables.remove(appName)
                         downloadStates[appName] = GameDownloadState()
-                        Toast.makeText(this@EpicGamesActivity, "No executable found after install", Toast.LENGTH_LONG).show()
+                        resultBarMsg = "No executable found after install"
                     }
                     return@launch
                 }
@@ -464,7 +466,7 @@ class EpicGamesActivity : ComponentActivity() {
                     withContext(Dispatchers.Main) {
                         cancelRunnables.remove(appName)
                         downloadStates[appName] = GameDownloadState()
-                        Toast.makeText(this@EpicGamesActivity, e.message ?: "Unknown error", Toast.LENGTH_LONG).show()
+                        resultBarMsg = e.message ?: "Unknown error"
                     }
                 }
             }

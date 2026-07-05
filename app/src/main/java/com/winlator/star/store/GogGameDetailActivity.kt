@@ -5,7 +5,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.text.Html
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -144,6 +143,10 @@ class GogGameDetailActivity : ComponentActivity() {
     private var cloudBtnsEnabled by mutableStateOf(true)
 
     private var showExePicker by mutableStateOf<ExePickerStateGame?>(null)
+
+    // Themed auto-dismiss bar — system Toasts render as an unreadable black box on this ROM
+    // (targetSDK 28); reuse the shared UninstallResultBar for readable feedback.
+    private var resultBarMsg by mutableStateOf<String?>(null)
     private val cancelFlag = AtomicBoolean(false)
 
     private val folderPickerLauncher = registerForActivityResult(
@@ -157,7 +160,7 @@ class GogGameDetailActivity : ComponentActivity() {
                 cloudSaveDirText = shortenPath(selectedPath)
                 cloudSaveDirColor = 0xFFCCCCCC.toInt()
                 cloudBtnsEnabled = true
-                Toast.makeText(this, "Save folder set", Toast.LENGTH_SHORT).show()
+                resultBarMsg = "Save folder set"
             }
         }
     }
@@ -237,7 +240,7 @@ class GogGameDetailActivity : ComponentActivity() {
                             val candidates = GogDownloadManager.collectExeCandidates(installPath)
                             if (candidates.isEmpty()) {
                                 withContext(Dispatchers.Main) {
-                                    Toast.makeText(this@GogGameDetailActivity, "No .exe files found", Toast.LENGTH_SHORT).show()
+                                    resultBarMsg = "No .exe files found"
                                 }
                                 return@launch
                             }
@@ -247,7 +250,7 @@ class GogGameDetailActivity : ComponentActivity() {
                                         prefs.edit().putString("gog_exe_$gameId", selected).apply()
                                         refreshActionState()
                                         setResult(RESULT_REFRESH)
-                                        Toast.makeText(this@GogGameDetailActivity, "Exe set: ${File(selected).name}", Toast.LENGTH_SHORT).show()
+                                        resultBarMsg = "Exe set: ${File(selected).name}"
                                     }
                                 }
                             }
@@ -255,12 +258,12 @@ class GogGameDetailActivity : ComponentActivity() {
                     },
                     onUninstall = { confirmUninstall() },
                     onCopy = {
-                        Toast.makeText(this@GogGameDetailActivity, "Copying\u2026", Toast.LENGTH_SHORT).show()
+                        resultBarMsg = "Copying\u2026"
                         lifecycleScope.launch(Dispatchers.IO) {
                             val dest = GogDownloadManager.copyToDownloads(this@GogGameDetailActivity, gameId)
                             withContext(Dispatchers.Main) {
-                                if (dest != null) Toast.makeText(this@GogGameDetailActivity, "Copied to: $dest", Toast.LENGTH_LONG).show()
-                                else Toast.makeText(this@GogGameDetailActivity, "Copy failed \u2014 check storage permission", Toast.LENGTH_SHORT).show()
+                                resultBarMsg = if (dest != null) "Copied to: $dest"
+                                else "Copy failed \u2014 check storage permission"
                             }
                         }
                     },
@@ -277,7 +280,7 @@ class GogGameDetailActivity : ComponentActivity() {
                     onUploadSaves = {
                         val dir = prefs.getString("gog_save_dir_$gameId", null)
                         if (dir == null) {
-                            Toast.makeText(this@GogGameDetailActivity, "Set a save folder first", Toast.LENGTH_SHORT).show()
+                            resultBarMsg = "Set a save folder first"
                             return@GogGameDetailScreen
                         }
                         cloudBtnsEnabled = false
@@ -292,7 +295,7 @@ class GogGameDetailActivity : ComponentActivity() {
                     onDownloadSaves = {
                         val dir = prefs.getString("gog_save_dir_$gameId", null)
                         if (dir == null) {
-                            Toast.makeText(this@GogGameDetailActivity, "Set a save folder first", Toast.LENGTH_SHORT).show()
+                            resultBarMsg = "Set a save folder first"
                             return@GogGameDetailScreen
                         }
                         cloudBtnsEnabled = false
@@ -316,6 +319,7 @@ class GogGameDetailActivity : ComponentActivity() {
                         onDismiss = { showExePicker = null },
                     )
                 }
+                resultBarMsg?.let { UninstallResultBar(it) { resultBarMsg = null } }
             }
         }
 
@@ -402,7 +406,7 @@ class GogGameDetailActivity : ComponentActivity() {
                     installBtnColor = 0xFF5533CC.toInt()
                     launchVisible = prefs.getString("gog_exe_$gameId", null) != null
                     setExeVisible = prefs.getString("gog_dir_$gameId", null) != null
-                    Toast.makeText(this@GogGameDetailActivity, "Error: $msg", Toast.LENGTH_LONG).show()
+                    resultBarMsg = "Error: $msg"
                 }
             }
             override fun onCancelled() {
@@ -447,7 +451,7 @@ class GogGameDetailActivity : ComponentActivity() {
             withContext(Dispatchers.Main) {
                 setResult(RESULT_REFRESH)
                 refreshActionState()
-                Toast.makeText(this@GogGameDetailActivity, "$title uninstalled", Toast.LENGTH_SHORT).show()
+                resultBarMsg = "$title uninstalled"
             }
         }
     }

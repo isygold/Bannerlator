@@ -2,7 +2,6 @@ package com.winlator.star.store
 
 import android.content.Intent
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -218,7 +217,7 @@ class DownloadManagerActivity : ComponentActivity() {
     private fun launch(entry: DownloadEntry) {
         val dir = entry.installPath
         if (dir.isNullOrEmpty()) {
-            Toast.makeText(this, "Install directory not set", Toast.LENGTH_SHORT).show()
+            uninstallResult = "Install directory not set"
             return
         }
         val appId = entry.id.toIntOrNull() ?: 0
@@ -228,7 +227,7 @@ class DownloadManagerActivity : ComponentActivity() {
             AmazonLaunchHelper.collectExe(installDir, exeFiles)
             if (exeFiles.isEmpty()) {
                 runOnUiThread {
-                    Toast.makeText(this, "No .exe found in install directory", Toast.LENGTH_LONG).show()
+                    uninstallResult = "No .exe found in install directory"
                 }
                 return@Thread
             }
