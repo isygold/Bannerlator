@@ -13,6 +13,7 @@ import android.util.TypedValue;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.winlator.star.R;
 import com.winlator.star.container.Container;
 import com.winlator.star.container.ContainerManager;
 import com.winlator.star.container.Shortcut;
@@ -126,7 +127,7 @@ public final class StarLaunchBridge {
                 }
 
                 ArrayList<Container> finalContainers = containers;
-                h.post(() -> new AlertDialog.Builder(activity)
+                h.post(() -> new AlertDialog.Builder(activity, R.style.StoreAlertDialogDark)
                         .setTitle("Add \"" + gameName + "\" to…")
                         .setItems(names, (dialog, which) ->
                                 writeShortcut(activity, finalContainers.get(which),

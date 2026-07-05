@@ -4,7 +4,6 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
@@ -529,7 +528,7 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
     private fun onLaunchClicked() {
         val g = game ?: return
         if (!g.isInstalled || g.installDir.isEmpty()) {
-            Toast.makeText(this, "Game not installed", Toast.LENGTH_SHORT).show()
+            uninstallResult = "Game not installed"
             return
         }
         val installDir = File(g.installDir)
@@ -538,7 +537,7 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
             AmazonLaunchHelper.collectExe(installDir, exeFiles)
             if (exeFiles.isEmpty()) {
                 runOnUiThread {
-                    Toast.makeText(this, "No .exe found in install directory", Toast.LENGTH_LONG).show()
+                    uninstallResult = "No .exe found in install directory"
                 }
                 return@Thread
             }

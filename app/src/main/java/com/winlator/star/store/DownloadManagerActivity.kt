@@ -2,7 +2,6 @@ package com.winlator.star.store
 
 import android.content.Intent
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -51,11 +50,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.winlator.star.store.compose.AddResultDialog
 import com.winlator.star.store.compose.AddShortcutResult
 import com.winlator.star.store.compose.AddToShortcutsRequest
@@ -66,6 +69,7 @@ import com.winlator.star.store.download.DownloadRegistry
 import com.winlator.star.store.download.DownloadState
 import com.winlator.star.store.download.Store
 import com.winlator.star.store.download.StoreStyle
+import com.winlator.star.store.download.formatDownloadSize
 import com.winlator.star.ui.theme.LocalAccentDim
 import com.winlator.star.ui.theme.WinlatorTheme
 import java.io.File
@@ -102,6 +106,10 @@ class DownloadManagerActivity : ComponentActivity() {
         SteamPrefs.init(this)
         SteamRepository.getInstance().initialize(this)
         DownloadRegistry.init(this)
+        // Seed non-Steam libraries too, so opening the Manager directly (without visiting the
+        // Amazon store first) still self-heals orphaned installs and surfaces update-available.
+        // Idempotent; never throws into startup.
+        AmazonLibrarySync.seed(this)
 
         setContent {
             WinlatorTheme {
@@ -173,14 +181,35 @@ class DownloadManagerActivity : ComponentActivity() {
         DownloadRegistry.clearLibrary()
     }
 
-    /** Tap a card → open that game's detail in its store. Steam-only for v1. */
+    /** Tap a card → open that game's detail in its store (works for downloading + installed). */
     private fun openDetail(entry: DownloadEntry) {
         when (entry.store) {
             Store.STEAM -> startActivity(
                 Intent(this, SteamGameDetailActivity::class.java)
                     .putExtra(SteamGameDetailActivity.EXTRA_APP_ID, entry.id.toIntOrNull() ?: 0),
             )
-            else -> { /* Epic/GOG/Amazon detail routing is a later phase. */ }
+            Store.AMAZON -> {
+                // The card only carries id(=productId)/name/cover; hydrate the rest of the detail
+                // extras from amazon_library_cache. Fall back to the entry's own fields so the page
+                // still opens (with a functional install/launch) even if the cache is unavailable.
+                val d = AmazonLibrarySync.cachedDetail(this, entry.id)
+                val title = d?.title?.takeIf { it.isNotEmpty() } ?: entry.name
+                val art = d?.artUrl?.takeIf { it.isNotEmpty() } ?: entry.cover ?: ""
+                startActivity(
+                    Intent(this, AmazonGameDetailActivity::class.java).apply {
+                        putExtra("product_id", entry.id)
+                        putExtra("entitlement_id", d?.entitlementId ?: "")
+                        putExtra("title", title)
+                        putExtra("developer", d?.developer ?: "")
+                        putExtra("publisher", d?.publisher ?: "")
+                        putExtra("art_url", art)
+                        putExtra("product_sku", d?.productSku ?: "")
+                    },
+                )
+            }
+            // TODO(GOG/EPIC): route to GogGameDetailActivity / EpicGameDetailActivity (they exist)
+            // once those producers populate the registry — same hydrate-from-cache shape as Amazon.
+            Store.GOG, Store.EPIC -> { /* detail routing lands with those producers */ }
         }
     }
 
@@ -188,7 +217,7 @@ class DownloadManagerActivity : ComponentActivity() {
     private fun launch(entry: DownloadEntry) {
         val dir = entry.installPath
         if (dir.isNullOrEmpty()) {
-            Toast.makeText(this, "Install directory not set", Toast.LENGTH_SHORT).show()
+            uninstallResult = "Install directory not set"
             return
         }
         val appId = entry.id.toIntOrNull() ?: 0
@@ -198,7 +227,7 @@ class DownloadManagerActivity : ComponentActivity() {
             AmazonLaunchHelper.collectExe(installDir, exeFiles)
             if (exeFiles.isEmpty()) {
                 runOnUiThread {
-                    Toast.makeText(this, "No .exe found in install directory", Toast.LENGTH_LONG).show()
+                    uninstallResult = "No .exe found in install directory"
                 }
                 return@Thread
             }
@@ -238,9 +267,29 @@ class DownloadManagerActivity : ComponentActivity() {
                 }
             },
         ) { ok ->
+            // Clear the durable-library row (also drops the live registry entry) AND the store's
+            // OWN native install record — otherwise the originating store's list/detail keeps
+            // reading "installed" from a record the Manager never touched (device-observed bug).
             DownloadRegistry.removeLibraryEntry(entry.key)
+            purgeNativeInstall(entry)
             uninstallingName = null
             uninstallResult = if (ok) "${entry.name} uninstalled" else "Couldn't fully remove ${entry.name}"
+        }
+    }
+
+    /**
+     * Per-store native install-record purge — the generalized seam so a cross-store uninstall
+     * clears each store's OWN "installed" bookkeeping, not just Steam's DB. Steam is already
+     * handled by the `mark` callback above (DB `markUninstalled`); this covers the storefronts
+     * whose install-state lives outside a DB.
+     */
+    private fun purgeNativeInstall(entry: DownloadEntry) {
+        when (entry.store) {
+            Store.AMAZON -> AmazonInstallState.purge(this, entry.id)
+            // TODO(GOG/EPIC): clear their native install records here when those producers land,
+            // mirroring AmazonInstallState.purge (same shape: remove the store's per-game keys).
+            Store.GOG, Store.EPIC -> Unit
+            Store.STEAM -> Unit   // handled via SteamRepository.markUninstalled in `mark`
         }
     }
 }
@@ -372,9 +421,8 @@ private fun DownloadCard(
                 .fillMaxWidth()
                 .padding(12.dp),
         ) {
-            // Reuse the Steam poster loader. Steam entry.cover holds the appId string.
-            GameCoverArt(
-                appId = entry.cover?.toIntOrNull() ?: 0,
+            DownloadCoverArt(
+                entry = entry,
                 modifier = Modifier
                     .size(width = 60.dp, height = 80.dp)
                     .clip(RoundedCornerShape(6.dp)),
@@ -398,11 +446,23 @@ private fun DownloadCard(
                         ActiveContent(entry, onCancel, onPauseResume)
 
                     DownloadState.INSTALLED -> {
-                        Text(
-                            text = "● Installed",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = INSTALLED_GREEN,
-                        )
+                        // Amber "Update available" mirrors the store list's own language
+                        // (AmazonGamesActivity "✓ Installed — Update Available"); up-to-date
+                        // stays installed-green. Store-agnostic: any store that sets
+                        // entry.updateAvailable gets the same marker.
+                        if (entry.updateAvailable) {
+                            Text(
+                                text = "● Installed — Update available",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = UPDATE_AMBER,
+                            )
+                        } else {
+                            Text(
+                                text = "● Installed",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = INSTALLED_GREEN,
+                            )
+                        }
                         Spacer(Modifier.height(6.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
@@ -545,6 +605,40 @@ private fun ActiveContent(
     }
 }
 
+/**
+ * Store-aware cover loader for a Manager card.
+ *
+ * Steam art is derived from the appId (its `cover` holds the appId string), so Steam rows
+ * reuse [GameCoverArt]. Every other store (Amazon now; GOG / Epic later) stores a real image
+ * URL in `cover`, which [GameCoverArt] can't render — it only knows Steam's appId→URL scheme,
+ * so an Amazon row was showing a blank/× box. For those we load the URL directly via Coil,
+ * falling back to a themed placeholder box when the URL is genuinely absent.
+ */
+@Composable
+private fun DownloadCoverArt(entry: DownloadEntry, modifier: Modifier) {
+    if (entry.store == Store.STEAM) {
+        GameCoverArt(appId = entry.cover?.toIntOrNull() ?: entry.id.toIntOrNull() ?: 0, modifier = modifier)
+        return
+    }
+    val coverUrl = entry.cover
+    if (coverUrl.isNullOrEmpty()) {
+        Box(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant))
+        return
+    }
+    val ctx = LocalContext.current
+    Box(
+        modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant),
+        contentAlignment = Alignment.Center,
+    ) {
+        AsyncImage(
+            model = ImageRequest.Builder(ctx).data(coverUrl).crossfade(true).build(),
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
+    }
+}
+
 /** Small store-tinted chip so a mixed-store list reads at a glance. */
 @Composable
 private fun StoreBadge(store: Store) {
@@ -599,9 +693,8 @@ private fun ExePickerDialogDm(
 }
 
 private val INSTALLED_GREEN = Color(0xFF4CAF50)
+// Matches the Amazon store list's amber update-available color (AmazonGamesActivity GameCard).
+private val UPDATE_AMBER = Color(0xFFFFAA00)
 
-private fun fmtSizeDm(bytes: Long): String = when {
-    bytes >= 1_073_741_824L -> "%.1f GB".format(bytes / 1_073_741_824.0)
-    bytes >= 1_048_576L     -> "%.1f MB".format(bytes / 1_048_576.0)
-    else                    -> "%.0f KB".format(bytes / 1024.0)
-}
+// One shared byte formatter across the download stack (card text, detail label, shade line).
+private fun fmtSizeDm(bytes: Long): String = formatDownloadSize(bytes)

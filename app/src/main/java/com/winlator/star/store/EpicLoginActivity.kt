@@ -6,11 +6,13 @@ import android.view.ViewGroup
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import com.winlator.star.ui.theme.WinlatorTheme
@@ -33,6 +35,10 @@ class EpicLoginActivity : ComponentActivity() {
 
     private val codeCaptured = AtomicBoolean(false)
 
+    // Themed auto-dismiss bar — system Toasts render as an unreadable black box on this ROM
+    // (targetSDK 28); reuse the shared UninstallResultBar for readable feedback.
+    private var resultBarMsg by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.d(TAG, "EpicLoginActivity: loading auth page")
@@ -44,6 +50,7 @@ class EpicLoginActivity : ComponentActivity() {
                     codeCaptured = codeCaptured,
                     onJsonPage = { view -> handleJsonPage(view) },
                 )
+                resultBarMsg?.let { UninstallResultBar(it) { resultBarMsg = null } }
             }
         }
     }
@@ -63,7 +70,7 @@ class EpicLoginActivity : ComponentActivity() {
             if (authCode.isNullOrEmpty()) {
                 Log.e(TAG, "authorizationCode not found in page: $result")
                 codeCaptured.set(false)
-                Toast.makeText(this, "Epic login failed, please try again", Toast.LENGTH_SHORT).show()
+                resultBarMsg = "Epic login failed, please try again"
                 view.loadUrl(AUTH_URL)
                 return@evaluateJavascript
             }
@@ -75,7 +82,7 @@ class EpicLoginActivity : ComponentActivity() {
                     Log.e(TAG, "Epic token exchange failed")
                     withContext(Dispatchers.Main) {
                         codeCaptured.set(false)
-                        Toast.makeText(this@EpicLoginActivity, "Epic login failed, please try again", Toast.LENGTH_SHORT).show()
+                        resultBarMsg = "Epic login failed, please try again"
                         view.loadUrl(AUTH_URL)
                     }
                     return@launch

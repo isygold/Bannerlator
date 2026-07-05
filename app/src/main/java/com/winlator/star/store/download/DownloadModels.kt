@@ -13,6 +13,18 @@ package com.winlator.star.store.download
 enum class Store { STEAM, EPIC, GOG, AMAZON }
 
 /**
+ * Single, store-agnostic human byte formatter for the whole download stack — the exact
+ * tiering the Download Manager card uses (GB / MB / KB). Shared here so the manager card
+ * text, the detail-page progress label, and the shade notification all read identically
+ * ("810.2 MB", "3.9 GB") instead of each store re-inventing a slightly different format.
+ */
+fun formatDownloadSize(bytes: Long): String = when {
+    bytes >= 1_073_741_824L -> "%.1f GB".format(bytes / 1_073_741_824.0)
+    bytes >= 1_048_576L     -> "%.1f MB".format(bytes / 1_048_576.0)
+    else                    -> "%.0f KB".format(bytes / 1024.0)
+}
+
+/**
  * Lifecycle of a single download row.
  *
  * QUEUED/DOWNLOADING/PAUSED are the *active* states (in-memory only). INSTALLED is
@@ -72,6 +84,15 @@ data class DownloadEntry(
     val supportsPause: Boolean = false,
     val installPath: String? = null,
     val error: String? = null,
+    /**
+     * True when an INSTALLED game has a newer version available from its store. Store-agnostic
+     * so the Manager card can render one amber "Update available" marker for any store. Derived
+     * per store at seed/produce time (Amazon: cached versionId carries an "_UPDATE_AVAILABLE"
+     * suffix; Steam leaves it false for now — no Steam update detection exists yet). Transient:
+     * NOT persisted to the durable library (the library writer serializes only name/store/
+     * installPath/cover) — it is re-derived on each seed, and a fresh install/update clears it.
+     */
+    val updateAvailable: Boolean = false,
     // ── Transient action handles — held live by the registry, NEVER persisted ──
     val pause: (() -> Unit)? = null,
     val cancel: (() -> Unit)? = null,

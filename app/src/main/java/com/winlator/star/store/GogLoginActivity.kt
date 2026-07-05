@@ -12,9 +12,9 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.lifecycle.lifecycleScope
+import com.winlator.star.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -173,7 +173,15 @@ class GogLoginActivity : ComponentActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Login post-processing failed", e)
             withContext(Dispatchers.Main) {
-                Toast.makeText(this@GogLoginActivity, "Login error, please try again", Toast.LENGTH_SHORT).show()
+                // Not a Compose screen (plain WebView via setContentView), so the shared
+                // UninstallResultBar can't apply — use the themed dark dialog instead of a
+                // black-box Toast.
+                if (!isFinishing && !isDestroyed) {
+                    android.app.AlertDialog.Builder(this@GogLoginActivity, R.style.StoreAlertDialogDark)
+                        .setMessage("Login error, please try again")
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
                 webViewRef?.loadUrl(AUTH_URL)
             }
         }
