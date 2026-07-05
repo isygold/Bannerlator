@@ -351,11 +351,14 @@ private fun SteamLoginScreen(
         ) { Text("Sign In") }
         Spacer(Modifier.height(12.dp))
 
-        // QR login temporarily disabled — sessions from QR sign-in can be
-        // dropped by the CM after ~1h. Username/password is the solid path
-        // for now. Re-enable once the logoff-recovery path is device-proven.
-        TextButton(onClick = onQrClick, enabled = false) {
-            Text("Sign in with QR Code (temporarily unavailable)")
+        // QR sign-in re-enabled: a QR-originated session stores the same
+        // username + refresh_token as a password login (SteamQrAuthManager →
+        // saveSession), so it is recovered by the same logoff/reconnect path
+        // (SteamRepository.onLoggedOff / reconnectNow). The QR screen shows an
+        // advisory to fall back to username + password if downloads or the
+        // session keep dropping after signing in this way.
+        TextButton(onClick = onQrClick) {
+            Text("Sign in with QR Code")
         }
         Spacer(Modifier.height(16.dp))
 

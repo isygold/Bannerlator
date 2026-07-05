@@ -285,6 +285,27 @@ private fun QrLoginScreen(
         )
         Spacer(Modifier.height(20.dp))
 
+        // Advisory: a QR-originated session is occasionally dropped by Steam's CM.
+        // Recovery is handled automatically, but if it keeps happening, username +
+        // password is the more durable path — tell the user so they aren't stuck.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(12.dp),
+        ) {
+            Text(
+                text = "If downloads or your session keep dropping after signing in with " +
+                        "QR, sign out and use the Username + Password method instead — " +
+                        "it's the more reliable sign-in.",
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Spacer(Modifier.height(20.dp))
+
         if (showRetry) {
             Button(
                 onClick = onRetry,
