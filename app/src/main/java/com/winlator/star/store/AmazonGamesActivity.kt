@@ -519,25 +519,14 @@ class AmazonGamesActivity : ComponentActivity() {
                     AmazonLaunchHelper.scoreExe(a, lowerTitle)
             }
 
-            if (exeFiles.size == 1) {
-                val path = exeFiles[0].absolutePath
-                prefs!!.edit().putString("amazon_exe_${game.productId}", path).apply()
-                onDownloadComplete(game.productId, path)
-                return@launch
-            }
-
-            val candidates = exeFiles.map { it.absolutePath }
-            withContext(Dispatchers.Main) {
-                exePickerData = ExePickerData(
-                    candidates = candidates,
-                    onSelected = { selected ->
-                        val chosen = if (!selected.isNullOrEmpty()) selected
-                        else exeFiles[0].absolutePath
-                        prefs!!.edit().putString("amazon_exe_${game.productId}", chosen).apply()
-                        onDownloadComplete(game.productId, chosen)
-                    },
-                )
-            }
+            // Completion NEVER shows a picker: auto-record the best-scored exe (list already
+            // sorted best-first) and finalize, regardless of exe count. This finalizes the install
+            // even when this screen isn't foreground (a queued dialog on a stopped Activity used to
+            // wedge the DL-manager card at 100%). Exe choice, if there are several, happens at
+            // Launch instead (detail page's onLaunchClicked / a Launch-time picker).
+            val path = exeFiles[0].absolutePath
+            prefs!!.edit().putString("amazon_exe_${game.productId}", path).apply()
+            onDownloadComplete(game.productId, path)
         }
     }
 

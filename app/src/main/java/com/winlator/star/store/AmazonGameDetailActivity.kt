@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.winlator.star.R
 import com.winlator.star.store.download.DownloadRegistry
 import com.winlator.star.store.download.DownloadScope
 import com.winlator.star.store.download.DownloadsButton
@@ -321,34 +322,15 @@ class AmazonGameDetailActivity : ComponentActivity() {
                     AmazonLaunchHelper.scoreExe(a, lowerTitle)
             }
 
-            if (exeFiles.size == 1) {
-                prefs!!.edit().putString(
-                    "amazon_exe_$productId",
-                    exeFiles[0].absolutePath,
-                ).apply()
-                withContext(Dispatchers.Main) { onInstallComplete() }
-            } else {
-                val candidates = exeFiles.map { it.absolutePath }
-                withContext(Dispatchers.Main) {
-                    // The picker is an AlertDialog on THIS Activity — it would crash with a
-                    // BadToken if the download outlived the detail page. When we're gone, just
-                    // auto-pick the best-scored exe (list is already sorted best-first) so the
-                    // install still completes and lands in the Library.
-                    if (isDestroyed || isFinishing) {
-                        prefs!!.edit()
-                            .putString("amazon_exe_$productId", exeFiles[0].absolutePath)
-                            .apply()
-                        onInstallComplete()
-                    } else {
-                        showExePicker(candidates) { selected ->
-                            val chosen = if (!selected.isNullOrEmpty()) selected
-                            else exeFiles[0].absolutePath
-                            prefs!!.edit().putString("amazon_exe_$productId", chosen).apply()
-                            onInstallComplete()
-                        }
-                    }
-                }
-            }
+            // Completion NEVER shows a dialog: auto-record the best-scored exe (list already
+            // sorted best-first) and finalize. Gating markInstalled behind an exe-picker used to
+            // wedge the download at 100% whenever the user wasn't on the detail page when it
+            // finished (the dialog queued on a stopped Activity, so the install never finalized).
+            // The exe choice, when there's more than one, now happens at Launch instead.
+            prefs!!.edit()
+                .putString("amazon_exe_$productId", exeFiles[0].absolutePath)
+                .apply()
+            withContext(Dispatchers.Main) { onInstallComplete() }
         }
     }
 
@@ -464,20 +446,43 @@ class AmazonGameDetailActivity : ComponentActivity() {
     // ── Launch ────────────────────────────────────────────────────────────
 
     private fun onLaunchClicked() {
-        val exe = prefs!!.getString("amazon_exe_$productId", null)
-        if (exe != null) pendingLaunchExe(exe)
-    }
-
-    private fun pendingLaunchExe(absPath: String) {
-        prefs!!.edit().putString("pending_amazon_exe", absPath).apply()
-        val intent = Intent().apply {
-            setClassName(
-                packageName,
-                "com.xj.landscape.launcher.ui.main.LandscapeLauncherMainActivity",
-            )
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val dir = prefs!!.getString("amazon_dir_$productId", null) ?: return
+        val name = titleText ?: productId ?: "Game"
+        // The exe choice happens HERE (not at install completion): scan the install dir, and if
+        // there's more than one candidate let the user pick before the container picker. Exactly
+        // one → straight to the container picker. Uses the same working StarLaunchBridge flow the
+        // games-list Launch uses (the old hardcoded LandscapeLauncher component doesn't exist in
+        // this app and crashed with ActivityNotFoundException).
+        lifecycleScope.launch(Dispatchers.IO) {
+            val exeFiles = mutableListOf<File>()
+            AmazonLaunchHelper.collectExe(File(dir), exeFiles)
+            if (exeFiles.isEmpty()) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(
+                        this@AmazonGameDetailActivity,
+                        "No .exe found in install directory",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+                return@launch
+            }
+            val lowerTitle = name.lowercase()
+            exeFiles.sortWith { a, b ->
+                AmazonLaunchHelper.scoreExe(b, lowerTitle) - AmazonLaunchHelper.scoreExe(a, lowerTitle)
+            }
+            val candidates = exeFiles.map { it.absolutePath }
+            withContext(Dispatchers.Main) {
+                if (candidates.size == 1) {
+                    StarLaunchBridge.addToLauncher(this@AmazonGameDetailActivity, name, candidates[0], artUrl)
+                } else {
+                    showExePicker(candidates, cancelable = true) { chosen ->
+                        runOnUiThread {
+                            StarLaunchBridge.addToLauncher(this@AmazonGameDetailActivity, name, chosen, artUrl)
+                        }
+                    }
+                }
+            }
         }
-        startActivity(intent)
     }
 
     // ── Updates ───────────────────────────────────────────────────────────
@@ -648,6 +653,7 @@ class AmazonGameDetailActivity : ComponentActivity() {
 
     private fun showExePicker(
         candidates: List<String>,
+        cancelable: Boolean = false,
         onSelected: (String) -> Unit,
     ) {
         val labels = candidates.map { path ->
@@ -656,14 +662,15 @@ class AmazonGameDetailActivity : ComponentActivity() {
             if (parent != null) "${parent.name}/${f.name}" else f.name
         }.toTypedArray()
 
-        val dialog = android.app.AlertDialog.Builder(this)
+        // Themed (StoreAlertDialogDark) so it matches the dark app instead of a white light dialog.
+        android.app.AlertDialog.Builder(this, R.style.StoreAlertDialogDark)
             .setTitle("Select game executable")
             .setItems(labels) { _, which ->
                 lifecycleScope.launch(Dispatchers.IO) {
                     onSelected(candidates[which])
                 }
             }
-            .setCancelable(false)
+            .setCancelable(cancelable)
             .show()
     }
 

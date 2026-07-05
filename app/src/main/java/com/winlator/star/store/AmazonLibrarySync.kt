@@ -41,6 +41,48 @@ object AmazonLibrarySync {
     /** Cached per-game metadata pulled from `amazon_library_cache` (best-effort). */
     private data class Meta(val title: String, val cover: String?, val update: Boolean)
 
+    /**
+     * Full detail-page extras for one game, hydrated from `amazon_library_cache`. Lets a caller
+     * that only holds a productId (e.g. the cross-store Download Manager card) open
+     * [AmazonGameDetailActivity] with the same extras [AmazonGamesActivity.openDetailScreen] uses.
+     */
+    data class DetailExtras(
+        val entitlementId: String,
+        val title: String,
+        val developer: String,
+        val publisher: String,
+        val artUrl: String,
+        val productSku: String,
+    )
+
+    /**
+     * Look up a game's cached detail metadata by productId, or null if it isn't in the cache
+     * (e.g. the Amazon store was never opened this install). Never throws — a parse failure
+     * returns null so the caller can fall back to whatever it already holds.
+     */
+    fun cachedDetail(ctx: Context, productId: String): DetailExtras? {
+        if (productId.isEmpty()) return null
+        return runCatching {
+            val json = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(CACHE_KEY, null) ?: return null
+            val arr = JSONArray(json)
+            for (i in 0 until arr.length()) {
+                val j = arr.optJSONObject(i) ?: continue
+                if (j.optString("productId", "") != productId) continue
+                val art = j.optString("artUrl", "").ifEmpty { j.optString("heroUrl", "") }
+                return DetailExtras(
+                    entitlementId = j.optString("entitlementId", ""),
+                    title = j.optString("title", ""),
+                    developer = j.optString("developer", ""),
+                    publisher = j.optString("publisher", ""),
+                    artUrl = art,
+                    productSku = j.optString("productSku", ""),
+                )
+            }
+            null
+        }.getOrNull()
+    }
+
     private val seeded = AtomicBoolean(false)
 
     /**

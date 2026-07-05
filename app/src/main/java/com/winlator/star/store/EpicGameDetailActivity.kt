@@ -366,12 +366,10 @@ class EpicGameDetailActivity : ComponentActivity() {
 
     private fun pendingLaunchExe() {
         val exe = prefs!!.getString("epic_exe_$appName", null) ?: return
-        prefs!!.edit().putString("pending_epic_exe", exe).apply()
-        val intent = Intent().apply {
-            setClassName(packageName, "com.xj.landscape.launcher.ui.main.LandscapeLauncherMainActivity")
-            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        }
-        startActivity(intent)
+        // Mirror the Epic games-list Launch (StarLaunchBridge container picker). The old hardcoded
+        // LandscapeLauncherMainActivity component doesn't exist in this app (com.winlator.banner)
+        // and crashed with ActivityNotFoundException — identical to the Amazon detail bug.
+        StarLaunchBridge.addToLauncher(this, title ?: appName ?: "Game", exe, artCover ?: "")
     }
 
     private fun onSetExeClicked() {

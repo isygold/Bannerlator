@@ -182,14 +182,35 @@ class DownloadManagerActivity : ComponentActivity() {
         DownloadRegistry.clearLibrary()
     }
 
-    /** Tap a card → open that game's detail in its store. Steam-only for v1. */
+    /** Tap a card → open that game's detail in its store (works for downloading + installed). */
     private fun openDetail(entry: DownloadEntry) {
         when (entry.store) {
             Store.STEAM -> startActivity(
                 Intent(this, SteamGameDetailActivity::class.java)
                     .putExtra(SteamGameDetailActivity.EXTRA_APP_ID, entry.id.toIntOrNull() ?: 0),
             )
-            else -> { /* Epic/GOG/Amazon detail routing is a later phase. */ }
+            Store.AMAZON -> {
+                // The card only carries id(=productId)/name/cover; hydrate the rest of the detail
+                // extras from amazon_library_cache. Fall back to the entry's own fields so the page
+                // still opens (with a functional install/launch) even if the cache is unavailable.
+                val d = AmazonLibrarySync.cachedDetail(this, entry.id)
+                val title = d?.title?.takeIf { it.isNotEmpty() } ?: entry.name
+                val art = d?.artUrl?.takeIf { it.isNotEmpty() } ?: entry.cover ?: ""
+                startActivity(
+                    Intent(this, AmazonGameDetailActivity::class.java).apply {
+                        putExtra("product_id", entry.id)
+                        putExtra("entitlement_id", d?.entitlementId ?: "")
+                        putExtra("title", title)
+                        putExtra("developer", d?.developer ?: "")
+                        putExtra("publisher", d?.publisher ?: "")
+                        putExtra("art_url", art)
+                        putExtra("product_sku", d?.productSku ?: "")
+                    },
+                )
+            }
+            // TODO(GOG/EPIC): route to GogGameDetailActivity / EpicGameDetailActivity (they exist)
+            // once those producers populate the registry — same hydrate-from-cache shape as Amazon.
+            Store.GOG, Store.EPIC -> { /* detail routing lands with those producers */ }
         }
     }
 
