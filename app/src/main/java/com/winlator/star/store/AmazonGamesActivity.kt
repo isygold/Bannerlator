@@ -86,6 +86,9 @@ class AmazonGamesActivity : ComponentActivity() {
     private var statusText by mutableStateOf("Loading Amazon library\u2026")
     private var gamesVisible by mutableStateOf(false)
     private var expandedProductId by mutableStateOf<String?>(null)
+    // Themed auto-dismiss bar — system Toasts render as an unreadable black box on this ROM
+    // (targetSDK 28); reuse Steam's UninstallResultBar for readable uninstall feedback.
+    private var resultBarMsg by mutableStateOf<String?>(null)
     private var refreshEnabled by mutableStateOf(true)
 
     // Download progress per game
@@ -184,6 +187,7 @@ class AmazonGamesActivity : ComponentActivity() {
                         },
                     )
                 }
+                resultBarMsg?.let { UninstallResultBar(it) { resultBarMsg = null } }
             }
         }
 
@@ -581,11 +585,7 @@ class AmazonGamesActivity : ComponentActivity() {
             StoreDownloadHooks.markUninstalled(Store.AMAZON, game.productId)
             withContext(Dispatchers.Main) {
                 refreshFromCache()
-                Toast.makeText(
-                    this@AmazonGamesActivity,
-                    "${game.title} uninstalled",
-                    Toast.LENGTH_SHORT,
-                ).show()
+                resultBarMsg = "${game.title} uninstalled"
             }
         }
     }

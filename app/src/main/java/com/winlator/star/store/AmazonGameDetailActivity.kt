@@ -103,6 +103,10 @@ class AmazonGameDetailActivity : ComponentActivity() {
     private var installBtnEnabled by mutableStateOf(true)
     private var setExeBtnVisible by mutableStateOf(false)
     private var uninstallBtnVisible by mutableStateOf(false)
+    // Themed auto-dismiss confirmation bar. System Toasts render as an unreadable black box on
+    // this ROM (targetSDK 28) — same issue Steam hit; reuse its UninstallResultBar for readable
+    // uninstall/launch feedback instead of Toast.makeText.
+    private var resultBarMsg by mutableStateOf<String?>(null)
     private var sizeText by mutableStateOf("Fetching\u2026")
 
     // Updates section state
@@ -148,6 +152,7 @@ class AmazonGameDetailActivity : ComponentActivity() {
 
         setContent {
             WinlatorTheme {
+                Box(Modifier.fillMaxSize()) {
                 AmazonGameDetailScreen(
                     artUrl = artUrl,
                     titleText = titleText,
@@ -181,6 +186,8 @@ class AmazonGameDetailActivity : ComponentActivity() {
                     onUpdateNowClick = { onInstallClicked() },
                     onDlcInstall = { eid, pid, dlcTitle -> startDlcInstall(eid, pid, dlcTitle) },
                 )
+                resultBarMsg?.let { UninstallResultBar(it) { resultBarMsg = null } }
+                }
             }
         }
     }
@@ -434,11 +441,8 @@ class AmazonGameDetailActivity : ComponentActivity() {
             withContext(Dispatchers.Main) {
                 setResult(RESULT_REFRESH)
                 refreshActionState()
-                Toast.makeText(
-                    this@AmazonGameDetailActivity,
-                    "$titleText uninstalled",
-                    Toast.LENGTH_SHORT,
-                ).show()
+                loadUpdateStatus()   // clear the stale "Installed: v…" line now that prefs are purged
+                resultBarMsg = "$titleText uninstalled"
             }
         }
     }
@@ -458,11 +462,7 @@ class AmazonGameDetailActivity : ComponentActivity() {
             AmazonLaunchHelper.collectExe(File(dir), exeFiles)
             if (exeFiles.isEmpty()) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@AmazonGameDetailActivity,
-                        "No .exe found in install directory",
-                        Toast.LENGTH_LONG,
-                    ).show()
+                    resultBarMsg = "No .exe found in install directory"
                 }
                 return@launch
             }
