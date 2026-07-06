@@ -20,12 +20,14 @@ import java.io.File;
 public abstract class WineThemeManager {
     public enum Theme {LIGHT, DARK}
     public enum BackgroundType {IMAGE, COLOR}
+    public enum BackgroundScope {GLOBAL, CONTAINER}
     public static final String DEFAULT_DESKTOP_THEME = Theme.LIGHT+","+BackgroundType.IMAGE+",#0277bd";
 
     public static class ThemeInfo {
         public final Theme theme;
         public final BackgroundType backgroundType;
         public final int backgroundColor;
+        public final BackgroundScope wallpaperScope;
 
         public ThemeInfo(String value) {
             String[] values = value.split(",");
@@ -38,15 +40,28 @@ public abstract class WineThemeManager {
                 backgroundType = BackgroundType.valueOf(values[1]);
                 backgroundColor = Color.parseColor(values[2]);
             }
+            // Slot 3 (values[3]) is the wallpaper scope for IMAGE backgrounds. Legacy strings
+            // stored a numeric mtime here instead, so a non-enum token must fall back to GLOBAL
+            // to preserve existing containers' behavior (shared wallpaper).
+            BackgroundScope scope = BackgroundScope.GLOBAL;
+            if (values.length >= 4) {
+                try {
+                    scope = BackgroundScope.valueOf(values[3]);
+                }
+                catch (IllegalArgumentException e) {
+                    scope = BackgroundScope.GLOBAL;
+                }
+            }
+            wallpaperScope = scope;
         }
     }
 
-    public static void apply(Context context, ThemeInfo themeInfo, ScreenInfo screenInfo) {
+    public static void apply(Context context, ThemeInfo themeInfo, ScreenInfo screenInfo, int containerId) {
         File rootDir = ImageFs.find(context).getRootDir();
         File userRegFile = new File(rootDir, ImageFs.WINEPREFIX+"/user.reg");
         String background = Color.red(themeInfo.backgroundColor)+" "+Color.green(themeInfo.backgroundColor)+" "+Color.blue(themeInfo.backgroundColor);
 
-        if (themeInfo.backgroundType == BackgroundType.IMAGE) createWallpaperBMPFile(context, screenInfo);
+        if (themeInfo.backgroundType == BackgroundType.IMAGE) createWallpaperBMPFile(context, screenInfo, themeInfo.wallpaperScope, containerId);
 
         try (WineRegistryEditor registryEditor = new WineRegistryEditor(userRegFile)) {
             if (themeInfo.backgroundType == BackgroundType.IMAGE) {
@@ -121,7 +136,7 @@ public abstract class WineThemeManager {
         }
     }
 
-    private static void createWallpaperBMPFile(Context context, ScreenInfo screenInfo) {
+    private static void createWallpaperBMPFile(Context context, ScreenInfo screenInfo, BackgroundScope scope, int containerId) {
         final int outputHeight = screenInfo.height;
         int outputWidth = screenInfo.width;
 
@@ -129,7 +144,14 @@ public abstract class WineThemeManager {
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         Canvas canvas = new Canvas(outputBitmap);
 
+        // Source-file resolution: a per-container wallpaper (when the container scope is chosen
+        // and its file exists) wins; otherwise fall back to the global file, then to the
+        // marcescence/bundled defaults below — so a CONTAINER scope never yields a blank desktop.
         File userWallpaperFile = getUserWallpaperFile(context);
+        if (scope == BackgroundScope.CONTAINER) {
+            File perContainer = getUserWallpaperFile(context, containerId);
+            if (perContainer.isFile()) userWallpaperFile = perContainer;
+        }
         if (userWallpaperFile.isFile()) {
             Bitmap image = BitmapFactory.decodeFile(userWallpaperFile.getPath());
             Rect srcRect = new Rect(0, 0, image.getWidth(), image.getHeight());
@@ -169,5 +191,9 @@ public abstract class WineThemeManager {
 
     public static File getUserWallpaperFile(Context context) {
         return new File(ImageFs.find(context).getRootDir(), ImageFs.CONFIG_PATH+"/user-wallpaper.png");
+    }
+
+    public static File getUserWallpaperFile(Context context, int containerId) {
+        return new File(ImageFs.find(context).getRootDir(), ImageFs.CONFIG_PATH+"/user-wallpaper-"+containerId+".png");
     }
 }

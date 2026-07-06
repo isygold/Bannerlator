@@ -814,19 +814,27 @@ private fun WineConfigTab(
                     )
                 }
             }
-            // Wallpaper picker (visible when Image selected). The picked file is a single
-            // global user-wallpaper.png; on Save buildDesktopThemeStr() appends its mtime so
-            // overwriting it regenerates the container's Wine wallpaper.
+            // Wallpaper picker (visible when Image selected). The picked image is written to a
+            // GLOBAL user-wallpaper.png (shared by all containers) or a per-container
+            // user-wallpaper-<id>.png depending on the scope selector. On Save
+            // buildDesktopThemeStr() emits the scope + the chosen file's mtime, so switching scope
+            // or overwriting the file regenerates this container's Wine wallpaper.
             if (viewModel.desktopBgTypeIndex == WineThemeManager.BackgroundType.IMAGE.ordinal) {
                 val context = LocalContext.current
-                val scope = rememberCoroutineScope()
-                val wallpaperFile = remember { WineThemeManager.getUserWallpaperFile(context) }
-                // Path is constant, so drive preview recomposition off an mtime stamp we bump
-                // (on the main thread) after each successful save.
-                var wallpaperStamp by remember { mutableStateOf(wallpaperFile.lastModified()) }
+                val ioScope = rememberCoroutineScope()
+                val scopeOptions = listOf("All containers", "This container")
+                val currentScope = WineThemeManager.BackgroundScope.values()
+                    .getOrElse(viewModel.desktopWallpaperScopeIndex) { WineThemeManager.BackgroundScope.GLOBAL }
+                // File depends on the selected scope; getNextContainerId() is O(1) so recomputing
+                // per recomposition is cheap.
+                val wallpaperFile = viewModel.wallpaperFileFor(currentScope)
+                // Both the file path AND the mtime can change (scope switch / new pick), so drive
+                // preview reload off (scopeIndex, stamp). Stamp is bumped on the main thread after
+                // a successful save.
+                var wallpaperStamp by remember { mutableStateOf(0L) }
                 var preview by remember { mutableStateOf<ImageBitmap?>(null) }
 
-                LaunchedEffect(wallpaperStamp) {
+                LaunchedEffect(viewModel.desktopWallpaperScopeIndex, wallpaperStamp) {
                     preview = if (wallpaperFile.isFile) {
                         withContext(Dispatchers.IO) {
                             BitmapFactory.decodeFile(wallpaperFile.path)?.asImageBitmap()
@@ -838,7 +846,7 @@ private fun WineConfigTab(
                     ActivityResultContracts.GetContent()
                 ) { uri ->
                     uri ?: return@rememberLauncherForActivityResult
-                    scope.launch {
+                    ioScope.launch {
                         val ok = withContext(Dispatchers.IO) {
                             val bitmap = ImageUtils.getBitmapFromUri(context, uri, 1280)
                                 ?: return@withContext false
@@ -849,6 +857,13 @@ private fun WineConfigTab(
                     }
                 }
 
+                Spacer(Modifier.height(8.dp))
+                LabeledDropdown(
+                    label = "Apply wallpaper to",
+                    options = scopeOptions,
+                    selectedOption = scopeOptions.getOrElse(viewModel.desktopWallpaperScopeIndex) { scopeOptions[0] },
+                    onSelect = { opt -> viewModel.desktopWallpaperScopeIndex = scopeOptions.indexOf(opt).coerceAtLeast(0) }
+                )
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Wallpaper Image", modifier = Modifier.weight(1f))
