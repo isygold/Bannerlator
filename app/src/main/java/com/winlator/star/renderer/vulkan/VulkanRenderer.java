@@ -302,8 +302,6 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private void updateTransform() {
         if (nativeHandle == 0) return;
         float zoom = magnifierZoom;
-        float cx = surfaceWidth / 2f;
-        float cy = surfaceHeight / 2f;
         if (fullscreen) {
             // Cursor-follow magnifier (parity with GLRenderer.drawFrame). The native compositor
             // normalises this transform by containerWidth/Height (= the GUEST screenInfo dims; see
@@ -339,9 +337,29 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
             float baseOy = viewTransformation.sceneOffsetY - py;
             float baseSx = viewTransformation.sceneScaleX;
             float baseSy = viewTransformation.sceneScaleY;
+            // Cursor-follow magnifier (parity with GLRenderer, which follows the cursor in
+            // WINDOWED mode too — it has no fullscreen gate). Magnify in GUEST space around the
+            // pointer FIRST, THEN apply the existing scene placement:
+            //   d'     = zoom*d + magOff                       (magnifier, guest px)
+            //   screen = sceneOffset + sceneScale*d'
+            //          = (sceneOffset + sceneScale*magOff) + (sceneScale*zoom)*d
+            // The native compositor normalises this transform by containerWidth = the GUEST
+            // screenInfo (see VulkanRendererContext::recordCmdBuf push constants: ndc =
+            // (ox + d*sx)/cw), so sceneOffset and magOff are GUEST pixels and sceneScale is
+            // dimensionless. The old code pivoted around the SURFACE centre (cx = surfaceWidth/2)
+            // and multiplied baseOx by zoom — both wrong: the compositor pivots in guest space and
+            // the scene offset must stay unscaled. At zoom == 1 magOff clamps to 0, so this reduces
+            // EXACTLY to (baseOx, baseOy, baseSx, baseSy) = today's non-magnified windowed
+            // transform (no regression). The screenOffsetYRelativeToCursor Y shift is folded into
+            // baseOy above and composes correctly through the scene scale.
+            float gw = xServer.screenInfo.width;
+            float gh = xServer.screenInfo.height;
+            float px = xServer.pointer.getX();
+            float magOffX = Math.max(gw * (1f - zoom), Math.min(0f, gw * 0.5f - px * zoom));
+            float magOffY = Math.max(gh * (1f - zoom), Math.min(0f, gh * 0.5f - xServer.pointer.getY() * zoom));
             nativeSetTransform(nativeHandle,
-                baseOx * zoom + cx * (1f - zoom),
-                baseOy * zoom + cy * (1f - zoom),
+                baseOx + baseSx * magOffX,
+                baseOy + baseSy * magOffY,
                 baseSx * zoom,
                 baseSy * zoom);
             nativeScanoutSetDst(nativeHandle,
