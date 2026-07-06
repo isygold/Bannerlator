@@ -1,5 +1,17 @@
 # Star-Compose — Progress Log
 
+## 2026-07-06 — ✅ CHECKPOINT: DLC-ownership fix + size breakdown + magnifier no-dim MERGED (main `29d5006`); DLC picker on branch
+
+> **main `29d5006`, CI `28806902047` (artifacts-only) GREEN. Still vc38; next stable = 2.4-preN (vc39+). No release cut.** Everything below merged this session on top of the DepotSizeResolver line:
+> - **Detail-page size breakdown** — headline on-disk FOOTPRINT (block-rounded per-file `ceil(size/4096)*4096`; real measured `du` once installed) + `Download` (compressed) + `PICS estimate (Steam)` (labeled) + `Free space`/"won't fit". DB v4→v5 `real_disk_bytes`, v5→v6 reset (a v5 build skipped every file via `linkTarget "" != null` → footprint == content; fixed with `isNullOrEmpty()`). REALITY: for VPK-packed games (HL2) block slack is tiny (~5.6 MB) so footprint ≈ content; the extra ~2 GB "on disk" is install-time overhead (staging/prefix/emulator) NOT in the manifest — user accepted "best it's going to get".
+> - **Magnifier whole-screen dim FIX** (`59e2e20`) — `MagnifierOverlay` is a Compose Dialog → `FLAG_DIM_BEHIND` dimmed the whole game surface. `clearFlags(FLAG_DIM_BEHIND)` + `setDimAmount(0f)` (mirrors PauseBoxOverlay). Renderer-independent → fixes GL AND Vulkan in one place.
+> - **Unowned-DLC-depot fix** (`29d5006`) — an owned game's PICS depot list includes its DLC depots; selecting an UNOWNED one made the engine try a keyless depot → 0 bytes → false "incomplete" on the owned game (devaspe's **See No Evil 313830**: soundtrack DLC depot **320210** he doesn't own; the 131 MB game downloaded 100% but was rejected). Detection: NOT `config/dlcappid` (Steam doesn't tag it — verified: Just Cause 3's owned DLC depots had no dlcappid) but **`extended/listofdlc` + depot_id == DLC appId**. Skip DLC depot if `!licensed`; `pruneDepots` drops stale ones on re-sync. `getLicensedAppIds()` = ownership.
+> - **"Includes DLC:" line** — owned DLC bundled with the game, shown on the detail page (DB v6→v7 `included_dlc`; `getIncludedDlcEntries`). Confirmed on device: JC3 shows its 11 owned DLC.
+>
+> **🔨 DLC PICKER — branch `feat/dlc-picker` head `bfd4847c`, CI `28810646828` GREEN, NOT merged.** Tap **"Choose DLC"** (OutlinedButton) → **ModalBottomSheet** (scrollable + nav-bar inset + "Done") of OWNED DLC checkboxes (default checked). Uncheck → `SteamPrefs.excludedDlc` → dropped from download via explicit `AppItem.depot`/`manifest` list + **sizes update live** (`recomputeSizeDisplay` sums depots minus excluded). **Stage 2 (unowned/locked rows) DROPPED per user** — owned-only, no clutter, no store-API name fetch. Device-UX-proven (button prominent, sheet scrolls); NOT yet proven that uncheck removes DLC from a real download → device-verify then merge.
+>
+> **NOT device-tested:** magnifier no-dim; See No Evil unowned-DLC fix (not owned on our account — logically certain from devaspe's log, needs library re-sync); picker actual opt-out.
+
 ## 2026-07-06 — ✅ MERGED TO MAIN: DepotSizeResolver — true sizes + executor fix + detail-page size breakdown (main `38cc00b`)
 
 > **Fast-forwarded `feat/depot-size-resolver` onto main (`9f5bf74`→`38cc00b`), CI run `28797042366`. No release cut, versionCode still 38 (=2.3); next stable = 2.4-preN (vc39+).** Five commits, all device-proven except where noted:
