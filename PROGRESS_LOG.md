@@ -1,5 +1,16 @@
 # Star-Compose — Progress Log
 
+## 2026-07-06 — ✅ CHECKPOINT (pre-reboot): DepotSizeResolver green + INSTALLED + PARTIAL device-test; install-blocker not yet reproduced
+
+> **Resolver APK `1f262e3` (CI `28784305760` GREEN) STAGED + INSTALLED + verified** (installed base.apk sha256 = `6f47720791a02e5164547e14d2677ea2c35922043ac544724ea8d70d496d10d4` = `bannerlator-depotsize-1f262e3-standard.apk`, 589,648,938 B). branch `feat/depot-size-resolver`, NOT merged, no version change.
+> **✅ On-device findings (steam.db pulled to /sdcard/Download/steam_dump.db — sqlite3 absent on device, queried locally):**
+> - **⭐ THE #1 RUNTIME UNKNOWN IS RESOLVED:** CDN manifest fetch works with **no depot key / no auth token** on real hardware. HL2 (appId 220) `depot_manifests.real_size_bytes` populated for all 4 depots after opening its detail page → `downloadManifestFuture` returns real sizes for real depots. Resolver functioning (login-gated, on library worker).
+> - **HL2 real == PICS exactly** (sum 8,990,704,030 = both `size_bytes` and `real_size_bytes`). HL2's PICS was already accurate at CONTENT level; the "10.66 GB" was on-disk `du` footprint (block rounding), NOT manifest content. So HL2's detail number does NOT visibly change — only the `~` drops once resolved. Detail-page async behavior confirmed (user's 06:28 `~8.4 GB` = pre-resolve window; re-open drops the `~`).
+> - **⚠️ NOT yet proven — the actual install-blocker fix.** HL2 = cosmetic under-report only. Reproduce the OVER-report failure with **appId `313830` / depot `313831`** (devaspe's game — appid visible in his Discord log screenshot: "=== Download complete: appId=313830 ===" → "INCOMPLETE: only 130.0 MB of 181.4 MB (<90%) — refusing to mark installed"). Own/install 313830 → confirm it marks **Installed**, not "Download incomplete."
+> - Left `/sdcard/Download/steam_dump.db` on device (harmless).
+> **🔁 USER REBOOTING DEVICE** → logcat-bridge token rotates; may need re-sync (`cp /data/data/com.termux/files/home/.logcat-bridge.token ~/.logcat-bridge.token` then `python3 ~/scratchpad/getlog.py ping`) before driving the device again.
+> **NEXT:** post-reboot → reproduce 313830 install (fail→pass). If proven → rebase `feat/depot-size-resolver` onto current main + FF-merge (no release cut) + reply to devaspe. Detail: memory `project_bannerlator_true_size_resolver`.
+
 ## 2026-07-06 — 🔨 CHECKPOINT: DepotSizeResolver built (branch `feat/depot-size-resolver`); help-crash fix MERGED to main `cbfc0d6`
 
 > **Help-button crash fix ✅ MERGED to main `cbfc0d6`** (rebased+FF, no version change). File Provider `?` NPE resolved (`null`→`View(context)`).
