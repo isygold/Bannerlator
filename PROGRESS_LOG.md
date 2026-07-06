@@ -1,5 +1,14 @@
 # Star-Compose — Progress Log
 
+## 2026-07-06 — ✅ EOD CHECKPOINT: DLC picker + download ETA/speed + fullscreen aspect-ratio ALL MERGED (main `c9d8df84`); #71 closed; Stage 2 deferred
+
+> **main = `c9d8df84`, combined artifacts build `28822949633` GREEN. Still vc38 → next stable 2.4-preN (vc39+). No release cut.** Everything from this session is now on main:
+> - **DLC picker** (`feat/dlc-picker` merged `37b0ac32`) — detail page "Choose DLC" → ModalBottomSheet of owned DLC checkboxes (scrollable + Done); uncheck → `SteamPrefs.excludedDlc` → dropped from the real download via explicit `AppItem.depot`/`manifest` list + sizes update live (`recomputeSizeDisplay`). Completion guard + progress denominators made exclusion-aware (else an opt-out DL would false-fail). **Device-proven** (JC3: all DLC unchecked → only 3 base depots fetched). Stage-2 unowned/locked rows DROPPED per user (keep list clean).
+> - **Download ETA + speed** (`8b371817`) — EMA-smoothed compressed-byte rate → `etaSeconds=(dTotal-dDone)/rate`, shown on detail page, download-manager row, AND FGS notification (`… 45% · 12.4 MB/s · ~8 min left`). `formatEta`/`formatDownloadSpeed` in DownloadModels; `DownloadEntry.speedBps/etaSeconds`. Hidden when paused/queued. Green, not device-tested.
+> - **Fullscreen aspect-ratio modes (issue #71)** (`c9d8df84`) — Off/Fit/Stretch replacing the stretch bool. `Container.fullscreenMode` int + JSON migration; all 3 renderers (GL/Vulkan/ASurface) branch on `isStretch()` (STRETCH→fill, OFF/FIT→ViewTransformation letterbox); TouchpadView letterbox mapping for FIT; per-container dropdown + per-game shortcut override + live drawer cycle **remembered per game**. **Device-proven on BOTH GL and Vulkan** (Titanfall 2 @1024×768 4:3 on 16:9 Pocket FIT: Off/Fit=pillarbox correct, Stretch=distorted wide). FILL/INTEGER enum-stubbed. Note: DXVK HUD stretches in Stretch mode = expected (baked into guest frame); app's own HUD is a host overlay and doesn't. **Issue #71 commented (commits+build+next-release+confirm-invite) and CLOSED.**
+>
+> **🔜 ONLY OPEN ITEM — Stage 2 fullscreen (FILL crop + INTEGER scaling): DEFERRED, build ONLY after the user is home on Wi-Fi** (he lost internet leaving work). FILL = ViewTransformation `max` instead of `min` (fill+crop, no distortion); INTEGER = floor(fit scale) (pixel-perfect, retro-only). Stage-1 plumbing done → incremental: VT math + each renderer's mode branch + touch mapping (fill crops / integer centers) + expose in the 2 dropdowns + drawer cycle. Will build, then ping kylinzang on #71 to test.
+
 ## 2026-07-06 — ✅ CHECKPOINT: DLC-ownership fix + size breakdown + magnifier no-dim MERGED (main `29d5006`); DLC picker on branch
 
 > **main `29d5006`, CI `28806902047` (artifacts-only) GREEN. Still vc38; next stable = 2.4-preN (vc39+). No release cut.** Everything below merged this session on top of the DepotSizeResolver line:
