@@ -1018,6 +1018,7 @@ public final class SteamRepository {
                         // and is always included. A depot with no public manifest can't be
                         // downloaded, so it is skipped entirely (contributes nothing).
                         StringBuilder depotSb = new StringBuilder();
+                        java.util.List<Integer> includedDlcIds = new java.util.ArrayList<>();  // owned DLC bundled with the game
                         long totalSize     = 0L;   // uncompressed (install) total — SELECTED depots only
                         long totalDownload = 0L;   // compressed (network) total — SELECTED depots only
                         int selectedCount = 0, skippedCount = 0;
@@ -1072,6 +1073,9 @@ public final class SteamRepository {
                                                     + " dlcappid=" + dlcAppId + " (DLC not owned)");
                                             skippedCount++; continue;
                                         }
+                                        // Owned DLC — its depot downloads with the game; record for the
+                                        // detail-page "Includes DLC:" line.
+                                        if (!includedDlcIds.contains(dlcAppId)) includedDlcIds.add(dlcAppId);
                                     } catch (NumberFormatException ignored) {}
                                 }
 
@@ -1118,6 +1122,13 @@ public final class SteamRepository {
                         // Drop any depot rows no longer selected (e.g. an unowned DLC depot a
                         // pre-filter sync stored) so the completion guard can't fail on them.
                         db.pruneDepots(app.getId(), depotSb.toString());
+                        // Record owned DLC bundled with the game (for the "Includes DLC:" line).
+                        StringBuilder dlcCsv = new StringBuilder();
+                        for (int id : includedDlcIds) {
+                            if (dlcCsv.length() > 0) dlcCsv.append(',');
+                            dlcCsv.append(id);
+                        }
+                        db.setIncludedDlc(app.getId(), dlcCsv.toString());
                         count++;
                     } catch (Exception e) {
                         Log.w(TAG, "Skipping app " + app.getId() + ": " + e.getMessage());

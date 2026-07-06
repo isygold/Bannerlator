@@ -329,6 +329,10 @@ object SteamDepotDownloader {
             return
         }
         dlog("Game: name='${row.name}' type=${row.type} sizeBytes=${row.sizeBytes}")
+        try {
+            val dlcNames = db.getIncludedDlcNames(appId)
+            if (dlcNames.isNotEmpty()) dlog("Including owned DLC: ${dlcNames.joinToString(", ")}")
+        } catch (_: Throwable) {}
 
         // Sanitise game name for directory usage
         val safeName = row.name.replace(Regex("[/\\\\:*?\"<>|]"), "_").trim()

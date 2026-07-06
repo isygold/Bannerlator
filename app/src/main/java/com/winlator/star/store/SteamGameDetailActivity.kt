@@ -105,6 +105,8 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
     private var sizeText by mutableStateOf("Size unknown")
     // Breakdown lines under the chips: download (compressed), PICS estimate (labeled), free space.
     private var sizeBreakdown by mutableStateOf(SizeBreakdown())
+    // "Includes DLC: <names>" — owned DLC that downloads with the game; "" hides the line.
+    private var includedDlcText by mutableStateOf("")
     // One-shot guard so the manifest-true size resolve fires at most once per detail view.
     private var sizeResolveStarted = false
     private var statusText by mutableStateOf("Not installed")
@@ -164,6 +166,7 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
                     typeText = typeText,
                     sizeText = sizeText,
                     sizeBreakdown = sizeBreakdown,
+                    includedDlcText = includedDlcText,
                     statusText = statusText,
                     gameStatus = gameStatus,
                     installBtnText = installBtnText,
@@ -508,6 +511,10 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
         // "~estimate". A background resolve then drops the "~" once the real size lands. cached() is a
         // pure DB read; resolve() is gated off the UI thread + off active downloads inside the resolver.
         refreshSizeUi(g)
+        includedDlcText = try {
+            val names = SteamRepository.getInstance().database.getIncludedDlcNames(g.appId)
+            if (names.isEmpty()) "" else "Includes DLC: " + names.joinToString(", ")
+        } catch (_: Throwable) { "" }
         maybeResolveRealSize()
 
         if (g.isInstalled) {
@@ -728,6 +735,7 @@ private fun SteamGameDetailScreen(
     typeText: String,
     sizeText: String,
     sizeBreakdown: SizeBreakdown,
+    includedDlcText: String,
     statusText: String,
     gameStatus: GameStatus,
     installBtnText: String,
@@ -856,6 +864,15 @@ private fun SteamGameDetailScreen(
                                 else MaterialTheme.colorScheme.error,
                     )
                 }
+            }
+            // Owned DLC that downloads alongside the game.
+            if (includedDlcText.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = includedDlcText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                )
             }
             Spacer(Modifier.height(8.dp))
             Text(

@@ -36,7 +36,9 @@ public final class SteamDatabase extends SQLiteOpenHelper {
     //     depot_manifests + steam_games — DepotSizeResolver sums ceil(fileSize/block) per file.
     // v6: reset real_disk_bytes — a v5 build computed it wrong (skipped every file, so it
     //     equalled real_size); zero it so the fixed block-rounding recomputes on next resolve.
-    private static final int    DB_VERSION = 6;
+    // v7: additive included_dlc (CSV of owned DLC appIds whose depots download with the game) on
+    //     steam_games — surfaced as an "Includes DLC:" line on the detail page.
+    private static final int    DB_VERSION = 7;
 
     // -------------------------------------------------------------------------
     // DDL
@@ -60,7 +62,10 @@ public final class SteamDatabase extends SQLiteOpenHelper {
             // DepotSizeResolver. 0 = unresolved → callers fall back to the PICS size_bytes estimate.
             "  real_size_bytes INTEGER NOT NULL DEFAULT 0," +
             // Estimated real on-disk footprint (block-rounded per-file sum). 0 = unresolved.
-            "  real_disk_bytes INTEGER NOT NULL DEFAULT 0" +
+            "  real_disk_bytes INTEGER NOT NULL DEFAULT 0," +
+            // CSV of owned DLC appIds whose depots download with this game (for the detail-page
+            // "Includes DLC:" line). Empty = no owned DLC bundled.
+            "  included_dlc TEXT NOT NULL DEFAULT ''" +
             ")";
 
     private static final String SQL_LICENSES =
@@ -180,6 +185,10 @@ public final class SteamDatabase extends SQLiteOpenHelper {
             try { db.execSQL("UPDATE steam_games SET real_disk_bytes = 0"); } catch (Exception e) {
                 Log.w(TAG, "v6 reset steam_games.real_disk_bytes: " + e.getMessage());
             }
+        }
+        // v6 → v7: ADDITIVE — included_dlc CSV column, default '', rows untouched.
+        if (oldVersion < 7) {
+            addColumnIfMissing(db, "steam_games", "included_dlc", "TEXT NOT NULL DEFAULT ''");
         }
     }
 
@@ -301,6 +310,39 @@ public final class SteamDatabase extends SQLiteOpenHelper {
         upd.put("genres",           cv.getAsString("genres"));
         upd.put("last_updated",     now);
         db.update("steam_games", upd, "app_id = ?", new String[]{String.valueOf(appId)});
+    }
+
+    /** Record the owned DLC (appId CSV) whose depots download with this game. Separate from
+     *  upsertGame so its signature (and all callers) stay unchanged. */
+    public void setIncludedDlc(int appId, String csv) {
+        ContentValues cv = new ContentValues();
+        cv.put("included_dlc", csv != null ? csv : "");
+        getWritableDatabase().update("steam_games", cv, "app_id = ?", new String[]{String.valueOf(appId)});
+    }
+
+    /** Display names of the owned DLC bundled with this game (resolved from included_dlc → steam_games.name).
+     *  Falls back to "DLC <appId>" when the DLC's own record hasn't been synced. Empty list = none. */
+    public List<String> getIncludedDlcNames(int appId) {
+        List<String> names = new ArrayList<>();
+        String csv;
+        try (Cursor c = getReadableDatabase().rawQuery(
+                "SELECT included_dlc FROM steam_games WHERE app_id = ?",
+                new String[]{String.valueOf(appId)})) {
+            if (!c.moveToNext()) return names;
+            csv = c.getString(0);
+        } catch (Exception e) { return names; }
+        if (csv == null || csv.isEmpty()) return names;
+        for (String part : csv.split(",")) {
+            String id = part.trim();
+            if (id.isEmpty()) continue;
+            String nm = null;
+            try (Cursor c = getReadableDatabase().rawQuery(
+                    "SELECT name FROM steam_games WHERE app_id = ?", new String[]{id})) {
+                if (c.moveToNext()) nm = c.getString(0);
+            } catch (Exception ignored) {}
+            names.add(nm != null && !nm.isEmpty() ? nm : "DLC " + id);
+        }
+        return names;
     }
 
     /** Mark a game as installed at the given path. */
