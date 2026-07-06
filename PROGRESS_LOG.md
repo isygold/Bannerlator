@@ -1,5 +1,12 @@
 # Star-Compose — Progress Log
 
+## 2026-07-06 — 🐞→✅ CHECKPOINT: File Provider help-button crash fixed (branch `fix/settings-help-crash`)
+
+> **Morning device-test of the main APK (`636f0ea`) surfaced a crash.** Settings → Experimental → *Enable File Provider* **`?` help button crashes the app.** Root cause (from on-device crash buffer, 07-06 05:10:57, `com.winlator.banner`): `java.lang.NullPointerException: …View.getContext() on a null object reference at AppUtils.showPopupWindow(AppUtils.java:168) ← at SettingsScreen.kt:808`. `SettingsScreen.kt:808` called `AppUtils.showHelpBox(context, null, R.string.help_file_provider)` — **null anchor**; `showPopupWindow` immediately does `anchor.getContext()`. It was the ONLY 1 of the app's 9 Compose help buttons passing `null`; the other 8 (ContainerDetailScreen ×4, cds/payload ×4) pass `View(context)`.
+> **Fix:** `null` → `android.view.View(context)` (fully-qualified, no import change), matching every other call site. The button itself is intentional — a help popup for the File Provider setting (`R.string.help_file_provider`); only the anchor was wrong.
+> **Branch `fix/settings-help-crash`** off main `5a583bc`, commit **`26b364b`**, pushed. **CI `28780961908` building.** On green → stage APK + offer FF-merge to main. NOT device-tested yet.
+> **State:** main = `5a583bc` (= `636f0ea` features + 2 docs commits). Combined main APK `bannerlator-main-636f0ea-standard.apk` (589,640,156 B, sha `c43660c2…`) staged. Everything since 2.3 still unreleased (vc38); next cut = 2.4-preN (vc39+).
+
 ## 2026-07-05 — 🌙 CHECKPOINT (end of day): ALL issue-session features MERGED to main `636f0ea`; main APK building; user testing in the morning
 
 > **main = `636f0ea`.** Everything on main SINCE 2.3 (vc38, unreleased — versionCode still 38): Save Backup/Restore v1+per-game+caution (`bc7d4dc`/`a8ddf7d`/`b46f174`/`da62916`/`0c2930a`/`53f528a`, restore device-proven, per-game backup untested); Scrape-cover-in-list (`087a8ca`); Vulkan magnifier cursor-follow #44 (`36b1962`+`0df8984`, device-proven, **#44 CLOSED**); container wallpaper picker + per-container/global + symlink fix #66 (`2420dbe`+`db27d1c`+`636f0ea`, device-proven, **#66 CLOSED w/ commit links**). Both issues closed on GitHub, each ships in 2.4-preN.
