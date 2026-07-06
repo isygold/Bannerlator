@@ -1473,12 +1473,14 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                     )
 
                     // Fullscreen aspect-ratio mode (#71) — per-game override. Index 0 = use the
-                    // container default; indices 1/2/3 map to Container.FULLSCREEN_OFF/FIT/STRETCH.
+                    // container default; indices 1..5 map to Container.FULLSCREEN_OFF/FIT/STRETCH/FILL/INTEGER.
                     val fsOverrideLabels = listOf(
                         stringResource(R.string.fullscreen_mode_default),
                         stringResource(R.string.fullscreen_mode_off),
                         stringResource(R.string.fullscreen_mode_fit),
-                        stringResource(R.string.fullscreen_mode_stretch)
+                        stringResource(R.string.fullscreen_mode_stretch),
+                        stringResource(R.string.fullscreen_mode_fill),
+                        stringResource(R.string.fullscreen_mode_integer)
                     )
                     val fsOverrideIdx = if (fullscreenModeOverride < 0) 0 else (fullscreenModeOverride + 1)
                         .coerceIn(1, fsOverrideLabels.size - 1)

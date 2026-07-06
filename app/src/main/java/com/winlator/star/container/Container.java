@@ -68,10 +68,8 @@ public class Container {
     public static final int FULLSCREEN_OFF = 0;      // windowed, letterboxed (preserve aspect)
     public static final int FULLSCREEN_FIT = 1;      // fullscreen-immersive, letterboxed (preserve aspect)
     public static final int FULLSCREEN_STRETCH = 2;  // fullscreen-immersive, fills surface (distorts aspect)
-    // TODO(#71 stage 2): FILL (crop-to-fill, no bars) and INTEGER (integer-scaled pixel-perfect) are
-    // reserved enum values only — NOT yet rendered. Until implemented they are treated as FIT.
-    public static final int FULLSCREEN_FILL = 3;
-    public static final int FULLSCREEN_INTEGER = 4;
+    public static final int FULLSCREEN_FILL = 3;     // fullscreen-immersive, crop-to-fill (preserve aspect, no bars)
+    public static final int FULLSCREEN_INTEGER = 4;  // fullscreen-immersive, largest whole-number scale (pixel-perfect, centered)
     private int fullscreenMode = FULLSCREEN_OFF;
     private byte startupSelection = STARTUP_SELECTION_ESSENTIAL;
     private String cpuList;
@@ -231,13 +229,14 @@ public class Container {
         this.fullscreenMode = stretched ? FULLSCREEN_STRETCH : FULLSCREEN_OFF;
     }
 
-    // In-game live cycle used by the drawer toggle: OFF -> FIT -> STRETCH -> OFF.
-    // Reserved FILL/INTEGER modes fall back to OFF here (not yet rendered).
+    // In-game live cycle used by the drawer toggle: OFF -> FIT -> STRETCH -> FILL -> INTEGER -> OFF.
     public static int nextFullscreenMode(int mode) {
         switch (mode) {
             case FULLSCREEN_OFF:     return FULLSCREEN_FIT;
             case FULLSCREEN_FIT:     return FULLSCREEN_STRETCH;
-            case FULLSCREEN_STRETCH: return FULLSCREEN_OFF;
+            case FULLSCREEN_STRETCH: return FULLSCREEN_FILL;
+            case FULLSCREEN_FILL:    return FULLSCREEN_INTEGER;
+            case FULLSCREEN_INTEGER: return FULLSCREEN_OFF;
             default:                 return FULLSCREEN_OFF;
         }
     }

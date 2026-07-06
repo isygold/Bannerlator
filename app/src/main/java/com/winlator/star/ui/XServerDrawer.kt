@@ -470,11 +470,13 @@ private fun GraphicsContent(state: XServerDrawerState) {
 
     HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
 
-    // Fullscreen aspect-ratio cycle (#71): OFF -> FIT -> STRETCH. Shows the current mode name.
+    // Fullscreen aspect-ratio cycle (#71): OFF -> FIT -> STRETCH -> FILL -> INTEGER. Shows the current mode name.
     val fullscreenMode by state.fullscreenMode.collectAsState()
     val fullscreenModeLabel = when (fullscreenMode) {
         1 -> stringResource(R.string.fullscreen_mode_fit)
         2 -> stringResource(R.string.fullscreen_mode_stretch)
+        3 -> stringResource(R.string.fullscreen_mode_fill)
+        4 -> stringResource(R.string.fullscreen_mode_integer)
         else -> stringResource(R.string.fullscreen_mode_off)
     }
     Row(

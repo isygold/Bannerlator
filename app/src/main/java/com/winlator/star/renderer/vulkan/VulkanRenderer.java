@@ -219,7 +219,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
 
     public void onSurfaceChanged(int width, int height) {
         surfaceWidth = width; surfaceHeight = height;
-        viewTransformation.update(width, height, xServer.screenInfo.width, xServer.screenInfo.height);
+        viewTransformation.update(width, height, xServer.screenInfo.width, xServer.screenInfo.height, fullscreenMode);
         synchronized (lock) {
             if (nativeHandle != 0) { nativeResize(nativeHandle, width, height); updateTransform(); }
         }
@@ -304,6 +304,12 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
 
     private void updateTransform() {
         if (nativeHandle == 0) return;
+        // Refresh the letterbox/crop/integer geometry for the current mode. updateTransform() is the
+        // single funnel for every mode/zoom/offset change, so recomputing here keeps FILL/INTEGER live
+        // on the in-game toggle without a surface change (STRETCH ignores viewTransformation anyway).
+        if (surfaceWidth > 0 && surfaceHeight > 0)
+            viewTransformation.update(surfaceWidth, surfaceHeight,
+                xServer.screenInfo.width, xServer.screenInfo.height, fullscreenMode);
         float zoom = magnifierZoom;
         if (isStretch()) {
             // Cursor-follow magnifier (parity with GLRenderer.drawFrame). The native compositor

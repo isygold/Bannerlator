@@ -107,13 +107,16 @@ public class TouchpadView extends View {
     }
 
     private void updateXform(int outerWidth, int outerHeight, int innerWidth, int innerHeight) {
+        int fullscreenMode = xServer.getRenderer().getFullscreenMode();
         ViewTransformation viewTransformation = new ViewTransformation();
-        viewTransformation.update(outerWidth, outerHeight, innerWidth, innerHeight);
+        viewTransformation.update(outerWidth, outerHeight, innerWidth, innerHeight, fullscreenMode);
 
         float invAspect = 1.0f / viewTransformation.aspect;
-        // OFF/FIT both letterbox (uniform, aspect-preserving); only STRETCH uses the non-uniform map.
-        // Gate on the mode, not isFullscreen(), because isFullscreen() is now true for FIT too (#71).
-        if (xServer.getRenderer().getFullscreenMode() != Container.FULLSCREEN_STRETCH) {
+        // OFF/FIT/FILL/INTEGER are all uniform, aspect-preserving maps (letterbox bars for FIT/INTEGER,
+        // negative offset crop for FILL) — the inverse is subtract-offset then divide-by-aspect for all
+        // of them. Only STRETCH is non-uniform. Gate on the mode, not isFullscreen(), because
+        // isFullscreen() is now true for FIT too (#71).
+        if (fullscreenMode != Container.FULLSCREEN_STRETCH) {
             XForm.makeTranslation(xform, -viewTransformation.viewOffsetX, -viewTransformation.viewOffsetY);
             XForm.scale(xform, invAspect, invAspect);
         } else

@@ -137,7 +137,7 @@ public class ASurfaceRenderer implements HostRenderer,
     public void onSurfaceChanged(Surface surface, int width, int height) {
         surfaceWidth = width;
         surfaceHeight = height;
-        viewTransformation.update(width, height, xServer.screenInfo.width, xServer.screenInfo.height);
+        viewTransformation.update(width, height, xServer.screenInfo.width, xServer.screenInfo.height, fullscreenMode);
         if (!surfaceInitialized) {
             onSurfaceCreated(surface);
         } else {
@@ -158,6 +158,11 @@ public class ASurfaceRenderer implements HostRenderer,
 
     private void updateTransform() {
         if (!surfaceInitialized) return;
+        // Refresh letterbox/crop/integer geometry for the current mode so the in-game toggle updates
+        // live (setFullscreenMode -> updateTransform/updateScene). STRETCH ignores viewTransformation.
+        if (surfaceWidth > 0 && surfaceHeight > 0)
+            viewTransformation.update(surfaceWidth, surfaceHeight,
+                    xServer.screenInfo.width, xServer.screenInfo.height, fullscreenMode);
         if (isStretch()) {
             nativeScanoutSetDst(0, 0, surfaceWidth, surfaceHeight);
         } else {

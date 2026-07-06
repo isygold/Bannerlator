@@ -246,7 +246,7 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
 
         surfaceWidth = width;
         surfaceHeight = height;
-        viewTransformation.update(width, height, xServer.screenInfo.width, xServer.screenInfo.height);
+        recomputeViewTransformation();
         viewportNeedsUpdate = true;
         if (nativeMode && scanout != null) {
             scanout.setSurfaceSize(surfaceWidth, surfaceHeight);
@@ -259,6 +259,7 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
         if (toggleFullscreen) {
             fullscreenMode = Container.nextFullscreenMode(fullscreenMode);
             toggleFullscreen = false;
+            recomputeViewTransformation();
             viewportNeedsUpdate = true;
             if (nativeMode) updateScanoutDst();
         }
@@ -543,8 +544,20 @@ public class GLRenderer implements GLSurfaceView.Renderer, WindowManager.OnWindo
     @Override public void setFullscreenMode(int mode) {
         this.fullscreenMode = mode;
         viewportNeedsUpdate = true;
+        // Recompute the letterbox/crop/integer geometry on the GL thread (pure math, but keep it
+        // ordered with the frame that consumes it). STRETCH ignores viewTransformation, but the
+        // others read it, so it must reflect the new mode before the next draw.
+        xServerView.queueEvent(this::recomputeViewTransformation);
         if (nativeMode) xServerView.queueEvent(this::updateScanoutDst);
         xServerView.requestRender();
+    }
+
+    // Rebuild viewTransformation for the current surface size + fullscreen mode. Safe to call from
+    // the GL thread only (matches the surface fields it reads).
+    private void recomputeViewTransformation() {
+        if (surfaceWidth <= 0 || surfaceHeight <= 0) return;
+        viewTransformation.update(surfaceWidth, surfaceHeight,
+                xServer.screenInfo.width, xServer.screenInfo.height, fullscreenMode);
     }
     public float getMagnifierZoom() { return magnifierZoom; }
     public void setMagnifierZoom(float magnifierZoom) { this.magnifierZoom = magnifierZoom; xServerView.requestRender(); }

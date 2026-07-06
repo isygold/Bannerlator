@@ -605,11 +605,14 @@ private fun TopLevelFields(
         }
 
         // Fullscreen aspect-ratio mode (#71): Off (windowed letterbox) / Fit (letterbox) /
-        // Stretch (fill). Option index maps 1:1 to Container.FULLSCREEN_OFF/FIT/STRETCH.
+        // Stretch (fill) / Fill (crop) / Integer (pixel-perfect). Option index maps 1:1 to
+        // Container.FULLSCREEN_OFF/FIT/STRETCH/FILL/INTEGER.
         val fullscreenModeLabels = listOf(
             stringResource(R.string.fullscreen_mode_off),
             stringResource(R.string.fullscreen_mode_fit),
-            stringResource(R.string.fullscreen_mode_stretch)
+            stringResource(R.string.fullscreen_mode_stretch),
+            stringResource(R.string.fullscreen_mode_fill),
+            stringResource(R.string.fullscreen_mode_integer)
         )
         val fsSelIdx = viewModel.fullscreenMode.coerceIn(0, fullscreenModeLabels.size - 1)
         LabeledDropdown(
