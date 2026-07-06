@@ -36,7 +36,9 @@ import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.Downloader
 import com.winlator.star.core.TarCompressorUtils
+import com.winlator.star.store.download.formatEta
 import com.winlator.star.ui.findActivity
+import com.winlator.star.util.ImportEtaTracker
 import com.winlator.star.util.InAppFilePicker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -70,6 +72,9 @@ fun ContentDownloadSheet(
     var installProgress by remember { mutableStateOf<Map<String, Float>>(emptyMap()) }
     var installingKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
     var fileInstalling by remember { mutableStateOf(false) }
+    // Determinate extraction progress for the manual "install from file" path (null = unknown size).
+    var fileInstallFraction by remember { mutableStateOf<Float?>(null) }
+    var fileInstallEta by remember { mutableStateOf("") }
     var showInfoProfile by remember { mutableStateOf<ContentProfile?>(null) }
     var confirmRemoveProfile by remember { mutableStateOf<ContentProfile?>(null) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
@@ -92,8 +97,11 @@ fun ContentDownloadSheet(
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         (result.data?.data ?: InAppFilePicker.pickedUri(result.data))?.let { uri ->
             fileInstalling = true
-            installContent(context, cm, uri, onProgress = {}) { ok ->
+            fileInstallFraction = null
+            fileInstallEta = ""
+            installContent(context, cm, uri, onProgress = { f, eta -> fileInstallFraction = f; fileInstallEta = eta }) { ok ->
                 fileInstalling = false
+                fileInstallFraction = null
                 if (ok) {
                     loadProfiles(cm, contentTypes) { profiles = it }
                     refreshKey++
@@ -177,7 +185,17 @@ fun ContentDownloadSheet(
                         modifier = Modifier.weight(1f),
                     )
                     if (fileInstalling) {
-                        CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                        val frac = fileInstallFraction
+                        if (frac != null) {
+                            // Determinate: percent + ETA for large extractions.
+                            CircularProgressIndicator(progress = { frac }, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            val eta = fileInstallEta.takeIf { it.isNotEmpty() }?.let { " · $it" } ?: ""
+                            Text("${(frac * 100).toInt()}%$eta", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } else {
+                            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                        }
                     } else {
                         var showPickMenu by remember { mutableStateOf(false) }
                         Box {
@@ -258,7 +276,7 @@ fun ContentDownloadSheet(
                                                     downloadingKeys = downloadingKeys - key
                                                     downloadProgress = downloadProgress - key
                                                     installProgress = installProgress + (key to 0f)
-                                                    installContent(context, cm, uri, onProgress = { f ->
+                                                    installContent(context, cm, uri, onProgress = { f, _ ->
                                                         // Monotonic: ignore the brief XZ-probe reset before the ZSTD pass.
                                                         val prev = installProgress[key] ?: 0f
                                                         installProgress = installProgress + (key to maxOf(prev, f))
@@ -438,17 +456,21 @@ private fun installContent(
     context: Context,
     cm: ContentsManager,
     uri: Uri,
-    onProgress: (Float) -> Unit,
+    onProgress: (fraction: Float, etaText: String) -> Unit,
     onDone: (Boolean) -> Unit,
 ) {
     val activity = context.findActivity()
     if (activity == null) { onDone(false); return }
     // Byte-accurate denominator = the compressed source size (file uris only; 0 for content uris).
     val total = uri.path?.let { runCatching { File(it).length() }.getOrDefault(0L) } ?: 0L
+    val etaTracker = ImportEtaTracker()
     Executors.newSingleThreadExecutor().execute {
         try {
             val progress = TarCompressorUtils.OnReadProgressListener { read, tot ->
-                if (tot > 0) activity.runOnUiThread { onProgress((read.toFloat() / tot).coerceIn(0f, 1f)) }
+                if (tot > 0) {
+                    val p = etaTracker.update(read, tot)
+                    activity.runOnUiThread { onProgress((read.toFloat() / tot).coerceIn(0f, 1f), formatEta(p.etaSeconds)) }
+                }
             }
             cm.extraContentFile(uri, total, progress, object : ContentsManager.OnInstallFinishedCallback {
                 var phase = 0
@@ -462,7 +484,7 @@ private fun installContent(
                             cm.finishInstallContent(profile, this)
                         } else {
                             cm.syncContents()
-                            activity.runOnUiThread { onProgress(1f); onDone(true) }
+                            activity.runOnUiThread { onProgress(1f, ""); onDone(true) }
                         }
                     } catch (e: Exception) {
                         e.printStackTrace()
