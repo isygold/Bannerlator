@@ -91,6 +91,11 @@ object XServerDrawerState {
     private val _currentRefreshRate = MutableStateFlow(0)
     val currentRefreshRate: StateFlow<Int> = _currentRefreshRate
 
+    // Current fullscreen aspect-ratio mode (#71): Container.FULLSCREEN_OFF/FIT/STRETCH. Shown next
+    // to the in-game "Toggle Fullscreen" row so the user sees which mode the cycle landed on.
+    private val _fullscreenMode = MutableStateFlow(0)
+    val fullscreenMode: StateFlow<Int> = _fullscreenMode
+
     private val _fpsExpanded = MutableStateFlow(false)
     val fpsExpanded: StateFlow<Boolean> = _fpsExpanded
 
@@ -175,6 +180,8 @@ object XServerDrawerState {
 
     fun setNativeRenderingEnabled(v: Boolean) { _nativeRenderingEnabled.value = v }
     fun getNativeRenderingEnabled(): Boolean = _nativeRenderingEnabled.value
+
+    fun setFullscreenMode(v: Int) { _fullscreenMode.value = v }
 
     fun setBionicFgActive(v: Boolean)      { _bionicFgActive.value = v }
     fun setFrameGenEnabled(v: Boolean)     { _frameGenEnabled.value = v }

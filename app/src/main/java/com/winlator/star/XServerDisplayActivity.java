@@ -638,8 +638,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Drawer HUD/FPS tab opened — refresh the live display-rate readout.
         state.onRefreshRatePoll = this::updateCurrentRefreshRate;
         state.onToggleFullscreen       = () -> {
-            xServerView.getRenderer().toggleFullscreen();
+            // Cycle OFF -> FIT -> STRETCH -> OFF via the renderer (#71), then remember the choice
+            // PER GAME: to the per-game shortcut override if launched from one, else the container.
+            HostRenderer r = xServerView.getRenderer();
+            int next = Container.nextFullscreenMode(r.getFullscreenMode());
+            r.setFullscreenMode(next);
             touchpadView.toggleFullscreen();
+            XServerDrawerState.INSTANCE.setFullscreenMode(next);
+            if (shortcut != null) {
+                shortcut.putExtra("fullscreenMode", String.valueOf(next));
+                shortcut.putExtra("fullscreenStretched", null); // clear legacy so it can't override
+                shortcut.saveData();
+            } else if (container != null) {
+                container.setFullscreenMode(next);
+                container.saveData();
+            }
         };
         state.onPauseResume            = () -> setPausedState(!isPaused);
         state.onPipMode                = () -> enterPictureInPictureMode();
@@ -2324,25 +2337,24 @@ public class XServerDisplayActivity extends AppCompatActivity {
             startDxApiDetection(rendererMode + " | ", dxName);
         }
 
-        // Get the fullscreen stretched extra from the shortcut if available
-        String shortcutFullscreenStretched = shortcut != null ? shortcut.getExtra("fullscreenStretched") : null;
-
-        // Proceed based on container and shortcut settings
-        boolean shouldStretch = false;
-
-        if (shortcut != null && shortcutFullscreenStretched != null) {
-            // Shortcut exists and has a valid setting
-            shouldStretch = shortcutFullscreenStretched.equals("1");
-        } else if (container != null && container.isFullscreenStretched()) {
-            // No shortcut or shortcut doesn't override, use the container's setting
-            shouldStretch = true;
+        // Resolve the fullscreen aspect-ratio mode (#71): a per-game shortcut override wins, else the
+        // container's setting, with backward-compat for the legacy per-game "fullscreenStretched".
+        int fullscreenMode = Container.FULLSCREEN_OFF;
+        String scMode = shortcut != null ? shortcut.getExtra("fullscreenMode") : "";
+        String scStretched = shortcut != null ? shortcut.getExtra("fullscreenStretched") : "";
+        if (shortcut != null && scMode != null && !scMode.isEmpty()) {
+            try { fullscreenMode = Integer.parseInt(scMode); } catch (NumberFormatException ignored) {}
+        } else if (shortcut != null && scStretched != null && !scStretched.isEmpty()) {
+            fullscreenMode = scStretched.equals("1") ? Container.FULLSCREEN_STRETCH : Container.FULLSCREEN_OFF;
+        } else if (container != null) {
+            fullscreenMode = container.getFullscreenMode();
         }
 
-        if (shouldStretch) {
-            // Toggle fullscreen mode based on the final decision
-            renderer.toggleFullscreen();
-            touchpadView.toggleFullscreen();
-        }
+        // Apply to the renderer. FIT and STRETCH are both fullscreen-immersive (bars already hidden
+        // for the whole session via AppUtils.hideSystemUI); OFF is the default windowed letterbox.
+        renderer.setFullscreenMode(fullscreenMode);
+        XServerDrawerState.INSTANCE.setFullscreenMode(fullscreenMode);
+        if (fullscreenMode != Container.FULLSCREEN_OFF) touchpadView.toggleFullscreen();
 
         if (shortcut != null) {
             String controlsProfile = shortcut.getExtra("controlsProfile");

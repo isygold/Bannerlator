@@ -86,6 +86,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -469,6 +470,13 @@ private fun GraphicsContent(state: XServerDrawerState) {
 
     HorizontalDivider(color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 6.dp))
 
+    // Fullscreen aspect-ratio cycle (#71): OFF -> FIT -> STRETCH. Shows the current mode name.
+    val fullscreenMode by state.fullscreenMode.collectAsState()
+    val fullscreenModeLabel = when (fullscreenMode) {
+        1 -> stringResource(R.string.fullscreen_mode_fit)
+        2 -> stringResource(R.string.fullscreen_mode_stretch)
+        else -> stringResource(R.string.fullscreen_mode_off)
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -478,7 +486,14 @@ private fun GraphicsContent(state: XServerDrawerState) {
             .clickable { state.onToggleFullscreen?.run(); state.onClose?.run() }
             .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
-        Text("Toggle Fullscreen", color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(stringResource(R.string.fullscreen_mode), color = MaterialTheme.colorScheme.onSurface)
+            Text(
+                fullscreenModeLabel,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
         Icon(
             painter = painterResource(R.drawable.icon_fullscreen),
             contentDescription = null,
