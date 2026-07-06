@@ -7,6 +7,7 @@ import android.view.Surface;
 import android.widget.Toast;
 
 import com.winlator.star.R;
+import com.winlator.star.container.Container;
 import com.winlator.star.renderer.GPUImage;
 import com.winlator.star.renderer.HostRenderer;
 import com.winlator.star.renderer.ViewTransformation;
@@ -35,7 +36,9 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private final Object lock = new Object();
 
     public final ViewTransformation viewTransformation = new ViewTransformation();
-    private boolean fullscreen = false;
+    // Fullscreen aspect-ratio mode (#71). STRETCH fills the surface (distorts); OFF/FIT letterbox.
+    private int fullscreenMode = Container.FULLSCREEN_OFF;
+    private boolean isStretch() { return fullscreenMode == Container.FULLSCREEN_STRETCH; }
     private float magnifierZoom = 1.0f;
     private boolean screenOffsetYRelativeToCursor = false;
     public int surfaceWidth;
@@ -302,7 +305,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
     private void updateTransform() {
         if (nativeHandle == 0) return;
         float zoom = magnifierZoom;
-        if (fullscreen) {
+        if (isStretch()) {
             // Cursor-follow magnifier (parity with GLRenderer.drawFrame). The native compositor
             // normalises this transform by containerWidth/Height (= the GUEST screenInfo dims; see
             // VulkanRendererContext::recordCmdBuf push constants), and the window positions it
@@ -429,7 +432,7 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
             nativeSetRenderList(nativeHandle, ids, xs, ys, n);
             return;
         }
-        if (fullscreen) {
+        if (isStretch()) {
             int n = list.size() - start;
             if (n <= 0) { nativeSetRenderList(nativeHandle, new long[0], new int[0], new int[0], 0); return; }
             long[] ids = new long[n]; int[] xs = new int[n]; int[] ys = new int[n];
@@ -848,8 +851,14 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         if (fr instanceof FrameRating) classicHudRef = (FrameRating) fr;
     }
 
-    public boolean isFullscreen() { return fullscreen; }
-    public void toggleFullscreen() { fullscreen = !fullscreen; synchronized (lock) { updateTransform(); } xServerView.queueEvent(this::updateScene); }
+    public boolean isFullscreen() { return fullscreenMode != Container.FULLSCREEN_OFF; }
+    public int getFullscreenMode() { return fullscreenMode; }
+    public void setFullscreenMode(int mode) {
+        fullscreenMode = mode;
+        synchronized (lock) { updateTransform(); }
+        xServerView.queueEvent(this::updateScene);
+    }
+    public void toggleFullscreen() { setFullscreenMode(Container.nextFullscreenMode(fullscreenMode)); }
     public void setScreenOffsetYRelativeToCursor(boolean b) { screenOffsetYRelativeToCursor = b; synchronized (lock) { updateTransform(); } }
     public boolean isScreenOffsetYRelativeToCursor() { return screenOffsetYRelativeToCursor; }
     public void setMagnifierZoom(float zoom) {

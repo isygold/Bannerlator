@@ -18,6 +18,7 @@ import android.widget.FrameLayout;
 import androidx.preference.PreferenceManager;
 
 import com.winlator.star.R;
+import com.winlator.star.container.Container;
 import com.winlator.star.core.AppUtils;
 import com.winlator.star.math.Mathf;
 import com.winlator.star.math.XForm;
@@ -110,7 +111,9 @@ public class TouchpadView extends View {
         viewTransformation.update(outerWidth, outerHeight, innerWidth, innerHeight);
 
         float invAspect = 1.0f / viewTransformation.aspect;
-        if (!xServer.getRenderer().isFullscreen()) {
+        // OFF/FIT both letterbox (uniform, aspect-preserving); only STRETCH uses the non-uniform map.
+        // Gate on the mode, not isFullscreen(), because isFullscreen() is now true for FIT too (#71).
+        if (xServer.getRenderer().getFullscreenMode() != Container.FULLSCREEN_STRETCH) {
             XForm.makeTranslation(xform, -viewTransformation.viewOffsetX, -viewTransformation.viewOffsetY);
             XForm.scale(xform, invAspect, invAspect);
         } else
