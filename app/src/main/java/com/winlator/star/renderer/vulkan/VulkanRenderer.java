@@ -305,8 +305,23 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
         float cx = surfaceWidth / 2f;
         float cy = surfaceHeight / 2f;
         if (fullscreen) {
-            nativeSetTransform(nativeHandle,
-                cx * (1f - zoom), cy * (1f - zoom), zoom, zoom);
+            // Cursor-follow magnifier (parity with GLRenderer.drawFrame). The native compositor
+            // normalises this transform by containerWidth/Height (= the GUEST screenInfo dims; see
+            // VulkanRendererContext::recordCmdBuf push constants), and the window positions it
+            // composites are already in guest pixels. xServer.pointer.getX/getY are ALSO guest
+            // coordinates, so the entire offset is computed in GUEST space with no surface-pixel
+            // scaling. (The old code pivoted around surfaceWidth/2, i.e. the wrong point whenever
+            // guest res != surface res; guest dims are the correct space here.)
+            float gw = xServer.screenInfo.width;
+            float gh = xServer.screenInfo.height;
+            float px = xServer.pointer.getX();
+            float py = xServer.pointer.getY();
+            // Keep the point under the cursor fixed under zoom, then clamp so the magnified content
+            // still covers the screen (no black gutters). At zoom == 1 the clamp range collapses to
+            // [0,0] -> identity, independent of the pointer.
+            float ox = Math.max(gw * (1f - zoom), Math.min(0f, gw * 0.5f - px * zoom));
+            float oy = Math.max(gh * (1f - zoom), Math.min(0f, gh * 0.5f - py * zoom));
+            nativeSetTransform(nativeHandle, ox, oy, zoom, zoom);
             viewTransformation.update(surfaceWidth, surfaceHeight,
                 xServer.screenInfo.width, xServer.screenInfo.height);
             nativeScanoutSetDst(nativeHandle,
@@ -557,7 +572,10 @@ public class VulkanRenderer implements WindowManager.OnWindowModificationListene
                 if (cursor != null) { hotX = (short)cursor.hotSpotX; hotY = (short)cursor.hotSpotY; }
                 nativeScanoutSetCursorPos(nativeHandle, x, y, hotX, hotY);
             }
-            if (screenOffsetYRelativeToCursor) updateTransform();
+            // Vulkan is event-driven (no continuous render loop), so the magnifier transform must
+            // be recomputed on pointer motion for the zoomed region to track the cursor; GLRenderer
+            // gets this for free from its per-frame render loop. Re-transform while magnified too.
+            if (screenOffsetYRelativeToCursor || magnifierZoom != 1.0f) updateTransform();
         }
     }
 
