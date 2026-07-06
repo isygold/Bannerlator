@@ -985,7 +985,20 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
     var lcAll by remember { mutableStateOf(shortcut.getExtra("lc_all", shortcut.container.getLC_ALL())) }
 
     // Checkboxes / switches
-    var fullscreenStretched by remember { mutableStateOf(shortcut.getExtra("fullscreenStretched", "0") == "1") }
+    // Per-game fullscreen aspect-ratio override (#71): -1 = use container default, else
+    // Container.FULLSCREEN_OFF/FIT/STRETCH. Migrates the legacy per-game "fullscreenStretched".
+    var fullscreenModeOverride by remember {
+        mutableStateOf(
+            run {
+                val m = shortcut.getExtra("fullscreenMode")
+                when {
+                    m.isNotEmpty() -> m.toIntOrNull() ?: -1
+                    shortcut.getExtra("fullscreenStretched", "") == "1" -> com.winlator.star.container.Container.FULLSCREEN_STRETCH
+                    else -> -1
+                }
+            }
+        )
+    }
     // Close the session when this game exits — per-game override, defaults to the container's setting (ON).
     var autoCloseOnExit by remember {
         mutableStateOf(shortcut.getExtra("autoCloseOnExit", shortcut.container.getExtra("autoCloseOnExit", "1")) == "1")
@@ -1217,7 +1230,10 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
             putExtra("emulator", StringUtils.parseIdentifier(selectedEmulator))
             putExtra("midiSoundFont", midiVal.ifEmpty { null })
             putExtra("lc_all", lcAll)
-            putExtra("fullscreenStretched", if (fullscreenStretched) "1" else null)
+            // #71: write the per-game mode override (or null = use container default) and clear the
+            // legacy boolean so it can never shadow the new key.
+            putExtra("fullscreenMode", if (fullscreenModeOverride < 0) null else fullscreenModeOverride.toString())
+            putExtra("fullscreenStretched", null)
             putExtra("autoCloseOnExit", if (autoCloseOnExit) "1" else "0")
             putExtra("inputType", finalInputType.toString())
             putExtra("exclusiveXInput", if (exclusiveXInput) "1" else "0")
@@ -1456,11 +1472,25 @@ private fun ShortcutSettingsDialogScreen(shortcut: Shortcut, onDismiss: () -> Un
                         singleLine = true
                     )
 
-                    // Fullscreen stretched
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Checkbox(checked = fullscreenStretched, onCheckedChange = { fullscreenStretched = it })
-                        Text(stringResource(R.string.fullscreen_stretched))
-                    }
+                    // Fullscreen aspect-ratio mode (#71) — per-game override. Index 0 = use the
+                    // container default; indices 1/2/3 map to Container.FULLSCREEN_OFF/FIT/STRETCH.
+                    val fsOverrideLabels = listOf(
+                        stringResource(R.string.fullscreen_mode_default),
+                        stringResource(R.string.fullscreen_mode_off),
+                        stringResource(R.string.fullscreen_mode_fit),
+                        stringResource(R.string.fullscreen_mode_stretch)
+                    )
+                    val fsOverrideIdx = if (fullscreenModeOverride < 0) 0 else (fullscreenModeOverride + 1)
+                        .coerceIn(1, fsOverrideLabels.size - 1)
+                    LabeledDropdown(
+                        label = stringResource(R.string.fullscreen_mode),
+                        options = fsOverrideLabels,
+                        selectedOption = fsOverrideLabels[fsOverrideIdx],
+                        onSelect = { sel ->
+                            val idx = fsOverrideLabels.indexOf(sel)
+                            fullscreenModeOverride = if (idx <= 0) -1 else idx - 1
+                        }
+                    )
 
                     // Close the session when this game exits (per-game override; container default is ON)
                     Row(verticalAlignment = Alignment.CenterVertically) {

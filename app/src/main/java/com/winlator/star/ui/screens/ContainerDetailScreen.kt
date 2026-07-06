@@ -604,15 +604,21 @@ private fun TopLevelFields(
             }
         }
 
-        // Fullscreen Stretched
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Switch(
-                checked = viewModel.fullscreenStretched,
-                onCheckedChange = { viewModel.fullscreenStretched = it }
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(stringResource(R.string.fullscreen_stretched))
-        }
+        // Fullscreen aspect-ratio mode (#71): Off (windowed letterbox) / Fit (letterbox) /
+        // Stretch (fill). Option index maps 1:1 to Container.FULLSCREEN_OFF/FIT/STRETCH.
+        val fullscreenModeLabels = listOf(
+            stringResource(R.string.fullscreen_mode_off),
+            stringResource(R.string.fullscreen_mode_fit),
+            stringResource(R.string.fullscreen_mode_stretch)
+        )
+        val fsSelIdx = viewModel.fullscreenMode.coerceIn(0, fullscreenModeLabels.size - 1)
+        LabeledDropdown(
+            label = stringResource(R.string.fullscreen_mode),
+            options = fullscreenModeLabels,
+            selectedOption = fullscreenModeLabels[fsSelIdx],
+            onSelect = { viewModel.fullscreenMode = fullscreenModeLabels.indexOf(it).coerceAtLeast(0) }
+        )
+        Spacer(Modifier.height(8.dp))
 
         // Frame Generation engine: Off / bionic-fg / lsfg-vk (mutually exclusive). lsfg-vk is grayed
         // out until a Lossless.dll is imported (Settings). This is the ONLY per-container FG control;
