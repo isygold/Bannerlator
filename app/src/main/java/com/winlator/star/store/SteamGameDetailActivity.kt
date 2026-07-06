@@ -29,7 +29,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -903,15 +905,20 @@ private fun SteamGameDetailScreen(
                     )
                 }
             }
-            // Owned DLC that downloads alongside the game — tap to choose which to include.
+            // Owned DLC that downloads alongside the game — with a clear button to choose which.
             if (includedDlcText.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "$includedDlcText  ·  Edit",
+                    text = includedDlcText,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable { onDlcLineClick() },
                 )
+                OutlinedButton(
+                    onClick = onDlcLineClick,
+                    modifier = Modifier.padding(top = 6.dp),
+                ) {
+                    Text("Choose DLC")
+                }
             }
             Spacer(Modifier.height(8.dp))
             Text(
@@ -1027,7 +1034,13 @@ private fun SteamGameDetailScreen(
     if (showDlcSheet) {
         val sheetState = rememberModalBottomSheetState()
         ModalBottomSheet(onDismissRequest = onDismissDlcSheet, sheetState = sheetState) {
-            Column(modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 32.dp)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .navigationBarsPadding()
+                    .padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
+            ) {
                 Text(
                     text = "DLC to download",
                     style = MaterialTheme.typography.titleMedium,
@@ -1057,6 +1070,12 @@ private fun SteamGameDetailScreen(
                         )
                     }
                 }
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = onDismissDlcSheet,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(10.dp),
+                ) { Text("Done") }
             }
         }
     }
