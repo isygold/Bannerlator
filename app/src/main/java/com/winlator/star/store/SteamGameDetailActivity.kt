@@ -411,34 +411,59 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
      * installed game the estimate is replaced by the REAL measured footprint (async, best-effort).
      */
     private fun refreshSizeUi(g: SteamGame) {
-        val cs = try { DepotSizeResolver.cached(g.appId) } catch (_: Throwable) { null }
-        val resolved   = cs != null && cs.complete
-        val picsInstall = g.sizeBytes
-        val footprint  = if (resolved && cs!!.realDiskBytes > 0L) cs.realDiskBytes else picsInstall
+        recomputeSizeDisplay(g)
+        maybeResolveRealSize()
+        if (g.isInstalled && g.installDir.isNotEmpty()) measureInstalledFootprint(g)
+    }
 
-        // Headline: real footprint (no "~") once resolved, else the PICS-based estimate.
+    /**
+     * Pure recompute of the size chips/breakdown from the depot rows, DROPPING any DLC the user opted
+     * out of — so unchecking DLC lowers the shown download / on-disk / PICS numbers live. Sums per
+     * depot (real sizes where resolved, PICS otherwise) instead of the app-level totals so exclusions
+     * are honoured. Safe to call on the UI thread (pure DB read).
+     */
+    private fun recomputeSizeDisplay(g: SteamGame) {
+        val rows = try { SteamRepository.getInstance().database.getDepotManifests(g.appId) } catch (_: Throwable) { emptyList() }
+        val kept = rows.filter { it.depotId !in excludedDlc }
+        var pics = 0L; var install = 0L; var download = 0L; var disk = 0L
+        var anyResolved = false; var allResolved = kept.isNotEmpty()
+        for (r in kept) {
+            pics += r.sizeBytes
+            if (r.realSizeBytes > 0L) {
+                anyResolved = true
+                install  += r.realSizeBytes
+                download += r.realDownloadBytes
+                disk     += if (r.realDiskBytes > 0L) r.realDiskBytes else r.realSizeBytes
+            } else {
+                allResolved = false
+                install += r.sizeBytes
+                disk    += r.sizeBytes
+            }
+        }
+        // Empty depot table (not synced) → fall back to the app-level PICS size.
+        if (rows.isEmpty()) { pics = g.sizeBytes; disk = g.sizeBytes }
+        val resolved  = allResolved && anyResolved
+        val footprint = if (resolved && disk > 0L) disk else pics
+
         sizeText = when {
             footprint > 0L && resolved -> "${fmtSize(footprint)} on disk"
             footprint > 0L             -> "~${fmtSize(footprint)} on disk"
             else                       -> "Size unknown"
         }
 
-        // Download (compressed) — resolved value if sane (0 < download <= install), else PICS estimate.
-        val resolvedDownload = cs?.realDownloadBytes ?: 0L
-        val downloadBytes = if (resolvedDownload in 1..maxOf(picsInstall, resolvedDownload)) resolvedDownload
+        // Download (compressed): the resolved per-depot sum is exclusion-aware; before resolve fall
+        // back to the app-level PICS download estimate (not exclusion-aware, shown only until resolve).
+        val downloadBytes = if (resolved && download in 1..maxOf(pics, download)) download
                             else try { SteamRepository.getInstance().getSelectedDownloadSize(g.appId) } catch (_: Throwable) { 0L }
 
         val free = try { freeInstallBytes() } catch (_: Throwable) { -1L }
-        // "Won't fit" only matters before install (an installed game already fits).
         val fits = g.isInstalled || free < 0L || footprint <= 0L || free >= footprint
         sizeBreakdown = SizeBreakdown(
             downloadLabel = if (downloadBytes > 0L) "Download: ${fmtSize(downloadBytes)}" else "",
-            picsLabel     = if (picsInstall > 0L)   "PICS estimate (Steam): ${fmtSize(picsInstall)}" else "",
+            picsLabel     = if (pics > 0L) "PICS estimate (Steam): ${fmtSize(pics)}" else "",
             freeLabel     = if (free >= 0L) "Free space: ${fmtSize(free)}" + (if (!fits) " — won't fit" else "") else "",
             fits          = fits,
         )
-
-        if (g.isInstalled && g.installDir.isNotEmpty()) measureInstalledFootprint(g)
     }
 
     /** The "Includes DLC:" label from the owned DLC minus the user's opt-outs. "" hides the line
@@ -458,6 +483,7 @@ class SteamGameDetailActivity : ComponentActivity(), SteamRepository.SteamEventL
         excludedDlc = next
         try { SteamPrefs.setExcludedDlc(g.appId, next) } catch (_: Throwable) {}
         includedDlcText = buildIncludedDlcText()
+        recomputeSizeDisplay(g)   // drop the unticked DLC from the shown download/on-disk/PICS sizes
     }
 
     /** Available bytes on the partition the games install to. */
