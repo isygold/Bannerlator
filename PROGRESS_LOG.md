@@ -1,5 +1,20 @@
 # Star-Compose — Progress Log
 
+## 2026-07-06 — 🚀 RELEASE CHECKPOINT: BANNERLATOR 2.4 SHIPPED (stable, latest) — main `c4010ce0`, vc39
+
+> **2.4 is LIVE and marked latest:** https://github.com/The412Banner/Bannerlator/releases/tag/2.4 — built by `release.yml` run `28834510336` (3 flavors standard/pubg/ludashi ~589 MB + `update.json` vc39 so the in-app updater offers it to everyone). versionCode 38→39, versionName 2.3→2.4. Release body = polished markdown (logo banner + shields.io badge chips + feature blocks + issue links + credits); README thoroughly updated (What's New in 2.4, 2.3 nested to history, Full Features refreshed, new "Community reports & requests" credits block). **NEXT stable = 2.5; anything built from here = 2.5-preN, vc40+ until told to cut.**
+>
+> **Everything in 2.4 (all merged to main this session, all device-proven):**
+> - **Stage 2 fullscreen (#71)** — FILL (crop-to-fill, no bars/no distortion = `ViewTransformation.aspect = max(sx,sy)`) + INTEGER (`max(1,floor(min))`, pixel-perfect centered), on top of Stage-1 Off/Fit/Stretch. Centralized in `ViewTransformation.update(...,mode)` → all 3 renderers (GL/Vulkan/ASurface) + TouchpadView inverse-map; STRETCH stays the only renderer-special-cased mode. Live-recompute on toggle/setter. **5-button SEGMENTED drawer selector** (applies live, drawer stays open; new `onSetFullscreenMode` IntConsumer → `applyFullscreenMode()`). GL device-proven (Titanfall2 screenshots) + user-confirmed all fullscreen.
+> - **In-app file picker (#73)** — reuse the REAL File Manager (`FileManagerScreen` pick-mode) via new themed `FilePickerActivity` for ALL imports (WCP/assets, ICP, wallpaper, icons, saves, settings, shortcuts, adrenotools, BigPicture); SAF kept as secondary "Pick via system…"; picked path wrapped `Uri.fromFile` so downstream import code unchanged; large imports show determinate **percent+ETA** (`ImportEtaTracker`, reuses download `formatEta`). New: `FilePickerActivity.kt`, `util/InAppFilePicker.kt`, `util/ImportEtaTracker.kt`. Device-proven.
+> - **File Manager image thumbnails** — image files (jpg/jpeg/png/webp/bmp/gif) render real thumbnails (Coil, 36dp decode, cached, async, generic-icon fallback) instead of the generic file icon. Device-confirmed on the Select-wallpaper screen.
+> - **Per-game persistence** — scaling mode (was session-only, reverted to base filter; now saved on pick Vulkan `onUpscalerApply`+GL `onGlUpscalerApply`, restored via `resolveScalingMode()`, restored preset≥3 forces Native OFF at seed), fullscreen mode, and FPS-HUD drag position (all 3 overlays fire `onMovedListener` → keys hudPosCV/CH/GH, one-shot layout-listener restore, clamped).
+> - Earlier in the session (also 2.4): DLC picker + DepotSizeResolver true-size install fix + detail-page size breakdown + download ETA/speed; container wallpaper picker (#66); Vulkan magnifier cursor-follow + no-dim (#44); save backup/restore; help-button crash fix; list-view scrape cover.
+>
+> **Issues:** **#73 CLOSED** (shipped) + **#75 CLOSED** (Soft Stretch ≈ our Fill; upscalers already present; DLSS not feasible on Adreno/Mali — replied w/ real ReShade effect list) — both linked to the 2.4 release. Left open (not shipped): #74 (DRS/presets), #70+#54 (Mali/BCn), #68 (iQOO crash), #65/#61/#56/#30.
+>
+> **Credits handed out** (release notes + README): @kylinzang (#71, #73), @SombraShadow (#66), @abdogm (#44), @Devaspe (install-blocker), + upstream stack. Upstream-source triage done earlier (5 sources, nothing to adopt; GameNative Turnip driver eval DROPPED per user). 2.4 release-notes HTML preview artifact published + saved to device (`/sdcard/Download/bannerlator-2.4-release-notes.html` + `-release.md`).
+
 ## 2026-07-06 — ✅ EOD CHECKPOINT: DLC picker + download ETA/speed + fullscreen aspect-ratio ALL MERGED (main `c9d8df84`); #71 closed; Stage 2 deferred
 
 > **main = `c9d8df84`, combined artifacts build `28822949633` GREEN. Still vc38 → next stable 2.4-preN (vc39+). No release cut.** Everything from this session is now on main:
