@@ -1521,6 +1521,9 @@ internal fun GraphicsDriverConfigDialog(
     var bcnEmulation     by remember { mutableStateOf(cfg["bcnEmulation"] ?: "auto") }
     var bcnEmulationType by remember { mutableStateOf(cfg["bcnEmulationType"] ?: "software") }
     var bcnEmulationCache by remember { mutableStateOf(cfg["bcnEmulationCache"] ?: "0") }
+    // WRAPPER_BCN_ASTC — integrated-wrapper (Wrapper-gamenative/leegao) ASTC transcode path.
+    // Off by default; only honored by the BCn-integrated wrapper ICD, ignored by others.
+    var bcnEmulationAstc by remember { mutableStateOf(cfg["bcnEmulationAstc"] == "1") }
     var syncFrame        by remember { mutableStateOf(cfg["syncFrame"] == "1") }
     var disablePresentWait by remember { mutableStateOf(cfg["disablePresentWait"] == "1") }
     var fdDevFeatures    by remember { mutableStateOf(cfg["fdDevFeatures"] == "1") }
@@ -1652,6 +1655,14 @@ internal fun GraphicsDriverConfigDialog(
                 Spacer(Modifier.height(8.dp))
                 LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation_cache), bcnCacheEntries, bcnEmulationCache, { bcnEmulationCache = it })
                 Spacer(Modifier.height(8.dp))
+                // ASTC transcode is offered by the BCn-integrated wrapper (Wrapper-gamenative).
+                // The Wrapper + bcn_layer driver has its own ASTC control in its section below.
+                if (!isBcnLayer) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = bcnEmulationAstc, onCheckedChange = { bcnEmulationAstc = it })
+                        Text(stringResource(R.string.graphics_driver_bcn_emulation_astc))
+                    }
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = syncFrame, onCheckedChange = { syncFrame = it })
                     Text(stringResource(R.string.graphics_driver_sync_frame))
@@ -1748,6 +1759,7 @@ internal fun GraphicsDriverConfigDialog(
                     "bcnEmulation=$bcnEmulation;" +
                     "bcnEmulationType=$bcnEmulationType;" +
                     "bcnEmulationCache=$bcnEmulationCache;" +
+                    "bcnEmulationAstc=${if (bcnEmulationAstc) "1" else "0"};" +
                     "bcnLayerAuto=${if (bcnLayerAuto) "1" else "0"};" +
                     "bcnTranscodeEtc2=${if (bcnTranscodeEtc2) "1" else "0"};" +
                     "bcnTranscodeAstc=${if (bcnTranscodeAstc) "1" else "0"};" +

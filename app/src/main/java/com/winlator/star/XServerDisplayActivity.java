@@ -3229,6 +3229,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
         String bcnEmulationCache = graphicsDriverConfig.get("bcnEmulationCache");
         if (bcnEmulationCache != null) envVars.put("WRAPPER_USE_BCN_CACHE", bcnEmulationCache);
+
+        // WRAPPER_BCN_ASTC — integrated-wrapper ASTC transcode target (Wrapper-gamenative build
+        // honors this; older/non-BCn wrappers ignore it). Only emit when the user opts in.
+        String bcnEmulationAstc = graphicsDriverConfig.get("bcnEmulationAstc");
+        if ("1".equals(bcnEmulationAstc)) envVars.put("WRAPPER_BCN_ASTC", "1");
     }
     else {
         // === bcn_layer activation ===

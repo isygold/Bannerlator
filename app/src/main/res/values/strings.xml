@@ -666,6 +666,7 @@ E.g. <b>META</b> for <i>META key</i>, \n
     <string name="graphics_driver_bcn_emulation">BCn Emulation</string>
     <string name="graphics_driver_bcn_emulation_type">BCn Emulation Type</string>
     <string name="graphics_driver_bcn_emulation_cache">BCn Emulation Cache</string>
+    <string name="graphics_driver_bcn_emulation_astc">BCn → ASTC transcode</string>
     <string name="bcn_layer_section">BCn Layer Settings</string>
     <string name="bcn_layer_section_hint">Transcodes BC-compressed textures on GPUs without native BCn (Mali / Xclipse / PowerVR). The layer ships as an implicit Vulkan layer; these controls drive its environment.</string>
     <string name="bcn_layer_force_decode">Force decode on all GPUs</string>
