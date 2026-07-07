@@ -1606,13 +1606,6 @@ internal fun GraphicsDriverConfigDialog(
     val bcnEmulationEntries = remember { context.resources.getStringArray(R.array.bcn_emulation_entries).toList() }
     val bcnTypeEntries      = remember { context.resources.getStringArray(R.array.bcn_emulation_type_entries).toList() }
     val bcnCacheEntries     = remember { context.resources.getStringArray(R.array.bcn_emulation_cache_entries).toList() }
-    val bcnMaxTexEntries    = remember { context.resources.getStringArray(R.array.bcn_max_texture_size_entries).toList() }
-    // Config key bcnMaxTextureSize stores the numeric env value ("0"/"1024"/...); "0" == Uncapped.
-    var bcnMaxTexEntry by remember {
-        val stored = cfg["bcnMaxTextureSize"] ?: "0"
-        mutableStateOf(if (stored == "0" || stored.isEmpty()) bcnMaxTexEntries.first()
-                       else bcnMaxTexEntries.firstOrNull { it == stored } ?: bcnMaxTexEntries.first())
-    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1729,8 +1722,6 @@ internal fun GraphicsDriverConfigDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(Modifier.height(8.dp))
-                        LabeledDropdown(stringResource(R.string.bcn_layer_max_texture_size), bcnMaxTexEntries, bcnMaxTexEntry, { bcnMaxTexEntry = it })
-                        Spacer(Modifier.height(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = bcnDebugLog, onCheckedChange = { bcnDebugLog = it })
                             Text(stringResource(R.string.bcn_layer_debug_log))
@@ -1761,7 +1752,6 @@ internal fun GraphicsDriverConfigDialog(
                     "bcnTranscodeEtc2=${if (bcnTranscodeEtc2) "1" else "0"};" +
                     "bcnTranscodeAstc=${if (bcnTranscodeAstc) "1" else "0"};" +
                     "bcnImageView=${if (bcnImageView) "1" else "0"};" +
-                    "bcnMaxTextureSize=${if (bcnMaxTexEntry == "Uncapped") "0" else bcnMaxTexEntry};" +
                     "bcnDebugLog=${if (bcnDebugLog) "1" else "0"};" +
                     "gpuName=$gpuName" +
                     ";fdDevFeatures=${if (fdDevFeatures) "1" else "0"}"

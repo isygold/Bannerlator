@@ -3259,17 +3259,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
         String imageView = graphicsDriverConfig.get("bcnImageView");
         envVars.put("BCN_COMPUTE_IMAGE_VIEW", "0".equals(imageView) ? "0" : "1");
 
-        // Low-VRAM cap. 0 == uncapped (default), else 1024/2048/4096.
-        String maxTex = graphicsDriverConfig.get("bcnMaxTextureSize");
-        if (maxTex == null || maxTex.isEmpty() || maxTex.equals("Uncapped")) maxTex = "0";
-        envVars.put("BCN_MAX_TEXTURE_SIZE", maxTex);
-
-        // Optional debug log. Host-absolute path (the guest runs on the host fs, like VK_ICD_FILENAMES).
+        // Optional debug log. The shader-v3 layer's logger writes to STDERR (not a file), which
+        // Winlator captures via the Wine debug log (Settings > Logs > Enable Wine Debug). The old
+        // BCN_LF/BCN_LL (file logging) and BCN_MAX_TEXTURE_SIZE were removed upstream in shader-v3.
         String debugLog = graphicsDriverConfig.get("bcnDebugLog");
-        if ("1".equals(debugLog)) {
-            envVars.put("BCN_LF", new File(imageFs.getRootDir(), "tmp/bcn_layer.log").getAbsolutePath());
-            envVars.put("BCN_LL", "info");
-        }
+        if ("1".equals(debugLog))
+            envVars.put("BCN_LAYER_LOG_LEVEL", "info,error");
         } // activateBcnLayer
     }
 
