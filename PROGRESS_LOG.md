@@ -1,5 +1,20 @@
 # Star-Compose — Progress Log
 
+## 2026-07-06 — 🟢 CHECKPOINT: Mali BCn layer DEVICE-PROVEN + shader-v3 swap done (branch `feat/mali-bcn-layer` `e3f4f90b`, CI green, in testing)
+
+> **NOT on main — on branch `feat/mali-bcn-layer` (rebased onto 2.4 main `15c7186c` → shader-v3 swap `e3f4f90b`), CI `28837058621` GREEN. Test build handed to Mali testers on #70. Merges as 2.5-preN once confirmed.**
+>
+> **✅ Mali device-proof (issue #70):** @kylinzang tested our earlier "Wrapper + bcn_layer" build on **Helio G99 / Mali-G57 MC2** — **MiSide** (BCn Unity game, previously crashed / black-purple textures) now **runs + renders correctly**. First real Mali proof (we can't test on the user's Adreno). Perf heavy (16-24fps, GPU 98-100%) but playable. He flagged 3 bugs: (1) BCn debug-log toggle DEAD (shipped `.so` had no logger), (2) `wrapper_DestroyBuffer: null buffer` batches per scene-load (non-fatal), (3) `BCN_MAX_TEXTURE_SIZE` unverifiable. And requested leegao's **shader-v3** (~3.5× faster ASTC).
+>
+> **✅ shader-v3 swap (this session):** rebased branch onto 2.4 main (1 trivial import conflict), then:
+> - Swapped `app/src/main/assets/graphics_driver/extra_libs.tzst` → `usr/lib/libbcn_layer.so` to leegao's **shader-v3** Release asset (arm64-v8a, NDK r29, kept **UNSTRIPPED** per user's debug-symbols call → tzst 18.8→29.8MB, **STRIP before merge**). Layer manifest identical, unchanged.
+> - **Env-var reconcile:** kept `ENABLE_BCN_COMPUTE`/`BCN_COMPUTE_AUTO`/`BCN_TRANSCODE_TO_ETC2`/`BCN_TRANSCODE_TO_ASTC`/`BCN_COMPUTE_IMAGE_VIEW`; **dropped** `BCN_LF`/`BCN_LL` (v3 logs to **stderr**→Wine debug log) → replaced with `BCN_LAYER_LOG_LEVEL=info,error` (debug-log toggle now works); **dropped** `BCN_MAX_TEXTURE_SIZE` (removed upstream) → removed its dropdown + array + string. v3 ASTC needs `VK_KHR_8bit_storage`+`shaderInt8` (Valhall Mali have it; self-disables gracefully otherwise).
+> - **✅ ADRENO-SAFE (confirmed, triple-gated):** bcn_layer block only runs on the "Wrapper + bcn_layer" driver + hardcoded `getVendorID() != 0x5143` (Qualcomm) gate + Vulkan-loader `enable_environment` → `ENABLE_BCN_COMPUTE` NEVER set on Adreno. Only cost to others = ~11MB APK from the unstripped `.so`.
+>
+> **Issues consolidated:** #70 = single Mali/BCn tracking issue (retitled; roadmap checklist). #54 closed into it; #53/#63/#64 already closed. #30 (@rizky2-crypto, Dimensity 8200 / **Mali-G610** / CODMW loading-screen crash) invited as 2nd Mali tester — kept OPEN until BCn confirmed to fix it. Both testers have the direct Actions build link (run `28837058621`).
+>
+> **CREDITS:** leegao already in README (line 382); **explicitly credit shader-v3 in the 2.5 release notes** (BCn ships in 2.5, not 2.4) — user asked. **NEXT:** await Mali test results (kylinzang before/after fps + working debug log; rizky2-crypto CODMW) → strip `.so` → merge 2.5-preN.
+
 ## 2026-07-06 — 🚀 RELEASE CHECKPOINT: BANNERLATOR 2.4 SHIPPED (stable, latest) — main `c4010ce0`, vc39
 
 > **2.4 is LIVE and marked latest:** https://github.com/The412Banner/Bannerlator/releases/tag/2.4 — built by `release.yml` run `28834510336` (3 flavors standard/pubg/ludashi ~589 MB + `update.json` vc39 so the in-app updater offers it to everyone). versionCode 38→39, versionName 2.3→2.4. Release body = polished markdown (logo banner + shields.io badge chips + feature blocks + issue links + credits); README thoroughly updated (What's New in 2.4, 2.3 nested to history, Full Features refreshed, new "Community reports & requests" credits block). **NEXT stable = 2.5; anything built from here = 2.5-preN, vc40+ until told to cut.**
