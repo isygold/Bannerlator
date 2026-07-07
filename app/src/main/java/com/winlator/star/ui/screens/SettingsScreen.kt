@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -960,7 +961,11 @@ fun SettingsScreen(onSaved: () -> Unit = {}) {
             onDismissRequest = { showDebugChannelDialog = false },
             title = { Text("Wine Debug Channels") },
             text = {
-                Column {
+                // Hundreds of channels — bound the height and scroll so the whole
+                // alphabetical list (vulkan, heap, …) stays reachable, not just the top.
+                Column(modifier = Modifier
+                    .heightIn(max = 400.dp)
+                    .verticalScroll(rememberScrollState())) {
                     allChannels.forEach { channel ->
                         val checked = channel in selectedSet.value
                         Row(verticalAlignment = Alignment.CenterVertically,
