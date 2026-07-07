@@ -3267,9 +3267,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Optional debug log. The shader-v3 layer's logger writes to STDERR (not a file), which
         // Winlator captures via the Wine debug log (Settings > Logs > Enable Wine Debug). The old
         // BCN_LF/BCN_LL (file logging) and BCN_MAX_TEXTURE_SIZE were removed upstream in shader-v3.
+        // shader-v3 only actually emits its transfer log when BOTH the log level AND the transfer
+        // profiler are enabled (@kylinzang, #70). BCN_LAYER_LOG_LEVEL alone is silent — the profiler
+        // is what drives the per-transfer log lines — so set the pair together.
         String debugLog = graphicsDriverConfig.get("bcnDebugLog");
-        if ("1".equals(debugLog))
+        if ("1".equals(debugLog)) {
             envVars.put("BCN_LAYER_LOG_LEVEL", "info,error");
+            envVars.put("BCN_PROFILE_TRANSFERS", "1");
+        }
         } // activateBcnLayer
     }
 

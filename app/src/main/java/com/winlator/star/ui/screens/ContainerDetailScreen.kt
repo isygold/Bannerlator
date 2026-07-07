@@ -1530,6 +1530,11 @@ internal fun GraphicsDriverConfigDialog(
 
     // --- BCn Layer (leegao bcn_layer) settings; only meaningful when driver == wrapper-bcn_layer ---
     val isBcnLayer = graphicsDriver == "wrapper-bcn_layer"
+    // The integrated-BCn wrapper (Wrapper-gamenative) is the only wrapper ICD that actually honors
+    // WRAPPER_BCN_ASTC (see XServerDisplayActivity BCn env block). The older wrappers
+    // (original/leegao/legacy) ignore it, and Wrapper + bcn_layer has its own ASTC control
+    // (bcnTranscodeAstc), so the general "BCn -> ASTC transcode" toggle belongs to gamenative only.
+    val isGamenative = graphicsDriver == "wrapper-gamenative"
     var bcnSectionExpanded by remember { mutableStateOf(false) }
     // Force decode on all GPUs -> BCN_COMPUTE_AUTO=0. Default ON (the Mali force-decode fix).
     var bcnLayerAuto      by remember { mutableStateOf(cfg["bcnLayerAuto"]?.let { it == "1" } ?: true) }
@@ -1656,8 +1661,10 @@ internal fun GraphicsDriverConfigDialog(
                 LabeledDropdown(stringResource(R.string.graphics_driver_bcn_emulation_cache), bcnCacheEntries, bcnEmulationCache, { bcnEmulationCache = it })
                 Spacer(Modifier.height(8.dp))
                 // ASTC transcode is offered by the BCn-integrated wrapper (Wrapper-gamenative).
-                // The Wrapper + bcn_layer driver has its own ASTC control in its section below.
-                if (!isBcnLayer) {
+                // The Wrapper + bcn_layer driver has its own ASTC control in its section below;
+                // the older wrappers ignore WRAPPER_BCN_ASTC entirely, so only expose it here for
+                // the gamenative integrated-BCn wrapper.
+                if (isGamenative) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = bcnEmulationAstc, onCheckedChange = { bcnEmulationAstc = it })
                         Text(stringResource(R.string.graphics_driver_bcn_emulation_astc))
