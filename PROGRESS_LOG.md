@@ -1,5 +1,19 @@
 # Star-Compose — Progress Log
 
+## 2026-07-06 — 🔧 CHECKPOINT: dev-environment tooling + bridge knowledge corrected (no repo code change)
+
+> **Session tooling/infra work (lives in `~/.local/bin` + memory, not the app repo). Main unchanged at `34cf6249`. Mali v3 build re-staged & awaiting Mali testers.**
+>
+> **Root-bridge knowledge CORRECTED (was hobbling us):** live-tested the logcat-bridge daemon (`~/logcat-bridge/module/system/bin/logcat-bridge-handler`) — its `exec|sh` verb runs `/system/bin/sh -c "$cmd"` and PRESERVES the command, so **pipes / grep / redirects / `$?` DO work ON-DEVICE**. The long-standing "never pipe / bare-verbs-only" rule was WRONG (a local-shell-quoting artifact, not a daemon limit). Real rule: pass the whole remote command as ONE quoted string. The daemon already exposes full root + safe verbs (`tail`/`pkg` logcat, `tomb`, `ps`, `props`, `proc`, `cat`/`ls`/`sql`, binary `write` preserving uid:gid:mode) — **no module change needed**. (Shizuku/no-root backend = separate future idea for the non-root community; the module needs on-device dev for that.)
+>
+> **3 persistent CLI helpers added to `~/.local/bin` (on PATH, survive every session):**
+> - **`bridge '<cmd>'`** — run a root command on the device; auto-syncs the token (kills boot-drift "auth failed"), pipes run on-device. Bare verbs (`bridge ping|tomb|ps|pkg <pkg> -d|cat …`) pass through.
+> - **`ci-watch <branch>`** — dispatch "CI Build (artifacts only)" → auto-capture run id → watch → GREEN/RED + failing-log tail. **Refuses to build main/master implicitly** (footgun guard — a bare test-run accidentally dispatched+was cancelled `28838588161`, hence the guard).
+> - **`stage-apk <run-id|branch> <label> [flavor]`** — download the test APK → stage `/sdcard/Download/bannerlator-<label>-<sha7>-<flavor>.apk` → **host+device sha256 match** via `bridge`. Live-proven: `stage-apk 28837058621 mali-v3` → match ✓.
+> - Chain: `ci-watch <branch> && stage-apk <branch> <label>`. Env overrides BANNER_REPO/WF/DIR/STAGE_DIR. All recorded in [[reference_logcat_bridge_root_access]] + MEMORY always-hot.
+>
+> **Mali v3 status (unchanged, awaiting testers):** branch `feat/mali-bcn-layer` `e3f4f90b`, CI `28837058621` GREEN, staged `bannerlator-mali-v3-e3f4f90-standard.apk` (600,577,679 B, sha `184b71ad…`). @kylinzang (G57/MiSide) + @rizky2-crypto (G610/CODMW, #30) invited on #70.
+
 ## 2026-07-06 — 🟢 CHECKPOINT: Mali BCn layer DEVICE-PROVEN + shader-v3 swap done (branch `feat/mali-bcn-layer` `e3f4f90b`, CI green, in testing)
 
 > **NOT on main — on branch `feat/mali-bcn-layer` (rebased onto 2.4 main `15c7186c` → shader-v3 swap `e3f4f90b`), CI `28837058621` GREEN. Test build handed to Mali testers on #70. Merges as 2.5-preN once confirmed.**
