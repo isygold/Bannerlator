@@ -1853,6 +1853,7 @@ internal fun DxvkConfigDialog(
                                     try {
                                         withContext(Dispatchers.IO) {
                                             val cm = ContentsManager(context)
+                                            cm.syncContents()
                                             val expectedName = "vegas-$selectedDxvk"
                                             val profile = cm.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_VEGAS)
                                                 .firstOrNull { it.verName == expectedName }
