@@ -236,7 +236,8 @@ fun ContainerDetailScreen(
                 ";presentMode=${viewModel.rendererPresentMode}" +
                 ";driverId=${viewModel.rendererDriverId}" +
                 ";filterMode=${viewModel.rendererFilterMode}" +
-                ";swapRB=${viewModel.rendererSwapRB}",
+                ";swapRB=${viewModel.rendererSwapRB}" +
+                ";sfCompatMode=${viewModel.rendererSfCompatMode}",
             onConfirm = { newConfig ->
                 val m = parseVulkanConfig(newConfig)
                 viewModel.rendererNative      = m["native"] == "true"
@@ -244,6 +245,8 @@ fun ContainerDetailScreen(
                 viewModel.rendererDriverId    = m["driverId"] ?: "system"
                 viewModel.rendererFilterMode  = m["filterMode"]?.toIntOrNull() ?: 0
                 viewModel.rendererSwapRB      = m["swapRB"] == "true"
+                // Default ON: absent token (old config) resolves to true (correct colours).
+                viewModel.rendererSfCompatMode = m["sfCompatMode"] != "false"
                 showVulkanConfig = false
             },
             onDismiss = { showVulkanConfig = false }
@@ -327,6 +330,9 @@ internal fun VulkanSettingsDialog(
     // persisted value round-trips through this dialog and still seeds the launch default.
     val filterMode = remember { cfg["filterMode"]?.toIntOrNull() ?: 0 }
     var swapRB by remember { mutableStateOf(cfg["swapRB"] == "true") }
+    // SurfaceFlinger (ASR) BGRA->RGBA colour correction (GN #1620). Default ON — an absent token
+    // (old config) resolves to true. ASR-only; independent of swapRB (Vulkan/GL).
+    var sfCompatMode by remember { mutableStateOf(cfg["sfCompatMode"] != "false") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -386,11 +392,25 @@ internal fun VulkanSettingsDialog(
                     Text(stringResource(R.string.renderer_swap_rb), Modifier.weight(1f))
                     Switch(checked = swapRB, onCheckedChange = { swapRB = it })
                 }
+
+                // SurfaceFlinger colour correction (ASR-only, GN #1620). Label + hint so users know
+                // this only affects the SurfaceFlinger renderer and defaults to on (correct colours).
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.renderer_sf_compat))
+                        Text(
+                            stringResource(R.string.renderer_sf_compat_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(checked = sfCompatMode, onCheckedChange = { sfCompatMode = it })
+                }
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                val config = "native=$nativeRender;presentMode=$presentMode;driverId=$driverId;filterMode=$filterMode;swapRB=$swapRB"
+                val config = "native=$nativeRender;presentMode=$presentMode;driverId=$driverId;filterMode=$filterMode;swapRB=$swapRB;sfCompatMode=$sfCompatMode"
                 onConfirm(config)
             }) {
                 Text(stringResource(android.R.string.ok))
