@@ -169,7 +169,7 @@ fun VegasDownloadSheet(
                                         scope.launch {
                                             val uri = withContext(Dispatchers.IO) {
                                                 downloadWcp(context, url, release.tagName) { progress ->
-                                                    withContext(Dispatchers.Main) { downloadProgress = progress }
+                                                    downloadProgress = progress
                                                 }
                                             }
                                             downloadingTag = null
