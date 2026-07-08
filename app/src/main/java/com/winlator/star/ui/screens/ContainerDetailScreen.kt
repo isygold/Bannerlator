@@ -392,20 +392,11 @@ internal fun VulkanSettingsDialog(
                     Text(stringResource(R.string.renderer_swap_rb), Modifier.weight(1f))
                     Switch(checked = swapRB, onCheckedChange = { swapRB = it })
                 }
-
-                // SurfaceFlinger colour correction (ASR-only, GN #1620). Label + hint so users know
-                // this only affects the SurfaceFlinger renderer and defaults to on (correct colours).
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.renderer_sf_compat))
-                        Text(
-                            stringResource(R.string.renderer_sf_compat_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(checked = sfCompatMode, onCheckedChange = { sfCompatMode = it })
-                }
+                // NOTE: "Correct SurfaceFlinger colours" (sfCompatMode) is NOT shown here — this
+                // dialog only opens for the Vulkan renderer, and that toggle only affects
+                // SurfaceFlinger. It's surfaced inline under the Renderer dropdown instead (see
+                // below). sfCompatMode is still round-tripped through this dialog's config so a
+                // Vulkan user hitting OK never drops the stored value.
             }
         },
         confirmButton = {
@@ -552,6 +543,27 @@ private fun TopLevelFields(
                 onConfirm = { viewModel.selectedRenderer = "SurfaceFlinger"; showSfWarning = false },
                 onDismiss = { showSfWarning = false }
             )
+        }
+        // SurfaceFlinger colour correction (ASR-only, GN #1620) — surfaced inline under the renderer
+        // choice, only when SurfaceFlinger is selected (mirrors the per-game shortcut editor). The
+        // renderer-settings gear only appears for Vulkan, so this toggle would otherwise be
+        // unreachable for the very renderer it applies to.
+        if (viewModel.selectedRenderer == "SurfaceFlinger") {
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(stringResource(R.string.renderer_sf_compat))
+                    Text(
+                        stringResource(R.string.renderer_sf_compat_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = viewModel.rendererSfCompatMode,
+                    onCheckedChange = { viewModel.rendererSfCompatMode = it }
+                )
+            }
         }
         Spacer(Modifier.height(8.dp))
 
