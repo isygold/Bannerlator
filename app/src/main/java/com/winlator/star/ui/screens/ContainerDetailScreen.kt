@@ -1741,7 +1741,7 @@ internal fun DxvkConfigDialog(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val config = remember(initialConfig) { DXVKConfigDialog.parseConfig(initialConfig) }
-    val activity = context.findActivity()
+    val activity = context.findActivity()!!
     var isProcessing by remember { mutableStateOf(false) }
 
     val allDxvkVersions = remember { mutableStateOf(listOf<String>()) }
