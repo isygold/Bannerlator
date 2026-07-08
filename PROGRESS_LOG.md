@@ -1,5 +1,19 @@
 # Star-Compose — Progress Log
 
+## 2026-07-08 — 🚧 2.6-pre: port GameNative #1620 (+#1644) — ASR SurfaceFlinger crash + BGRA→RGBA color fix
+
+> **Branch `feat/asr-gn1620` off main `0ff4df95` (clean post-2.5 base). NOT yet CI-verified/device-tested. 2.6-preN material.**
+>
+> **What:** ported GN's consolidated ASR hardening PR #1620 (+#1644) — fences on CPU images (fixes the SurfaceFlinger CPU-image crash + tearing), `R8G8B8A8_UNORM` + GPU_FRAMEBUFFER/CPU_READ_OFTEN AHB flags, and a GPU BGRA→RGBA converter (GLES3.1 compute / GLES3.0 fragment fallback, dedicated EGL thread) that fixes ASR's swapped red/blue colors.
+>
+> **Renderer-split reconciliation (the delicate part):** GN split `GPUImage extends Texture` → new abstract `NativeTexture` base with two concretes — `GPUImage` (GL/Vulkan/DRI3/Present, our socket-present buffer) and new `AHBImage` (fenced 3-buffer CPU scanout swapchain). **We deliberately did NOT adopt GN's DRI3-→-AHBImage change:** socket/present buffers stay `GPUImage`, so every `(GPUImage)` cast in `VulkanRenderer` (:494/:540), `PresentExtension`, `DRI3Extension:156` is untouched → **Vulkan present path unchanged, GL unchanged.** Only ASR CPU chrome (gated on `Drawable.DRAWABLE_FOR_ASR`, default false) now uses AHBImage. Game frame under ASR = still GPUImage, presented direct; converter transiently imports it so BGRA→RGBA still applies.
+>
+> **Files:** native `cpp/asurfacerenderer/` += `blit_converter.{cpp,h}`, `ahbimage.c` (own `libahbimage.so`), rewritten `ASurfaceRendererContext.{cpp,h}` + `asurface_jni.cpp`, `GPU_CONVERTER_README.md`; CMake += blit_converter into `asurface_renderer` (+EGL/GLESv3) and new `ahbimage` lib. Java `com.winlator.star.renderer` += `NativeTexture`, `AHBImage`; `GPUImage` now `extends NativeTexture` (minimal); `ASurfaceRenderer` (AHBImage vs GPUImage routing + `setSfCompatMode` toggle, default true=convert + #1644 half-rate HUD tick); `xserver/Drawable` (ASR-mode → AHBImage, `instanceof GPUImage`→`NativeTexture`, additive/gated). Built from source (no prebuilt .so copied). Removed GN's unused `asurfacerenderer/drawable.c` (swap handled in the converter).
+>
+> **Color toggle hook (for UI wiring, TODO):** `ASurfaceRenderer.setSfCompatMode(bool)` (default true) → last arg of `nativeSetWindowBuffer` → `ASurfaceRendererContext::setWindowBuffer(...)`. true=converted RGBA (glitch-free), false=direct BGRA. Wire at `XServerDisplayActivity` :2268 `instanceof ASurfaceRenderer` block, mirroring `container.getRendererSwapRB()` pattern (:2216/:2249). Plan: relabel to "Color channels: Auto/RGBA/BGRA". Pair with SurfaceFlinger native-toggle grey-out.
+>
+> **Watch on device (all THREE renderers, not just ASR):** Vulkan present (the shared-GPUImage regression risk), ASR first-frame timing (`future.get()` synchronous per game frame), low-RAM AHBImage swapchain memory (4 AHBs/Drawable). Commits: `e58aa517`, `b4a7f7e1`, `f4084713`, + drawable.c removal.
+
 ## 2026-07-08 — 🧹 CHECKPOINT: post-2.5 branch cleanup (mali branches deleted, cloud-saves preserved)
 
 > **2.5 is out and stable (see entry below). This checkpoint = branch housekeeping. main unchanged at `981cb657`; 2.5 release intact (tag `2.5`, Latest).**
