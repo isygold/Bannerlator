@@ -1,5 +1,25 @@
 # Star-Compose — Progress Log
 
+## 2026-07-08 — 🎉 RELEASE: Bannerlator 2.5 (stable, LATEST) — the Mali hardening release
+
+> **2.5 SHIPPED STABLE — `versionName 2.5`, `versionCode 40`, tag `2.5` (make_latest=true → offered to 2.4 users via the in-app updater). Release run `28911581500` GREEN, 3 flavors + update.json. main tip `34a43924`.**
+>
+> **2.5 = the Mali support hardening release.** Makes BC-texture (BCn) games work on **Mali / Xclipse** GPUs, with a full sign-off on real Mali-G57 (Helio G99) hardware, plus an in-game logging overhaul. Entirely app-side — no ImageFS reinstall; existing containers pull the new driver assets automatically.
+>
+> **Shipped (all from #70, now closed):**
+> - **`Wrapper + bcn_layer`** graphics driver — primary Mali BCn path (leegao **bcn_layer shader-v3**); transcodes BC textures on the GPU. Device-proven: *MiSide* went from crashing → ~34 fps, 0 buffer errors on Mali-G57.
+> - **`Wrapper-gamenative`** — experimental (Adreno-only) secondary driver.
+> - Wrapper bumped to **bionic-vulkan-wrapper ETC2-Milestone-2** (kills `wrapper_DestroyBuffer` spam).
+> - **BCn Layer Settings** dialog (force-decode, ETC2/ASTC transcode, image-view mode, debug logging).
+> - **In-game logging overhaul**: Copy-logs button (pinned on-screen; the mali-v6 layout fix), selectable log location (Settings › Logs), co-located DXVK/DXGI/VKD3D logs, scrollable Wine debug-channels dialog.
+> - release.yml notes hardened against backticks. bcn_layer `.so` kept **unstripped by design** (ongoing Mali debug).
+>
+> **Merge hygiene:** merged via `release/2.5-mali` (clean branch) after excising a stray shelved Steam-cloud-saves commit (`6fcf27e7`) that had drifted onto the mali branch from an earlier shared-worktree session — caught by scanning the merge file list before pushing.
+>
+> **Credits:** **leegao** (bcn_layer shader-v3 + bionic-vulkan-wrapper ETC2-Milestone-2). Testers: **@kylinzang** (Mali-G57, #70 — drove the whole effort + full sign-off), **@rizky2-crypto** (Mali-G610, #30). Experimental gamenative driver base: **GameNative** (utkarshdalal).
+>
+> **Follow-ups:** "Import .so" self-update button → 2.6 (needs its own issue). rizky2 (#30, G610) still open. Shelved Steam cloud-saves parked off main. Release notes also footnote the new [Proton 11.0-1 bionic build](https://github.com/The412Banner/proton-wine/releases/tag/build-p11-20260707).
+
 ## 2026-07-06 — 🔧 CHECKPOINT: dev-environment tooling + bridge knowledge corrected (no repo code change)
 
 > **Session tooling/infra work (lives in `~/.local/bin` + memory, not the app repo). Main unchanged at `34cf6249`. Mali v3 build re-staged & awaiting Mali testers.**
