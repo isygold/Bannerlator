@@ -99,24 +99,31 @@ public class DXVKConfigDialog {
     }
 
     public static void setEnvVars(Context context, KeyValueSet config, EnvVars envVars) {
-        String framerate = config.get("framerate");
-        StringBuilder contentBuilder = new StringBuilder();
-        if (!framerate.isEmpty() && !framerate.equals("0")) {
-            contentBuilder.append("dxgi.maxFrameRate = ").append(framerate).append("; ");
-            contentBuilder.append("d3d9.maxFrameRate = ").append(framerate);
-            envVars.put("DXVK_FRAME_RATE", framerate);
-        }
+        String configFile = config.get("dxvkConfigFile");
+        boolean hasConfigFile = configFile != null && !configFile.isEmpty() && !configFile.equals("0") && !configFile.equals("None");
 
-        // Append vegas-specific defaults always — harmless for plain DXVK
-        {
-            if (contentBuilder.length() > 0) contentBuilder.append("; ");
-            contentBuilder.append("dxvk.enableStarProfile = Auto; ");
-            contentBuilder.append("vegas.enableUpscaler = Auto");
-        }
+        // When a custom DXVK_CONFIG_FILE is selected, skip DXVK_CONFIG entirely
+        // so the user's config file has full control (DXVK_CONFIG would override it).
+        if (!hasConfigFile) {
+            String framerate = config.get("framerate");
+            StringBuilder contentBuilder = new StringBuilder();
+            if (!framerate.isEmpty() && !framerate.equals("0")) {
+                contentBuilder.append("dxgi.maxFrameRate = ").append(framerate).append("; ");
+                contentBuilder.append("d3d9.maxFrameRate = ").append(framerate);
+                envVars.put("DXVK_FRAME_RATE", framerate);
+            }
 
-        String content = contentBuilder.toString();
-        if (!content.isEmpty())
-            envVars.put("DXVK_CONFIG", content);
+            // Append vegas-specific defaults always — harmless for plain DXVK
+            {
+                if (contentBuilder.length() > 0) contentBuilder.append("; ");
+                contentBuilder.append("dxvk.enableStarProfile = Auto; ");
+                contentBuilder.append("vegas.enableUpscaler = Auto");
+            }
+
+            String content = contentBuilder.toString();
+            if (!content.isEmpty())
+                envVars.put("DXVK_CONFIG", content);
+        }
 
         if (!config.get("async").isEmpty() && !config.get("async").equals("0"))
             envVars.put("DXVK_ASYNC", "1");
@@ -126,8 +133,7 @@ public class DXVKConfigDialog {
         envVars.put("DXVK_STATE_CACHE_PATH", context.getFilesDir() + "/imagefs/" + ImageFs.CACHE_PATH);
 
         // DXVK_CONFIG_FILE (config source path, e.g. /storage/emulated/0/dxvk.conf)
-        String configFile = config.get("dxvkConfigFile");
-        if (configFile != null && !configFile.isEmpty() && !configFile.equals("0") && !configFile.equals("None")) {
+        if (hasConfigFile) {
             envVars.put("DXVK_CONFIG_FILE", configFile);
         }
     }
