@@ -1,5 +1,17 @@
 # Star-Compose — Progress Log
 
+## 2026-07-08 — 🧹 CHECKPOINT: post-2.5 branch cleanup (mali branches deleted, cloud-saves preserved)
+
+> **2.5 is out and stable (see entry below). This checkpoint = branch housekeeping. main unchanged at `981cb657`; 2.5 release intact (tag `2.5`, Latest).**
+>
+> **Deleted (local + remote) — all content shipped in 2.5:** `release/2.5-mali` (the clean merge source), `feat/mali-bcn-v4` (mali-v4/v5/v6 pre-release branch), `feat/mali-bcn-layer`, `feat/wrapper-gamenative-bcn`, plus stale local `worktree-agent-*` leftovers.
+>
+> **Preserved first:** the shelved **Steam cloud-saves** foundation commit (`6fcf27e7`) turned out to live **only** on `feat/mali-bcn-v4` (the `feat/steam-cloud-saves` branch had drifted to a docs commit). Cherry-picked it cleanly onto main → **`feat/steam-cloud-saves` now = main + the cloud-saves foundation** (`6d86f277`), ready to resume in a future version.
+>
+> **Note:** the `mali-v5` / `mali-v6` pre-release **git tags are mislabeled** (they point at main commits, not the build branch — `release.yml`'s tag defaults to the default-branch HEAD). The pre-release **APKs are correct**; only the tags are cosmetic. For future pre-releases off a non-main branch, set `target_commitish`.
+>
+> **Kept:** `main`, `feat/steam-cloud-saves` (re-anchored), `feat/save-backup-restore`. Other merged 2.4-era feature branches remain and could be swept separately.
+
 ## 2026-07-08 — 🎉 RELEASE: Bannerlator 2.5 (stable, LATEST) — the Mali hardening release
 
 > **2.5 SHIPPED STABLE — `versionName 2.5`, `versionCode 40`, tag `2.5` (make_latest=true → offered to 2.4 users via the in-app updater). Release run `28911581500` GREEN, 3 flavors + update.json. main tip `34a43924`.**
