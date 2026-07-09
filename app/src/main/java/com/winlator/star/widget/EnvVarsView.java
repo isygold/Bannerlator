@@ -48,7 +48,7 @@ public class EnvVarsView extends FrameLayout {
         {"WINE_NEW_MEDIASOURCE", "CHECKBOX", "0", "1"},
         {"GALLIUM_HUD", "SELECT_MULTIPLE", "simple", "fps", "frametime"},
         // DXVK tuning
-        {"DXVK_DISABLE_TIMELINE", "CHECKBOX", "0", "1"},
+        {"DXVK_DISABLE_TIMELINE_SEMAPHORES", "CHECKBOX", "0", "1"},
         {"DXVK_FRAME_RATE", "NUMBER"},
         {"DXVK_STATE_CACHE", "CHECKBOX", "0", "1"},
         {"DXVK_LOG_LEVEL", "SELECT", "none", "error", "warn", "info", "debug"},
