@@ -200,6 +200,12 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         }
     }
 
+    // Linux PID of the top-level guest process (wine/box64). Used read-only by the runtime-backend
+    // HUD chip to probe /proc/<pid>/maps for the FEX unixlib. -1 until the guest is started.
+    public static int getPid() {
+        return pid;
+    }
+
     public Callback<Integer> getTerminationCallback() {
         return terminationCallback;
     }
