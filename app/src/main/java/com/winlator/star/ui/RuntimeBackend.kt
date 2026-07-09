@@ -37,16 +37,16 @@ object FexProbe {
         val maps = File("/proc/$pid/maps")
         if (!maps.canRead()) return FexMode.NA
         return try {
-            var sawDll = false
-            maps.forEachLine { line ->
-                when {
-                    line.contains("libarm64ecfex.so") || line.contains("libwow64fex.so") ->
-                        return FexMode.UNIXLIB
-                    line.contains("libarm64ecfex.dll") || line.contains("libwow64fex.dll") ->
+            maps.useLines { lines ->
+                var sawDll = false
+                for (line in lines) {
+                    if (line.contains("libarm64ecfex.so") || line.contains("libwow64fex.so"))
+                        return@useLines FexMode.UNIXLIB
+                    if (line.contains("libarm64ecfex.dll") || line.contains("libwow64fex.dll"))
                         sawDll = true
                 }
+                if (sawDll) FexMode.DLL else FexMode.NA
             }
-            if (sawDll) FexMode.DLL else FexMode.NA
         } catch (e: Exception) {
             FexMode.NA
         }
