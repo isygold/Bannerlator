@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.winlator.star.ui.screens
 
 import android.app.Activity
@@ -20,6 +22,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -51,6 +55,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddToHomeScreen
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.ViewList
@@ -75,7 +80,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import com.winlator.star.communityconfigs.CanonicalDevice
 import com.winlator.star.communityconfigs.CanonicalGame
+import com.winlator.star.communityconfigs.CommunityConfigApply
+import com.winlator.star.communityconfigs.GameMatcher
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -195,7 +203,29 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var communityLoading by remember { mutableStateOf(false) }
     var communitySearch by remember(communityTarget) { mutableStateOf("") }
     var communitySearchResults by remember(communityTarget) { mutableStateOf<List<CanonicalGame>>(emptyList()) }
+    // Catalog browser (catalog-first entry from the header) + the shared Phase 2 apply flow.
+    var showCommunityBrowser by remember { mutableStateOf(false) }
+    var applyPicker by remember { mutableStateOf<Pair<CanonicalGame, CanonicalDevice>?>(null) }
+    var applyMismatch by remember { mutableStateOf<Triple<Shortcut, CanonicalGame, CanonicalDevice>?>(null) }
+    var applyBusy by remember { mutableStateOf(false) }
+    var applyResult by remember { mutableStateOf<CommunityConfigApply.ConfigApplyResult?>(null) }
     val scope = rememberCoroutineScope()
+
+    // Shared apply runner — used by both the catalog browser and the per-shortcut sheet.
+    val runCommunityApply: (Shortcut, CanonicalGame, CanonicalDevice) -> Unit = { sc, g, d ->
+        applyBusy = true
+        applyResult = null
+        vm.applyCommunityConfig(sc, g, d) { res ->
+            applyBusy = false
+            applyResult = res
+        }
+    }
+    // Pick a target shortcut for a browser-selected config; warn when its game doesn't match.
+    val chooseApplyTarget: (Shortcut, CanonicalGame, CanonicalDevice) -> Unit = { sc, g, d ->
+        applyPicker = null
+        if (GameMatcher.match(sc.name, listOf(g)).isNotEmpty()) runCommunityApply(sc, g, d)
+        else applyMismatch = Triple(sc, g, d)
+    }
 
     // Shared "Scrape cover" action so both grid tiles and list rows fire the same flow.
     val scrapeCoverFor: (Shortcut) -> Unit = { shortcut ->
@@ -273,6 +303,13 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // parent's clear when it fires post-commit.
     LaunchedEffect(isGridView) {
         topBarActions.value = {
+            IconButton(onClick = { showCommunityBrowser = true }) {
+                Icon(
+                    imageVector = Icons.Filled.Public,
+                    contentDescription = "Community configs",
+                    tint = androidx.compose.ui.graphics.Color.White,
+                )
+            }
             IconButton(onClick = { vm.setGridView(!isGridView) }) {
                 Icon(
                     imageVector = if (isGridView) Icons.Filled.ViewList else Icons.Filled.GridView,
@@ -761,19 +798,12 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                                 )
                                             }
                                         }
-                                        Column(horizontalAlignment = Alignment.End) {
-                                            // Apply is Phase 2 — disabled until the surgical merge lands.
-                                            OutlinedButton(
-                                                onClick = {},
-                                                enabled = false,
-                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                            ) { Text("Apply") }
-                                            Text(
-                                                text = "Phase 2",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = OnSurfaceVariant,
-                                            )
-                                        }
+                                        // Surgical merge into this exact shortcut (the matched target).
+                                        OutlinedButton(
+                                            onClick = { runCommunityApply(s, game, d) },
+                                            enabled = !applyBusy,
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                        ) { Text("Apply") }
                                     }
                                 }
                             }
@@ -785,6 +815,110 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             },
             confirmButton = {},
             dismissButton = { TextButton(onClick = dismiss) { Text("Close") } },
+        )
+    }
+
+    // Catalog browser (Part A) — full-catalog entry from the header button.
+    if (showCommunityBrowser) {
+        CommunityCatalogBrowser(
+            vm = vm,
+            onDismiss = { showCommunityBrowser = false },
+            onApply = { g, d -> applyPicker = g to d },
+        )
+    }
+
+    // Apply-target picker — choose which of your shortcuts to apply a browser-selected config to.
+    applyPicker?.let { (game, device) ->
+        val shortcutList = vm.currentShortcuts()
+        AlertDialog(
+            onDismissRequest = { applyPicker = null },
+            title = { Text("Apply to game…") },
+            text = {
+                if (shortcutList.isEmpty()) {
+                    Text("You have no shortcuts yet.", color = OnSurfaceVariant)
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
+                    ) {
+                        Text(
+                            "Config from ${device.model.ifBlank { "device" }} for \"${game.name}\".",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 6.dp),
+                        )
+                        shortcutList.forEach { sc ->
+                            Text(
+                                text = sc.name,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { chooseApplyTarget(sc, game, device) }
+                                    .padding(vertical = 12.dp),
+                                color = OnSurface,
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { applyPicker = null }) { Text("Cancel") } },
+        )
+    }
+
+    // Mismatch confirmation — target shortcut's game doesn't match the config's game.
+    applyMismatch?.let { (sc, game, device) ->
+        AlertDialog(
+            onDismissRequest = { applyMismatch = null },
+            title = { Text("Different game") },
+            text = { Text("This config is for \"${game.name}\" — apply to \"${sc.name}\" anyway?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    applyMismatch = null
+                    runCommunityApply(sc, game, device)
+                }) { Text("Apply anyway") }
+            },
+            dismissButton = { TextButton(onClick = { applyMismatch = null }) { Text("Cancel") } },
+        )
+    }
+
+    // Applying spinner (blocking) while the config is fetched + merged.
+    if (applyBusy) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Applying config") },
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text("Fetching and merging…", color = OnSurfaceVariant)
+                }
+            },
+            confirmButton = {},
+        )
+    }
+
+    // Result summary — what changed + install / Proton advisories.
+    applyResult?.let { res ->
+        AlertDialog(
+            onDismissRequest = { applyResult = null },
+            title = { Text(if (res.ok) "Config applied" else "Couldn't apply") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(res.message, color = OnSurface)
+                    if (res.changed.isNotEmpty()) {
+                        Divider(color = DividerColor)
+                        Text("Changed", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+                        res.changed.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant) }
+                    }
+                    if (res.advisories.isNotEmpty()) {
+                        Divider(color = DividerColor)
+                        Text("Heads up", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+                        res.advisories.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { applyResult = null }) { Text("Done") } },
         )
     }
 
@@ -813,6 +947,265 @@ private fun CommunityStoreBadge(isSteam: Boolean) {
             style = MaterialTheme.typography.labelSmall,
             color = fg,
         )
+    }
+}
+
+private enum class CatalogStoreFilter { ALL, STEAM, TITLE }
+private enum class CatalogSort { CONFIGS, NAME, DEVICES }
+
+// Full-catalog browser (Part A) — a catalog-first entry from the header. Lists every game in the
+// community index with search / device + store filters / sort; a tapped game opens its per-device
+// config list (user's-hardware first), and a device row starts the Phase 2 apply flow.
+@Composable
+private fun CommunityCatalogBrowser(
+    vm: ShortcutsViewModel,
+    onDismiss: () -> Unit,
+    onApply: (CanonicalGame, CanonicalDevice) -> Unit,
+) {
+    var catalog by remember { mutableStateOf<CommunityCatalog?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    var query by remember { mutableStateOf("") }
+    var matchesMyDevice by remember { mutableStateOf(false) }
+    var storeFilter by remember { mutableStateOf(CatalogStoreFilter.ALL) }
+    var sort by remember { mutableStateOf(CatalogSort.CONFIGS) }
+    var selectedGame by remember { mutableStateOf<CanonicalGame?>(null) }
+
+    LaunchedEffect(Unit) { vm.getCommunityCatalog { catalog = it; loading = false } }
+
+    val userSoc = catalog?.userSoc
+    val userGpu = catalog?.userGpu
+    val games = catalog?.games ?: emptyList()
+
+    val visible: List<CanonicalGame> = remember(games, query, matchesMyDevice, storeFilter, sort, userSoc, userGpu) {
+        val base = if (query.trim().length >= 2) GameMatcher.search(query, games, limit = 200) else games
+        val filtered = base.asSequence()
+            .filter { g ->
+                when (storeFilter) {
+                    CatalogStoreFilter.ALL -> true
+                    CatalogStoreFilter.STEAM -> g.isSteam
+                    CatalogStoreFilter.TITLE -> !g.isSteam
+                }
+            }
+            .filter { g ->
+                !matchesMyDevice || g.devices.any { GameMatcher.deviceMatchesUser(it, userSoc, userGpu) }
+            }
+            .toList()
+        // Preserve search relevance while a query is active; otherwise honour the chosen sort.
+        if (query.trim().length >= 2) filtered
+        else when (sort) {
+            CatalogSort.CONFIGS -> filtered.sortedByDescending { it.configCount }
+            CatalogSort.NAME -> filtered.sortedBy { it.name.lowercase() }
+            CatalogSort.DEVICES -> filtered.sortedByDescending { it.devices.size }
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.92f),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+        ) {
+            Column {
+                // Title bar (with a back affordance when drilled into a game).
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (selectedGame != null) {
+                        IconButton(onClick = { selectedGame = null }) {
+                            Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    }
+                    Text(
+                        text = selectedGame?.name ?: "Community configs",
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).padding(start = if (selectedGame == null) 4.dp else 0.dp),
+                    )
+                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
+                }
+                Divider(color = DividerColor)
+
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    when {
+                        loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                        selectedGame != null -> CommunityDevicePanel(
+                            game = selectedGame!!,
+                            userSoc = userSoc,
+                            userGpu = userGpu,
+                            hardwareLabel = catalog?.hardwareLabel,
+                            onApply = onApply,
+                        )
+                        games.isEmpty() -> Text(
+                            "No community configs available yet (offline, or the index hasn't been fetched).",
+                            color = OnSurfaceVariant,
+                            modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                            textAlign = TextAlign.Center,
+                        )
+                        else -> Column(modifier = Modifier.fillMaxSize()) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                catalog?.hardwareLabel?.let { hw ->
+                                    Text(
+                                        "Your device: $hw",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = OnSurfaceVariant,
+                                    )
+                                }
+                                OutlinedTextField(
+                                    value = query,
+                                    onValueChange = { query = it },
+                                    label = { Text("Search all games") },
+                                    leadingIcon = { Icon(Icons.Filled.Search, null) },
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                                // Store filter + "matches my device".
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    FilterChip(selected = storeFilter == CatalogStoreFilter.ALL, onClick = { storeFilter = CatalogStoreFilter.ALL }, label = { Text("All") })
+                                    FilterChip(selected = storeFilter == CatalogStoreFilter.STEAM, onClick = { storeFilter = CatalogStoreFilter.STEAM }, label = { Text("Steam") })
+                                    FilterChip(selected = storeFilter == CatalogStoreFilter.TITLE, onClick = { storeFilter = CatalogStoreFilter.TITLE }, label = { Text("Title") })
+                                }
+                                FilterChip(
+                                    selected = matchesMyDevice,
+                                    onClick = { matchesMyDevice = !matchesMyDevice },
+                                    label = { Text("Matches my device") },
+                                    enabled = userSoc != null || userGpu != null,
+                                )
+                                // Sort.
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Sort:", style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
+                                    FilterChip(selected = sort == CatalogSort.CONFIGS, onClick = { sort = CatalogSort.CONFIGS }, label = { Text("Configs") })
+                                    FilterChip(selected = sort == CatalogSort.NAME, onClick = { sort = CatalogSort.NAME }, label = { Text("Name") })
+                                    FilterChip(selected = sort == CatalogSort.DEVICES, onClick = { sort = CatalogSort.DEVICES }, label = { Text("Devices") })
+                                }
+                                Text(
+                                    "${visible.size} game${if (visible.size == 1) "" else "s"}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = OnSurfaceVariant,
+                                )
+                            }
+                            Divider(color = DividerColor)
+                            if (visible.isEmpty()) {
+                                Text(
+                                    "No games match your filters.",
+                                    color = OnSurfaceVariant,
+                                    modifier = Modifier.padding(24.dp),
+                                )
+                            } else {
+                                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                    items(visible, key = { it.identity }) { g ->
+                                        CommunityGameRow(game = g, onClick = { selectedGame = g })
+                                        Divider(color = DividerColor)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// One game row in the catalog browser: name, Steam/Title badge, config + device counts.
+@Composable
+private fun CommunityGameRow(game: CanonicalGame, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = game.name,
+                style = MaterialTheme.typography.bodyMedium,
+                color = OnSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val cfgWord = if (game.configCount == 1) "config" else "configs"
+            val devWord = if (game.devices.size == 1) "device" else "devices"
+            Text(
+                text = "${game.configCount} $cfgWord · ${game.devices.size} $devWord",
+                style = MaterialTheme.typography.labelSmall,
+                color = OnSurfaceVariant,
+            )
+        }
+        CommunityStoreBadge(isSteam = game.isSteam)
+    }
+}
+
+// Per-device config list for a browser-selected game (user's-hardware first), each with "Apply to game…".
+@Composable
+private fun CommunityDevicePanel(
+    game: CanonicalGame,
+    userSoc: String?,
+    userGpu: String?,
+    hardwareLabel: String?,
+    onApply: (CanonicalGame, CanonicalDevice) -> Unit,
+) {
+    val ranked = remember(game, userSoc, userGpu) { GameMatcher.rankDevices(game.devices, userSoc, userGpu) }
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val cfgWord = if (game.configCount == 1) "config" else "configs"
+            val devWord = if (game.devices.size == 1) "device" else "devices"
+            Text(
+                "${game.configCount} $cfgWord · ${game.devices.size} $devWord",
+                style = MaterialTheme.typography.bodySmall,
+                color = OnSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            CommunityStoreBadge(isSteam = game.isSteam)
+        }
+        hardwareLabel?.let {
+            Text("Your device: $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+        }
+        Divider(color = DividerColor)
+        if (ranked.isEmpty()) {
+            Text("No device configs listed.", color = OnSurfaceVariant)
+        } else {
+            val hw = hardwareLabel?.lowercase()
+            ranked.forEach { d ->
+                val isMatch = hw != null && (
+                    (d.soc.isNotBlank() && (hw.contains(d.soc.lowercase()) || d.soc.lowercase().contains(hw))) ||
+                    (d.gpu.isNotBlank() && (hw.contains(d.gpu.lowercase()) || d.gpu.lowercase().contains(hw)))
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = d.model.ifBlank { "Unknown device" },
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (isMatch) MaterialTheme.colorScheme.primary else OnSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        val sub = listOf(d.gpu, d.soc).filter { it.isNotBlank() }.joinToString(" · ")
+                        if (sub.isNotEmpty()) {
+                            Text(sub, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { onApply(game, d) },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    ) { Text("Apply to game…") }
+                }
+            }
+        }
     }
 }
 

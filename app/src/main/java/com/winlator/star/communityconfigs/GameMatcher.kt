@@ -133,5 +133,18 @@ object GameMatcher {
     private fun looselyMatches(a: String, b: String): Boolean =
         a == b || a.contains(b) || b.contains(a)
 
+    /**
+     * True when [device] loosely matches the user's hardware — same loose SoC OR GPU rule used by
+     * [rankDevices], exposed for the catalog browser's "Matches my device" filter.
+     */
+    fun deviceMatchesUser(device: CanonicalDevice, userSoc: String?, userGpu: String?): Boolean {
+        val soc = userSoc?.lowercase()?.takeIf { it.isNotBlank() }
+        val gpu = userGpu?.lowercase()?.takeIf { it.isNotBlank() }
+        if (soc == null && gpu == null) return false
+        if (soc != null && device.soc.isNotBlank() && looselyMatches(device.soc.lowercase(), soc)) return true
+        if (gpu != null && device.gpu.isNotBlank() && looselyMatches(device.gpu.lowercase(), gpu)) return true
+        return false
+    }
+
     private const val MIN_SCORE = 0.34
 }

@@ -14,9 +14,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.winlator.star.communityconfigs.CanonicalDevice
 import com.winlator.star.communityconfigs.CanonicalGame
+import com.winlator.star.communityconfigs.CommunityConfigApply
+import com.winlator.star.communityconfigs.CommunityConfigFetcher
 import com.winlator.star.communityconfigs.CommunityConfigRepository
+import com.winlator.star.communityconfigs.ConfigTranslator
 import com.winlator.star.communityconfigs.DeviceIdentity
 import com.winlator.star.communityconfigs.GameMatcher
+import com.winlator.star.communityconfigs.InstalledComponents
 import com.winlator.star.container.Container
 import com.winlator.star.container.ContainerManager
 import com.winlator.star.container.Shortcut
@@ -50,6 +54,17 @@ data class CommunityMatchResult(
     val match: CanonicalGame?,
     val rankedDevices: List<CanonicalDevice>,
     val userHardwareLabel: String?,
+)
+
+/**
+ * The whole community catalog plus the detected hardware, delivered to the catalog browser. Loaded
+ * off the main thread, offline-first; [games] is empty when the index is unavailable (empty state).
+ */
+data class CommunityCatalog(
+    val games: List<CanonicalGame>,
+    val userSoc: String?,
+    val userGpu: String?,
+    val hardwareLabel: String?,
 )
 
 class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
@@ -131,6 +146,58 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
                     userHardwareLabel = userSoc ?: userGpu,
                 )
             }
+            onResult(result)
+        }
+    }
+
+    /**
+     * Loads the full community catalog + detected hardware for the catalog browser, off the main
+     * thread. Offline-first (cache-served); empty [CommunityCatalog.games] when unavailable.
+     */
+    fun getCommunityCatalog(onResult: (CommunityCatalog) -> Unit) {
+        viewModelScope.launch {
+            val catalog = withContext(Dispatchers.IO) {
+                val games = communityRepo.getGames()
+                val userSoc = DeviceIdentity.soc()
+                val userGpu = DeviceIdentity.gpu(getApplication())
+                CommunityCatalog(games, userSoc, userGpu, userSoc ?: userGpu)
+            }
+            onResult(catalog)
+        }
+    }
+
+    /** Snapshot of the current shortcut list — the target picker for "Apply to game…". */
+    fun currentShortcuts(): List<Shortcut> = _shortcuts.value
+
+    /**
+     * Full Phase 2 apply: fetch the config for [game]+[device], translate it, resolve components
+     * against what's installed, SURGICALLY merge into [shortcut], persist, and report back. All IO is
+     * off the main thread; every failure returns a clean [CommunityConfigApply.ConfigApplyResult].
+     */
+    fun applyCommunityConfig(
+        shortcut: Shortcut,
+        game: CanonicalGame,
+        device: CanonicalDevice,
+        onResult: (CommunityConfigApply.ConfigApplyResult) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                val fetched = CommunityConfigFetcher.fetchForDevice(game, device)
+                    ?: return@withContext CommunityConfigApply.ConfigApplyResult(
+                        ok = false,
+                        message = "Couldn't fetch a config for ${device.model.ifBlank { "that device" }} " +
+                            "(offline, or no matching file in the repo).",
+                    )
+                val config = ConfigTranslator.translate(fetched.json)
+                val installed = InstalledComponents.read(getApplication())
+                CommunityConfigApply.apply(
+                    shortcut = shortcut,
+                    config = config,
+                    installed = installed,
+                    containerWineVersion = shortcut.container?.getWineVersion(),
+                )
+            }
+            if (result.ok && result.changed.isNotEmpty()) refresh()
             onResult(result)
         }
     }
