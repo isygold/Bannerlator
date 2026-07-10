@@ -329,7 +329,17 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             scope.launch {
                 val resolved = withContext(Dispatchers.IO) {
                     val installed = com.winlator.star.communityconfigs.InstalledComponents.read(context)
-                    CommunityConfigApply.applyResolvedComponent(target, mc, installed)
+                    // Try the exact wanted version first. If the user installed a CLOSEST build instead
+                    // (e.g. a date-stamped FEX like "Fex-20260103" that has no exact catalog match), the
+                    // wanted string never re-resolves — so fall back to the NEWEST installed build of this
+                    // type, i.e. the one that was just installed, and apply that.
+                    if (CommunityConfigApply.applyResolvedComponent(target, mc, installed)) {
+                        true
+                    } else {
+                        val newest = CommunityConfigApply.installedTypeKey(mc.type)?.let { installed.newestToken(it) }
+                        newest != null &&
+                            CommunityConfigApply.applyResolvedComponent(target, mc.copy(wanted = newest), installed)
+                    }
                 }
                 if (resolved) {
                     if (mc.label !in resolvedMissing) resolvedMissing.add(mc.label)

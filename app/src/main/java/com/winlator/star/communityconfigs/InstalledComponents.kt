@@ -14,10 +14,19 @@ import java.io.File
  */
 class InstalledComponents private constructor(
     private val byType: Map<String, List<String>>,
+    private val newestRawByType: Map<String, String>,
 ) {
 
     /** Raw install-dir names for a component type (e.g. "dxvk-2.4.1-1624", "proton-arm64ec-3.0.1-0"). */
     fun raw(type: String): List<String> = byType[type].orEmpty()
+
+    /**
+     * Sub-field token of the MOST-RECENTLY-installed build of [type] (newest install-dir mtime), or
+     * null when none. Used to auto-apply "the build the user just installed" after a smart install of a
+     * CLOSEST version — a date-stamped FEX ("Fex-20260103") never re-resolves against the exact wanted
+     * string, so we fall back to whatever landed on disk last.
+     */
+    fun newestToken(type: String): String? = newestRawByType[type]?.let { deriveToken(type, it) }
 
     /**
      * The version token the shortcut sub-field expects, derived from an install-dir name by stripping
@@ -78,12 +87,14 @@ class InstalledComponents private constructor(
         fun read(context: Context): InstalledComponents {
             val contents = File(context.filesDir, "contents")
             val map = HashMap<String, List<String>>()
+            val newest = HashMap<String, String>()
             for (type in TYPES) {
                 val dir = File(contents, type)
-                val names = dir.listFiles { f -> f.isDirectory }?.map { it.name }?.sorted() ?: emptyList()
-                map[type] = names
+                val dirs = dir.listFiles { f -> f.isDirectory }?.toList() ?: emptyList()
+                map[type] = dirs.map { it.name }.sorted()
+                dirs.maxByOrNull { it.lastModified() }?.let { newest[type] = it.name }
             }
-            return InstalledComponents(map)
+            return InstalledComponents(map, newest)
         }
 
         private val PREFIX = mapOf("DXVK" to "dxvk-", "VKD3D" to "vkd3d-")

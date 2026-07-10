@@ -440,6 +440,9 @@ object CommunityConfigApply {
         }
     }
 
+    /** Public alias of [installedType] — lets the UI map a component type to its install-dir key. */
+    fun installedTypeKey(type: ContentProfile.ContentType): String? = installedType(type)
+
     /** Map a sheet-installable [ContentProfile.ContentType] to its [InstalledComponents] type key. */
     private fun installedType(type: ContentProfile.ContentType): String? = when (type) {
         ContentProfile.ContentType.CONTENT_TYPE_DXVK -> "DXVK"
