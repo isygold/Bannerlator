@@ -11,15 +11,24 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.winlator.star.communityconfigs.CanonicalDevice
+import com.winlator.star.communityconfigs.CanonicalGame
+import com.winlator.star.communityconfigs.CommunityConfigRepository
+import com.winlator.star.communityconfigs.DeviceIdentity
+import com.winlator.star.communityconfigs.GameMatcher
 import com.winlator.star.container.Container
 import com.winlator.star.container.ContainerManager
 import com.winlator.star.container.Shortcut
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.WinePath
 import com.winlator.star.store.StarLaunchBridge
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -31,6 +40,17 @@ sealed class ImportResult {
     data class Success(val shortcutName: String) : ImportResult()
     data class Error(val message: String) : ImportResult()
 }
+
+/**
+ * Result of matching a shortcut against the community-config index. [match] is null when nothing
+ * plausibly overlapped (clean empty state); [rankedDevices] surfaces the user's-hardware rows first.
+ */
+data class CommunityMatchResult(
+    val query: String,
+    val match: CanonicalGame?,
+    val rankedDevices: List<CanonicalDevice>,
+    val userHardwareLabel: String?,
+)
 
 class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -60,8 +80,34 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
 
     private val manager = ContainerManager(app)
 
+    private val communityRepo = CommunityConfigRepository(app)
+
     init {
         refresh()
+    }
+
+    /**
+     * Matches [shortcut] against the community-config index off the main thread and delivers the
+     * result back on the main thread. Offline-first: served from cache instantly, refreshed in the
+     * background; when the index is unavailable [CommunityMatchResult.match] is null (empty state).
+     */
+    fun matchCommunityConfigs(shortcut: Shortcut, onResult: (CommunityMatchResult) -> Unit) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                val games = communityRepo.getGames()
+                val best = GameMatcher.match(shortcut.name, games).firstOrNull()?.game
+                val userSoc = DeviceIdentity.soc()
+                val userGpu = DeviceIdentity.gpu(getApplication())
+                val devices = best?.let { GameMatcher.rankDevices(it.devices, userSoc, userGpu) } ?: emptyList()
+                CommunityMatchResult(
+                    query = shortcut.name,
+                    match = best,
+                    rankedDevices = devices,
+                    userHardwareLabel = userSoc ?: userGpu,
+                )
+            }
+            onResult(result)
+        }
     }
 
     fun setSortOrder(order: ShortcutSortOrder) {

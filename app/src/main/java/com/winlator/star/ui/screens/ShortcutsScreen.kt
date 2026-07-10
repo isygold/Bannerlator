@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Upload
@@ -188,6 +189,9 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var scrapeTarget by remember { mutableStateOf<Shortcut?>(null) }
     val scrapeCovers = remember { mutableStateListOf<Pair<Bitmap, String>>() }
     var scrapeLoading by remember { mutableStateOf(false) }
+    var communityTarget by remember { mutableStateOf<Shortcut?>(null) }
+    var communityResult by remember { mutableStateOf<CommunityMatchResult?>(null) }
+    var communityLoading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     // Shared "Scrape cover" action so both grid tiles and list rows fire the same flow.
@@ -219,6 +223,17 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 scrapeCovers.addAll(covers)
                 scrapeLoading = false
             }
+        }
+    }
+
+    // Shared "Community configs" action — opens the sheet and kicks off the offline-first match.
+    val communityConfigsFor: (Shortcut) -> Unit = { shortcut ->
+        communityTarget = shortcut
+        communityResult = null
+        communityLoading = true
+        vm.matchCommunityConfigs(shortcut) { result ->
+            communityResult = result
+            communityLoading = false
         }
     }
 
@@ -330,6 +345,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     onExport = { exportShortcut(context, shortcut) },
                                     onProperties = { propertiesShortcut = shortcut },
                                     onScrapeCover = { scrapeCoverFor(shortcut) },
+                                    onCommunityConfigs = { communityConfigsFor(shortcut) },
                                 )
                             }
                         }
@@ -353,6 +369,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     onExport = itemExport,
                                     onProperties = itemProperties,
                                     onScrapeCover = { scrapeCoverFor(shortcut) },
+                                    onCommunityConfigs = { communityConfigsFor(shortcut) },
                                 )
                             }
                         }
@@ -609,11 +626,137 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         )
     }
 
+    // Community configs dialog (Phase 1 — match + suggest, read-only)
+    communityTarget?.let { s ->
+        val dismiss = { communityTarget = null; communityResult = null }
+        AlertDialog(
+            onDismissRequest = dismiss,
+            title = { Text("Community configs") },
+            text = {
+                val result = communityResult
+                val game = result?.match
+                when {
+                    communityLoading -> Text("Matching \"${s.name}\"…", color = OnSurfaceVariant)
+                    game == null -> Text("No community configs found for \"${s.name}\".", color = OnSurfaceVariant)
+                    else -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 420.dp)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    text = game.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = OnSurface,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                CommunityStoreBadge(isSteam = game.isSteam)
+                            }
+                            val devWord = if (game.devices.size == 1) "device" else "devices"
+                            val cfgWord = if (game.configCount == 1) "config" else "configs"
+                            Text(
+                                text = "${game.configCount} $cfgWord · ${game.devices.size} $devWord",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = OnSurfaceVariant,
+                            )
+                            result?.userHardwareLabel?.let { hw ->
+                                Text(
+                                    text = "Your device: $hw",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = OnSurfaceVariant,
+                                )
+                            }
+                            Divider(color = DividerColor)
+                            if (result?.rankedDevices.isNullOrEmpty()) {
+                                Text("No device configs listed.", color = OnSurfaceVariant)
+                            } else {
+                                val hw = result?.userHardwareLabel?.lowercase()
+                                result?.rankedDevices?.forEach { d ->
+                                    val isMatch = hw != null && (
+                                        (d.soc.isNotBlank() && (hw.contains(d.soc.lowercase()) || d.soc.lowercase().contains(hw))) ||
+                                        (d.gpu.isNotBlank() && (hw.contains(d.gpu.lowercase()) || d.gpu.lowercase().contains(hw)))
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = d.model.ifBlank { "Unknown device" },
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = if (isMatch) MaterialTheme.colorScheme.primary else OnSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            val sub = listOf(d.gpu, d.soc).filter { it.isNotBlank() }.joinToString(" · ")
+                                            if (sub.isNotEmpty()) {
+                                                Text(
+                                                    text = sub,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = OnSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                        }
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            // Apply is Phase 2 — disabled until the surgical merge lands.
+                                            OutlinedButton(
+                                                onClick = {},
+                                                enabled = false,
+                                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                                            ) { Text("Apply") }
+                                            Text(
+                                                text = "Phase 2",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = OnSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = dismiss) { Text("Close") } },
+        )
+    }
+
     // Compose shortcut settings dialog
     settingsShortcut?.let { s ->
         ShortcutSettingsDialogScreen(
             shortcut = s,
             onDismiss = { settingsShortcut = null; vm.refresh() }
+        )
+    }
+}
+
+// Small Steam / Title provenance badge for the community-config sheet header.
+@Composable
+private fun CommunityStoreBadge(isSteam: Boolean) {
+    val bg = if (isSteam) MaterialTheme.colorScheme.primary else SurfaceVariantColor
+    val fg = if (isSteam) MaterialTheme.colorScheme.onPrimary else OnSurfaceVariant
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(bg)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    ) {
+        Text(
+            text = if (isSteam) "STEAM" else "TITLE",
+            style = MaterialTheme.typography.labelSmall,
+            color = fg,
         )
     }
 }
@@ -633,6 +776,7 @@ private fun ShortcutItemLayoutL(
     onExport: () -> Unit,
     onProperties: () -> Unit,
     onScrapeCover: () -> Unit,
+    onCommunityConfigs: () -> Unit,
 ) {
     val container = shortcut.container
     val res = LocalContext.current.resources
@@ -736,6 +880,7 @@ private fun ShortcutItemLayoutL(
             onExport = onExport,
             onProperties = onProperties,
             onScrapeCover = onScrapeCover,
+            onCommunityConfigs = onCommunityConfigs,
         )
       }
     }
@@ -751,6 +896,7 @@ private fun ShortcutOverflowButton(
     onExport: () -> Unit,
     onProperties: () -> Unit,
     onScrapeCover: () -> Unit,
+    onCommunityConfigs: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     Box {
@@ -789,6 +935,11 @@ private fun ShortcutOverflowButton(
                 onClick = { menuExpanded = false; onScrapeCover() },
             )
             DropdownMenuItem(
+                text = { Text("Community configs") },
+                leadingIcon = { Icon(Icons.Filled.Public, null, tint = MaterialTheme.colorScheme.primary) },
+                onClick = { menuExpanded = false; onCommunityConfigs() },
+            )
+            DropdownMenuItem(
                 text = { Text("Properties") },
                 leadingIcon = { Icon(Icons.Filled.Info, null) },
                 onClick = { menuExpanded = false; onProperties() },
@@ -809,6 +960,7 @@ private fun ShortcutGridItem(
     onExport: () -> Unit,
     onProperties: () -> Unit,
     onScrapeCover: () -> Unit,
+    onCommunityConfigs: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -887,6 +1039,7 @@ private fun ShortcutGridItem(
             DropdownMenuItem(text = { Text("Add to home screen") }, leadingIcon = { Icon(Icons.Filled.AddToHomeScreen, null) }, onClick = { menuExpanded = false; onAddToHome() })
             DropdownMenuItem(text = { Text("Export") }, leadingIcon = { Icon(Icons.Filled.Upload, null) }, onClick = { menuExpanded = false; onExport() })
             DropdownMenuItem(text = { Text("Scrape cover") }, leadingIcon = { Icon(Icons.Filled.Search, null, tint = MaterialTheme.colorScheme.primary) }, onClick = { menuExpanded = false; onScrapeCover() })
+            DropdownMenuItem(text = { Text("Community configs") }, leadingIcon = { Icon(Icons.Filled.Public, null, tint = MaterialTheme.colorScheme.primary) }, onClick = { menuExpanded = false; onCommunityConfigs() })
             DropdownMenuItem(text = { Text("Properties") }, leadingIcon = { Icon(Icons.Filled.Info, null) }, onClick = { menuExpanded = false; onProperties() })
         }
     }
