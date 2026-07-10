@@ -424,6 +424,10 @@ object CommunityConfigApply {
             val pat = dotted.groupValues.getOrNull(3)?.toLongOrNull() ?: 0L
             return longArrayOf(0L, maj, min, pat)
         }
+        // FEX/GameHub date builds are tagged YYMM (year's last two digits + month). Reduce any date form
+        // to that 4-digit tag first, so a config's full date ("Fex-20260103") ranks nearest the monthly
+        // build ("2601") instead of being ~20 million apart from it as raw integers.
+        InstalledComponents.fexBuildTag(v)?.toLongOrNull()?.let { return longArrayOf(1L, it) }
         val big = Regex("\\d+").findAll(v).map { it.value }.maxByOrNull { it.length }?.toLongOrNull()
             ?: return null
         return longArrayOf(1L, big)

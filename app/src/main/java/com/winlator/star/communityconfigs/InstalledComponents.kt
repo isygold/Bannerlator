@@ -63,6 +63,20 @@ class InstalledComponents private constructor(
             val compatible = tokens.firstOrNull { majorMinor(it) == wantMm }
             if (compatible != null) return Resolution.Match(compatible)
         }
+        // FEX/GameHub date builds: match by the 4-digit YYMM build tag (year's last two digits + month),
+        // so a config carrying a full date ("Fex-20260103" = 2026-01) resolves to the installed/monthly
+        // build ("2601"). More precise than the substring fallback below.
+        val wantTag = fexBuildTag(wanted)
+        if (wantTag != null) {
+            if (!currentValue.isNullOrBlank() && fexBuildTag(currentValue) == wantTag &&
+                tokens.any { fexBuildTag(it) == wantTag }
+            ) {
+                return Resolution.Match(null)
+            }
+            val tagHit = tokens.firstOrNull { fexBuildTag(it) == wantTag }
+            if (tagHit != null) return Resolution.Match(if (tagHit.equals(currentValue, true)) null else tagHit)
+        }
+
         // FEX / date-stamped versions have no x.y — fall back to substring containment.
         val contains = tokens.firstOrNull {
             it.contains(wanted, ignoreCase = true) || wanted.contains(it, ignoreCase = true)
@@ -107,6 +121,28 @@ class InstalledComponents private constructor(
             t = t.replace(Regex("-\\d+$"), "")
             return t
         }
+
+        /**
+         * FEX/GameHub build tag = the 4-digit YYMM (year's last two digits + two-digit month) that
+         * GameHub and the community use to label FEXCore builds. Reduces any date form to that tag so a
+         * config carrying a full date matches the catalog's monthly build:
+         *   "Fex-20260103" (YYYYMMDD) → "2601",  "fexcore_241214" (YYMMDD) → "2412",  "FEX-2601" → "2601".
+         * The month is validated (01-12) so an arbitrary 4-digit number (e.g. a DXVK build code "1624")
+         * is NOT mistaken for a tag. Returns null when no plausible YYMM/date number is present.
+         */
+        fun fexBuildTag(v: String): String? {
+            for (m in Regex("\\d+").findAll(v)) {
+                val d = m.value
+                when (d.length) {
+                    8 -> if (validMonth(d.substring(4, 6))) return d.substring(2, 6)  // YYYYMMDD → YYMM
+                    6 -> if (validMonth(d.substring(2, 4))) return d.substring(0, 4)  // YYMMDD → YYMM
+                    4 -> if (validMonth(d.substring(2, 4))) return d                  // YYMM as-is
+                }
+            }
+            return null
+        }
+
+        private fun validMonth(mm: String): Boolean = (mm.toIntOrNull() ?: 0) in 1..12
 
         /** "2.7.1-1-async" → "2.7"; null when there's no leading numeric x.y (e.g. FEX date builds). */
         fun majorMinor(v: String?): String? {
