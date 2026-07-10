@@ -3,6 +3,7 @@ package com.winlator.star.ui.screens
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -477,6 +478,17 @@ internal fun installContent(
             cm.extraContentFile(uri, total, progress, object : ContentsManager.OnInstallFinishedCallback {
                 var phase = 0
                 override fun onFailed(reason: ContentsManager.InstallFailedReason, e: Exception?) {
+                    // A component that's already installed is NOT a failure — the caller's post-install
+                    // apply re-resolves against what's on disk and finds it. Report success so the
+                    // community inline installer writes the version to the shortcut instead of showing
+                    // a misleading "install failed" on a build the user already has.
+                    if (reason == ContentsManager.InstallFailedReason.ERROR_EXIST) {
+                        Log.i("CommunityConfigs", "Component already installed (ERROR_EXIST) — treating as success")
+                        activity.runOnUiThread { onProgress(1f, ""); onDone(true) }
+                        return
+                    }
+                    // Every other reason previously surfaced as a bare "fails" with nothing in the log.
+                    Log.w("CommunityConfigs", "Component install failed: $reason", e)
                     activity.runOnUiThread { onDone(false) }
                 }
                 override fun onSucceed(profile: ContentProfile) {
