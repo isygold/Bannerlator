@@ -112,38 +112,58 @@ object GameMatcher {
 
     /**
      * Reorders a game's device list so the ones matching the user's hardware surface first:
-     * SoC match, then GPU/driver match, then the rest — each group keeping index order.
+     * matched hardware first, then the rest — each group keeping index order.
      */
     fun rankDevices(devices: List<CanonicalDevice>, userSoc: String?, userGpu: String?): List<CanonicalDevice> {
         if (devices.isEmpty()) return devices
-        val soc = userSoc?.lowercase()?.takeIf { it.isNotBlank() }
-        val gpu = userGpu?.lowercase()?.takeIf { it.isNotBlank() }
-        if (soc == null && gpu == null) return devices
-
-        fun rank(d: CanonicalDevice): Int = when {
-            soc != null && d.soc.isNotBlank() && looselyMatches(d.soc.lowercase(), soc) -> 0
-            gpu != null && d.gpu.isNotBlank() && looselyMatches(d.gpu.lowercase(), gpu) -> 1
-            else -> 2
-        }
-        // Stable sort preserves original order within each rank bucket.
-        return devices.sortedBy { rank(it) }
+        val userToks = userTokens(userSoc, userGpu)
+        if (userToks.isEmpty()) return devices
+        // Stable sort: matching devices (rank 0) ahead of the rest (rank 1), original order kept within each.
+        return devices.sortedBy { if (deviceOverlaps(it, userToks)) 0 else 1 }
     }
 
-    /** True when either string contains the other — tolerant of "Adreno 750" vs "Qualcomm Adreno (TM) 750". */
-    private fun looselyMatches(a: String, b: String): Boolean =
-        a == b || a.contains(b) || b.contains(a)
+    /**
+     * True when [device] loosely matches the user's hardware. Compares the user's SoC/GPU strings
+     * against ALL of the device's identifying fields (model / gpu / soc), because BannerHub's
+     * per-config "soc" is really a GPU-renderer string (e.g. "Adreno (TM) 750") that lands in
+     * [CanonicalDevice.soc], while its underscored twin ("Adreno__TM__750") lands in
+     * [CanonicalDevice.gpu] — matching only the same-named field misses on both axes. Exposed for the
+     * catalog browser's "Matches my device" filter.
+     */
+    fun deviceMatchesUser(device: CanonicalDevice, userSoc: String?, userGpu: String?): Boolean =
+        deviceOverlaps(device, userTokens(userSoc, userGpu))
+
+    /** Any user hardware token overlaps any of the device's fields (soc/gpu/model), all normalized. */
+    private fun deviceOverlaps(device: CanonicalDevice, userToks: List<String>): Boolean {
+        if (userToks.isEmpty()) return false
+        val devToks = listOf(device.soc, device.gpu, device.model).map { normHw(it) }.filter { it.length >= 3 }
+        for (u in userToks) for (d in devToks) if (hwOverlap(u, d)) return true
+        return false
+    }
+
+    private fun userTokens(userSoc: String?, userGpu: String?): List<String> =
+        listOfNotNull(userSoc, userGpu).map { normHw(it) }.filter { it.length >= 3 }
 
     /**
-     * True when [device] loosely matches the user's hardware — same loose SoC OR GPU rule used by
-     * [rankDevices], exposed for the catalog browser's "Matches my device" filter.
+     * Normalize a hardware string so renderer/SoC spellings line up: lowercase, punctuation and
+     * underscores collapse to single spaces, and standalone trademark tokens (tm/r) are dropped. So
+     * "Adreno (TM) 750", "Adreno__TM__750" and a full "Qualcomm, Adreno (TM) 750, OpenGL ES ..." all
+     * reduce to something containing "adreno 750".
      */
-    fun deviceMatchesUser(device: CanonicalDevice, userSoc: String?, userGpu: String?): Boolean {
-        val soc = userSoc?.lowercase()?.takeIf { it.isNotBlank() }
-        val gpu = userGpu?.lowercase()?.takeIf { it.isNotBlank() }
-        if (soc == null && gpu == null) return false
-        if (soc != null && device.soc.isNotBlank() && looselyMatches(device.soc.lowercase(), soc)) return true
-        if (gpu != null && device.gpu.isNotBlank() && looselyMatches(device.gpu.lowercase(), gpu)) return true
-        return false
+    private fun normHw(s: String): String =
+        s.lowercase()
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .replace(Regex("\\b(tm|r)\\b"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+    /** Overlap of two normalized tokens: equal, or the shorter (>= 4 chars, to avoid junk) is a substring of the longer. */
+    private fun hwOverlap(a: String, b: String): Boolean {
+        if (a.isEmpty() || b.isEmpty()) return false
+        if (a == b) return true
+        val shorter = if (a.length <= b.length) a else b
+        val longer = if (a.length <= b.length) b else a
+        return shorter.length >= 4 && longer.contains(shorter)
     }
 
     private const val MIN_SCORE = 0.34
