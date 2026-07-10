@@ -2,7 +2,9 @@
 
 ## 2026-07-10 — 🌐 Community Configs: browse/apply BannerHub configs in-app (Phase 1 device-verified + Phase 2 CI-green)
 
-> **Branch `feat/community-configs-v1` (tip `29120035264`-build = commit after `a9095b4b`, CI GREEN run 29120035264, NOT merged/tagged). APK staged: `/sdcard/Download/bannerlator-per-file-config-cards-*-standard.apk`. Full detail in memory [[project_bannerlator_bannerhub_config_crossuse]] + backend reference [[reference_bannerhub_config_worker_contract]] (repo doc `docs/bannerhub_config_system_reference.md`).**
+> **Branch `feat/community-configs-v1` (tip `bba45e9`, CI GREEN run 29121869050, NOT merged/tagged). APK staged: `/sdcard/Download/bannerlator-config-list-allfolders-bba45e9-standard.apk`. Full detail in memory [[project_bannerlator_bannerhub_config_crossuse]] + backend reference [[reference_bannerhub_config_worker_contract]] (repo doc `docs/bannerhub_config_system_reference.md`).**
+>
+> **✅ DEVICE-VERIFIED (2026-07-10):** per-uploaded-config cards render correctly; **multi-folder aggregation fix** (`bba45e9` — `fetchGameConfigs` now queries ALL `game.folders` in parallel, concatenates, dedups by sha, re-sorts votes-desc, each entry carries its own folder so vote/comment/download route right) — user confirmed the config lists that had shrunk are whole again ("works well, better"). Prior regression: the first cut returned only the FIRST folder's configs, shrinking multi-folder canonical games.
 >
 > **BACKEND DISCOVERY (2026-07-10): the whole community-config system is FIRST-PARTY user-owned — one Cloudflare worker (`bannerhub-configs-worker.the412banner.workers.dev`, the SAME one Bannerlator already uses for /steam/search) + KV + the GitHub repo. Upvotes/comments/uploads/downloads all live there (NOT XiaoJi). `app_source` tags each upload (`bannerhub`/`bannerhub_lite`/ours→`bannerlator`) and `/admin/purge` deletes by it → Bannerlator reuses the SAME worker, no new backend/repo. Full endpoint+format contract in the repo doc.**
 >
