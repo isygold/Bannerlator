@@ -17,6 +17,8 @@ import com.winlator.star.communityconfigs.CanonicalGame
 import com.winlator.star.communityconfigs.CommunityConfigApply
 import com.winlator.star.communityconfigs.CommunityConfigFetcher
 import com.winlator.star.communityconfigs.CommunityConfigRepository
+import com.winlator.star.communityconfigs.CommunityConfigWorker
+import com.winlator.star.communityconfigs.WorkerComment
 import com.winlator.star.communityconfigs.ConfigMeta
 import com.winlator.star.communityconfigs.ConfigTranslator
 import com.winlator.star.communityconfigs.ShortcutConfig
@@ -88,6 +90,15 @@ data class CommunityConfigDetail(
     val meta: ConfigMeta,
     val config: ShortcutConfig,
     val preview: CommunityConfigApply.ConfigApplyResult?,
+    // Live social layer from the configs worker (best-effort; blank/empty when offline or unmatched).
+    // [workerGame] is the game key the matching /list entry lived under — reused for vote/comment so
+    // they land on the same KV bucket; null when no /list entry matched [fileName].
+    val sha: String? = null,
+    val workerGame: String? = null,
+    val votes: Int = 0,
+    val downloads: Int = 0,
+    val description: String = "",
+    val comments: List<WorkerComment> = emptyList(),
 )
 
 class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
@@ -253,9 +264,65 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
                         isAdreno = GPUInformation.isAdrenoGPU(getApplication()),
                     )
                 }
-                CommunityConfigDetail(game, device, fetched.fileName, meta, config, preview)
+                // Resolve the live social layer: find this file's /list entry (across the game's
+                // folders, then its name) to get sha + votes + downloads, then desc + comments. All
+                // best-effort — any miss just leaves the social section empty; never fails the page.
+                var sha: String? = null
+                var workerGame: String? = null
+                var votes = 0
+                var downloads = 0
+                val candidates = (game.folders + game.name).distinct()
+                for (key in candidates) {
+                    val entry = CommunityConfigWorker.list(key)
+                        .firstOrNull { it.filename == fetched.fileName } ?: continue
+                    sha = entry.sha.ifBlank { null }
+                    workerGame = key
+                    votes = entry.votes
+                    downloads = entry.downloads
+                    break
+                }
+                val description = sha?.let { CommunityConfigWorker.desc(it) } ?: ""
+                val comments = workerGame?.let { CommunityConfigWorker.comments(it, fetched.fileName) } ?: emptyList()
+                CommunityConfigDetail(
+                    game, device, fetched.fileName, meta, config, preview,
+                    sha = sha, workerGame = workerGame, votes = votes, downloads = downloads,
+                    description = description, comments = comments,
+                )
             }
             onResult(detail)
+        }
+    }
+
+    /**
+     * POST an upvote for [sha] (bucketed under [game]/[filename]) and hand back the new count, or null
+     * on failure. Local per-sha dedup lives in the UI (a `banner_config_votes` prefs file), matching
+     * BannerHub; the worker also enforces one vote per IP per 24h.
+     */
+    fun voteConfig(sha: String, game: String, filename: String, onResult: (Int?) -> Unit) {
+        viewModelScope.launch {
+            val votes = withContext(Dispatchers.IO) { CommunityConfigWorker.vote(sha, game, filename) }
+            onResult(votes)
+        }
+    }
+
+    /**
+     * POST a comment then re-fetch the thread so the UI shows it immediately. [onResult] gets the
+     * refreshed list on success, or null when the post failed (UI keeps the field populated to retry).
+     */
+    fun addConfigComment(
+        game: String,
+        filename: String,
+        text: String,
+        device: String,
+        onResult: (List<WorkerComment>?) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val refreshed = withContext(Dispatchers.IO) {
+                if (CommunityConfigWorker.postComment(game, filename, text, device))
+                    CommunityConfigWorker.comments(game, filename)
+                else null
+            }
+            onResult(refreshed)
         }
     }
 

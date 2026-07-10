@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -172,6 +173,7 @@ import com.winlator.star.widget.CPUListView
 import com.winlator.star.widget.EnvVarsView
 import com.winlator.star.winhandler.WinHandler
 import android.net.Uri
+import android.os.Build
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -840,11 +842,10 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                         (d.soc.isNotBlank() && (hw.contains(d.soc.lowercase()) || d.soc.lowercase().contains(hw))) ||
                                         (d.gpu.isNotBlank() && (hw.contains(d.gpu.lowercase()) || d.gpu.lowercase().contains(hw)))
                                     )
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    ) {
+                                    // Whole config card taps → chooser (Apply to this shortcut / View
+                                    // details). The in-context shortcut `s` is carried so details can
+                                    // preview the diff.
+                                    CommunityCard(onClick = { configAction = Triple(game, d, s) }) {
                                         Column(modifier = Modifier.weight(1f)) {
                                             Text(
                                                 text = d.model.ifBlank { "Unknown device" },
@@ -864,13 +865,6 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                                 )
                                             }
                                         }
-                                        // Tap → chooser (Apply to this shortcut / View details). The
-                                        // in-context shortcut `s` is carried so details can preview the diff.
-                                        OutlinedButton(
-                                            onClick = { configAction = Triple(game, d, s) },
-                                            enabled = !applyBusy,
-                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                                        ) { Text("Apply") }
                                     }
                                 }
                             }
@@ -945,6 +939,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             detail = detail,
             loading = detailLoading,
             failed = detailFailed,
+            vm = vm,
             onApply = {
                 detailFor = null
                 startConfigApply(game, device, ctxShortcut)
@@ -1624,10 +1619,13 @@ private fun CommunityCatalogBrowser(
                         modifier = Modifier.padding(24.dp),
                     )
                 } else {
-                    LazyColumn(modifier = modifier) {
+                    LazyColumn(
+                        modifier = modifier,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         items(visible, key = { it.identity }) { g ->
                             CommunityGameRow(game = g, onClick = { selectedIdentity = g.identity })
-                            Divider(color = DividerColor)
                         }
                     }
                 }
@@ -1698,17 +1696,34 @@ private fun CommunityCatalogBrowser(
     }
 }
 
-// One game row in the catalog browser: name, Steam/Title badge, config + device counts.
+// Shared thin outlined card for the community browser's game + config rows. Matches the app's
+// FileManager/Containers card idiom (surfaceContainer fill, 1dp outline, rounded 10dp) but with a
+// tighter vertical rhythm so the rows read as a compact list. The whole card is the tap target.
+@Composable
+private fun CommunityCard(
+    onClick: () -> Unit,
+    content: @Composable RowScope.() -> Unit,
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            content = content,
+        )
+    }
+}
+
+// One game card in the catalog browser: name, Steam/Title badge, config + device counts.
 @Composable
 private fun CommunityGameRow(game: CanonicalGame, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    CommunityCard(onClick = onClick) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = game.name,
@@ -1729,7 +1744,8 @@ private fun CommunityGameRow(game: CanonicalGame, onClick: () -> Unit) {
     }
 }
 
-// Per-device config list for a browser-selected game (user's-hardware first), each with "Apply to game…".
+// Per-device config list for a browser-selected game (user's-hardware first); each config is a
+// whole-row-tappable card that opens the Apply-to-game… | View-details chooser.
 @Composable
 private fun CommunityDevicePanel(
     game: CanonicalGame,
@@ -1760,24 +1776,22 @@ private fun CommunityDevicePanel(
         }
     }
 
-    // The per-device config rows with "Apply to game…" buttons. `modifier` provides the scroll container.
+    // The per-device config cards (whole-row tap → chooser). `modifier` provides the scroll container.
     @Composable
     fun DeviceList(modifier: Modifier) {
         if (ranked.isEmpty()) {
             Text("No device configs listed.", color = OnSurfaceVariant, modifier = modifier.padding(12.dp))
         } else {
             val hw = hardwareLabel?.lowercase()
-            Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Each config is a thin outlined card; the whole card taps through to the chooser
+            // (Apply to game… | View details) via [onApply] — no per-row button.
+            Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 ranked.forEach { d ->
                     val isMatch = hw != null && (
                         (d.soc.isNotBlank() && (hw.contains(d.soc.lowercase()) || d.soc.lowercase().contains(hw))) ||
                         (d.gpu.isNotBlank() && (hw.contains(d.gpu.lowercase()) || d.gpu.lowercase().contains(hw)))
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
+                    CommunityCard(onClick = { onApply(game, d) }) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = d.model.ifBlank { "Unknown device" },
@@ -1791,10 +1805,6 @@ private fun CommunityDevicePanel(
                                 Text(sub, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
-                        OutlinedButton(
-                            onClick = { onApply(game, d) },
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                        ) { Text("Apply to game…") }
                     }
                 }
             }
@@ -1868,9 +1878,112 @@ private fun CommunityConfigDetailDialog(
     detail: CommunityConfigDetail?,
     loading: Boolean,
     failed: Boolean,
+    vm: ShortcutsViewModel,
     onApply: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val context = LocalContext.current
+    // Live social state, seeded from [detail] (re-seeds when the async load lands). Vote dedup is local
+    // per-sha in a `banner_config_votes` prefs file, mirroring BannerHub's `bh_config_votes`; the worker
+    // also enforces one vote / IP / 24h.
+    val votePrefs = remember { context.getSharedPreferences("banner_config_votes", Context.MODE_PRIVATE) }
+    var votes by remember(detail) { mutableStateOf(detail?.votes ?: 0) }
+    var comments by remember(detail) { mutableStateOf(detail?.comments ?: emptyList()) }
+    var voted by remember(detail) {
+        mutableStateOf(detail?.sha?.let { votePrefs.getBoolean(it, false) } ?: false)
+    }
+    var voting by remember(detail) { mutableStateOf(false) }
+    var commentText by remember(detail) { mutableStateOf("") }
+    var commenting by remember(detail) { mutableStateOf(false) }
+
+    // The live social block: ★ votes · ↓ downloads, uploader description, an Upvote button (local +
+    // worker dedup), the comment thread, and a compact add-comment field. Only rendered when a worker
+    // /list entry matched this file ([workerGame] != null) — otherwise there's no social data to show.
+    @Composable
+    fun Social(d: CommunityConfigDetail) {
+        Divider(color = DividerColor)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("★ $votes", style = MaterialTheme.typography.bodyMedium, color = OnSurface)
+            Text("↓ ${d.downloads}", style = MaterialTheme.typography.bodyMedium, color = OnSurfaceVariant)
+        }
+        if (d.description.isNotBlank()) {
+            Text(d.description, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+        }
+        d.sha?.let { sha ->
+            OutlinedButton(
+                onClick = {
+                    val g = d.workerGame ?: return@OutlinedButton
+                    if (voted || voting) return@OutlinedButton
+                    voting = true
+                    vm.voteConfig(sha, g, d.fileName) { newVotes ->
+                        voting = false
+                        if (newVotes != null) {
+                            votes = newVotes
+                            voted = true
+                            votePrefs.edit().putBoolean(sha, true).apply()
+                        } else {
+                            Toast.makeText(context, "Couldn't record your vote.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+                enabled = !voted && !voting,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                if (voting) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                } else {
+                    Text(if (voted) "Voted ✓" else "Upvote")
+                }
+            }
+        }
+
+        Text("Comments", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+        if (comments.isEmpty()) {
+            Text("No comments yet.", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+        } else {
+            comments.forEach { c ->
+                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    val head = listOf(c.device, c.date).filter { it.isNotBlank() }.joinToString(" · ")
+                    if (head.isNotEmpty()) {
+                        Text(head, style = MaterialTheme.typography.labelSmall, color = OnSurfaceVariant)
+                    }
+                    Text(c.text, style = MaterialTheme.typography.bodySmall, color = OnSurface)
+                }
+            }
+        }
+        // Add a comment (worker caps text at 500 chars).
+        val workerGame = d.workerGame
+        if (workerGame != null) {
+            OutlinedTextField(
+                value = commentText,
+                onValueChange = { if (it.length <= 500) commentText = it },
+                label = { Text("Add a comment") },
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 3,
+            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(
+                    onClick = {
+                        val text = commentText.trim()
+                        if (text.isEmpty() || commenting) return@TextButton
+                        commenting = true
+                        val dev = Build.MANUFACTURER + "_" + Build.MODEL
+                        vm.addConfigComment(workerGame, d.fileName, text, dev) { refreshed ->
+                            commenting = false
+                            if (refreshed != null) {
+                                comments = refreshed
+                                commentText = ""
+                            } else {
+                                Toast.makeText(context, "Couldn't post your comment.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    enabled = commentText.isNotBlank() && !commenting,
+                ) { Text(if (commenting) "Sending…" else "Send") }
+            }
+        }
+    }
+
     // Provenance — game · device · soc · uploaded date · BannerHub source badge. Prefers the config's
     // own meta, falling back to the catalog device row when a field is blank.
     @Composable
@@ -1979,6 +2092,10 @@ private fun CommunityConfigDetailDialog(
                             pre.advisories.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant) }
                         }
                     }
+
+                    // Live social layer (votes / downloads / description / comments) — only when a
+                    // worker /list entry matched this file; otherwise there's nothing to show.
+                    if (detail.workerGame != null) Social(detail)
                 }
             }
         }
