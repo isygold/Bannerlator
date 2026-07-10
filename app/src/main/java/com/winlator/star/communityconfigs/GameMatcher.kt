@@ -65,16 +65,14 @@ object GameMatcher {
             val inter = qSet.count { it in gSet }
             if (inter == 0 && !exact) continue
 
-            val score = when {
-                exact -> 1.0
-                // Subset either direction (e.g. query "crysis 3" ⊆ canonical "crysis 3 warhead").
-                qSet.containsAll(gSet) || gSet.containsAll(qSet) -> {
-                    val bigger = maxOf(qSet.size, gSet.size).toDouble()
-                    0.90 * (minOf(qSet.size, gSet.size) / bigger)
-                }
-                // Otherwise overlap coefficient over the smaller set.
-                else -> 0.80 * (inter.toDouble() / minOf(qSet.size, gSet.size))
-            }
+            // Score primarily by how fully the CANONICAL name is covered by the shortcut: a game
+            // name fully contained in the shortcut (e.g. "Dirt 3" ⊆ "dirt 3 colin mcrae", or
+            // "Crysis 3" ⊆ "crysis 3 remastered") is a strong match and must not be diluted by the
+            // shortcut's extra subtitle tokens. Blend with query coverage; tiny +inter bonus breaks
+            // ties toward more shared tokens (so "Dirt 3" beats a "3"-only name).
+            val covGame = inter.toDouble() / gSet.size
+            val covQuery = inter.toDouble() / qSet.size
+            val score = if (exact) 1.0 else (0.7 * covGame + 0.3 * covQuery + 0.001 * inter)
             if (score >= MIN_SCORE) candidates.add(GameCandidate(game, score, exact))
         }
 
@@ -82,6 +80,34 @@ object GameMatcher {
             compareByDescending<GameCandidate> { it.score }
                 .thenByDescending { it.game.configCount }
         )
+    }
+
+    /**
+     * Free-text search over the whole database — the manual-pick fallback for when auto-match is
+     * wrong or empty. Ranks exact > prefix > substring > token-overlap, breaking ties by config count.
+     */
+    fun search(query: String, games: List<CanonicalGame>, limit: Int = 40): List<CanonicalGame> {
+        val q = query.trim().lowercase()
+        if (q.length < 2) return emptyList()
+        val qTokens = tokenize(query).toSet()
+        return games.asSequence()
+            .mapNotNull { g ->
+                val name = g.name.lowercase()
+                val gTokens = tokenize(g.name).toSet()
+                val hits = qTokens.count { it in gTokens }
+                val rank = when {
+                    name == q -> 4.0
+                    name.startsWith(q) -> 3.0
+                    name.contains(q) -> 2.0
+                    hits > 0 -> 1.0 + hits.toDouble() / (qTokens.size + 1)
+                    else -> 0.0
+                }
+                if (rank <= 0.0) null else g to (rank + g.configCount * 1e-6)
+            }
+            .sortedByDescending { it.second }
+            .take(limit)
+            .map { it.first }
+            .toList()
     }
 
     /**

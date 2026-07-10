@@ -75,6 +75,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import com.winlator.star.communityconfigs.CanonicalGame
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -192,6 +193,8 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var communityTarget by remember { mutableStateOf<Shortcut?>(null) }
     var communityResult by remember { mutableStateOf<CommunityMatchResult?>(null) }
     var communityLoading by remember { mutableStateOf(false) }
+    var communitySearch by remember(communityTarget) { mutableStateOf("") }
+    var communitySearchResults by remember(communityTarget) { mutableStateOf<List<CanonicalGame>>(emptyList()) }
     val scope = rememberCoroutineScope()
 
     // Shared "Scrape cover" action so both grid tiles and list rows fire the same flow.
@@ -635,9 +638,59 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             text = {
                 val result = communityResult
                 val game = result?.match
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = communitySearch,
+                    onValueChange = { q ->
+                        communitySearch = q
+                        if (q.trim().length >= 2) vm.searchCommunityGames(q) { communitySearchResults = it }
+                        else communitySearchResults = emptyList()
+                    },
+                    label = { Text("Search all games") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (communitySearch.trim().length >= 2) {
+                    if (communitySearchResults.isEmpty()) {
+                        Text("No games match \"$communitySearch\".", color = OnSurfaceVariant)
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 360.dp)
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            communitySearchResults.forEach { cg ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            vm.selectCommunityGame(cg) { communityResult = it }
+                                            communitySearch = ""
+                                            communitySearchResults = emptyList()
+                                        }
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        text = cg.name,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = OnSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text("${cg.configCount}", style = MaterialTheme.typography.labelSmall, color = OnSurfaceVariant)
+                                    CommunityStoreBadge(isSteam = cg.isSteam)
+                                }
+                            }
+                        }
+                    }
+                } else {
                 when {
                     communityLoading -> Text("Matching \"${s.name}\"…", color = OnSurfaceVariant)
-                    game == null -> Text("No community configs found for \"${s.name}\".", color = OnSurfaceVariant)
+                    game == null -> Text("No auto-match for \"${s.name}\" — search above to pick one.", color = OnSurfaceVariant)
                     else -> {
                         Column(
                             modifier = Modifier
@@ -726,6 +779,8 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                             }
                         }
                     }
+                }
+                }
                 }
             },
             confirmButton = {},

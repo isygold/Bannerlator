@@ -110,6 +110,31 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Free-text search across the whole community DB — the manual-pick fallback when auto-match misses. */
+    fun searchCommunityGames(query: String, onResult: (List<CanonicalGame>) -> Unit) {
+        viewModelScope.launch {
+            val games = withContext(Dispatchers.IO) { GameMatcher.search(query, communityRepo.getGames()) }
+            onResult(games)
+        }
+    }
+
+    /** Build the same suggest view for a game the user picked manually from search. */
+    fun selectCommunityGame(game: CanonicalGame, onResult: (CommunityMatchResult) -> Unit) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                val userSoc = DeviceIdentity.soc()
+                val userGpu = DeviceIdentity.gpu(getApplication())
+                CommunityMatchResult(
+                    query = game.name,
+                    match = game,
+                    rankedDevices = GameMatcher.rankDevices(game.devices, userSoc, userGpu),
+                    userHardwareLabel = userSoc ?: userGpu,
+                )
+            }
+            onResult(result)
+        }
+    }
+
     fun setSortOrder(order: ShortcutSortOrder) {
         _sortOrder.value = order
         prefs.edit().putInt("sort_order", order.ordinal).apply()
