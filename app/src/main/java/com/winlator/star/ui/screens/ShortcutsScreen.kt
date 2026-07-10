@@ -55,6 +55,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddToHomeScreen
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.SwapVert
@@ -209,12 +210,20 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var applyMismatch by remember { mutableStateOf<Triple<Shortcut, CanonicalGame, CanonicalDevice>?>(null) }
     var applyBusy by remember { mutableStateOf(false) }
     var applyResult by remember { mutableStateOf<CommunityConfigApply.ConfigApplyResult?>(null) }
+    // The shortcut the current result was applied to — threaded through so a post-install component
+    // fixup can write the resolved version sub-field back to the right shortcut.
+    var applyTarget by remember { mutableStateOf<Shortcut?>(null) }
+    // Missing component the user tapped "Install" on → opens its single-type download sheet.
+    var installSheetFor by remember { mutableStateOf<CommunityConfigApply.MissingComponent?>(null) }
+    // Labels of missing components that resolved after an install (→ checkmark instead of a button).
+    val resolvedMissing = remember(applyResult) { mutableStateListOf<String>() }
     val scope = rememberCoroutineScope()
 
     // Shared apply runner — used by both the catalog browser and the per-shortcut sheet.
     val runCommunityApply: (Shortcut, CanonicalGame, CanonicalDevice) -> Unit = { sc, g, d ->
         applyBusy = true
         applyResult = null
+        applyTarget = sc
         vm.applyCommunityConfig(sc, g, d) { res ->
             applyBusy = false
             applyResult = res
@@ -895,8 +904,10 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         )
     }
 
-    // Result summary — what changed + install / Proton advisories.
-    applyResult?.let { res ->
+    // Result summary — what changed + install / Proton advisories. Hidden while a component-install
+    // sheet is open (a ModalBottomSheet renders behind an AlertDialog's window); it reappears — with
+    // any new checkmark — once the sheet closes, since applyResult / resolvedMissing persist.
+    if (installSheetFor == null) applyResult?.let { res ->
         AlertDialog(
             onDismissRequest = { applyResult = null },
             title = { Text(if (res.ok) "Config applied" else "Couldn't apply") },
@@ -911,6 +922,38 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                         Text("Changed", style = MaterialTheme.typography.labelLarge, color = OnSurface)
                         res.changed.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant) }
                     }
+                    // Missing components that ARE installable via the download sheet — text + Install button.
+                    if (res.missingComponents.isNotEmpty()) {
+                        Divider(color = DividerColor)
+                        Text("Needs a component", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+                        res.missingComponents.forEach { mc ->
+                            val done = mc.label in resolvedMissing
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    "• ${mc.label}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = OnSurfaceVariant,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                if (done) {
+                                    Icon(
+                                        Icons.Filled.CheckCircle,
+                                        contentDescription = "Installed",
+                                        tint = Color(0xFF4FC3F7),
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                } else {
+                                    TextButton(onClick = { installSheetFor = mc }) {
+                                        Text("Install", color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                            }
+                        }
+                    }
                     if (res.advisories.isNotEmpty()) {
                         Divider(color = DividerColor)
                         Text("Heads up", style = MaterialTheme.typography.labelLarge, color = OnSurface)
@@ -919,6 +962,30 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 }
             },
             confirmButton = { TextButton(onClick = { applyResult = null }) { Text("Done") } },
+        )
+    }
+
+    // Install a config's missing component via the app's normal single-type download sheet. When a
+    // build gets installed we re-resolve it against what's now on disk and, if it resolves, surgically
+    // write the version sub-field back to the target shortcut (same merge the apply engine uses).
+    installSheetFor?.let { mc ->
+        ContentDownloadSheet(
+            contentType = mc.type,
+            onDismiss = { installSheetFor = null },
+            onContentChanged = {
+                val target = applyTarget ?: return@ContentDownloadSheet
+                scope.launch {
+                    val resolved = withContext(Dispatchers.IO) {
+                        val installed = com.winlator.star.communityconfigs.InstalledComponents.read(context)
+                        CommunityConfigApply.applyResolvedComponent(target, mc, installed)
+                    }
+                    if (resolved) {
+                        if (mc.label !in resolvedMissing) resolvedMissing.add(mc.label)
+                        vm.refresh()
+                        Toast.makeText(context, "Installed and applied to \"${target.name}\".", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
         )
     }
 

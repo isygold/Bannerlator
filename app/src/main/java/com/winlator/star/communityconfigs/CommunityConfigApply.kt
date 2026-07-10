@@ -2,6 +2,7 @@ package com.winlator.star.communityconfigs
 
 import android.util.Log
 import com.winlator.star.container.Shortcut
+import com.winlator.star.contents.ContentProfile
 
 /**
  * PHASE 2 apply engine — translate a community config → SURGICALLY merge it into a game's shortcut
@@ -38,14 +39,35 @@ object CommunityConfigApply {
     val MERGE_SUBKEYS: List<String> = listOf("version", "vkd3dVersion", "async", "graphics")
 
     /**
+     * A component the config wants but that isn't installed AND is installable through the app's
+     * single-type download sheet (DXVK / VKD3D / FEXCore). Carries enough to (a) open the right sheet
+     * and (b) SURGICALLY write the resolved version sub-field back after the user installs a build.
+     * Proton / Turnip are NOT here — they stay plain advisory strings (not installable via the sheet).
+     *
+     * @param type    which single-type download sheet to open.
+     * @param label   the same human-readable advisory line shown when there's no button.
+     * @param wanted  the version the config requested (re-resolved against installs after download).
+     * @param current the shortcut's current sub-field value, or null when it has none.
+     */
+    data class MissingComponent(
+        val type: ContentProfile.ContentType,
+        val label: String,
+        val wanted: String,
+        val current: String?,
+    )
+
+    /**
      * The reviewable, human-readable outcome of an apply — what actually changed, what needs an
-     * install, and advisory-only notes (Proton). [ok] is false only on an outright fetch/translate
-     * failure; an apply that changed nothing but produced advisories is still [ok].
+     * install (structured [missingComponents], each installable via the download sheet), and
+     * advisory-only notes ([advisories]: Proton / Turnip, plain text, no button). [ok] is false only
+     * on an outright fetch/translate failure; an apply that changed nothing but produced advisories is
+     * still [ok].
      */
     data class ConfigApplyResult(
         val ok: Boolean,
         val message: String,
         val changed: List<String> = emptyList(),
+        val missingComponents: List<MissingComponent> = emptyList(),
         val advisories: List<String> = emptyList(),
     )
 
@@ -64,6 +86,7 @@ object CommunityConfigApply {
     ): ConfigApplyResult {
         val changed = ArrayList<String>()
         val advisories = ArrayList<String>()
+        val missing = ArrayList<MissingComponent>()
 
         // FEXCore is coupled to the emulator scalar: only switch to fexcore if a compatible build is
         // installed, otherwise we'd point the shortcut at a translator that isn't there.
@@ -79,7 +102,14 @@ object CommunityConfigApply {
                 }
                 InstalledComponents.Resolution.Missing -> {
                     writeEmulatorFex = false
-                    advisories.add("config uses FEXCore $wantedFex — not installed; install it to switch x86 translator.")
+                    missing.add(
+                        MissingComponent(
+                            ContentProfile.ContentType.CONTENT_TYPE_FEXCORE,
+                            "config uses FEXCore $wantedFex — not installed; install it to switch x86 translator.",
+                            wantedFex,
+                            shortcut.getExtra("fexcoreVersion").takeIf { it.isNotBlank() },
+                        )
+                    )
                 }
             }
         }
@@ -98,12 +128,16 @@ object CommunityConfigApply {
         val dxwCurrent = currentOrDefault(shortcut, "dxwrapperConfig", shortcut.container?.getDXWrapperConfig())
         val dxwUpdates = LinkedHashMap<String, String>()
         config.dxwrapperConfig["version"]?.let { wanted ->
-            resolveInto("DXVK", "DXVK", wanted, subValue(dxwCurrent, ",", "version"), installed, advisories)
-                ?.let { dxwUpdates["version"] = it }
+            resolveInto(
+                "DXVK", "DXVK", wanted, subValue(dxwCurrent, ",", "version"), installed, advisories,
+                missing, ContentProfile.ContentType.CONTENT_TYPE_DXVK,
+            )?.let { dxwUpdates["version"] = it }
         }
         config.dxwrapperConfig["vkd3dVersion"]?.let { wanted ->
-            resolveInto("VKD3D", "VKD3D", wanted, subValue(dxwCurrent, ",", "vkd3dVersion"), installed, advisories)
-                ?.let { dxwUpdates["vkd3dVersion"] = it }
+            resolveInto(
+                "VKD3D", "VKD3D", wanted, subValue(dxwCurrent, ",", "vkd3dVersion"), installed, advisories,
+                missing, ContentProfile.ContentType.CONTENT_TYPE_VKD3D,
+            )?.let { dxwUpdates["vkd3dVersion"] = it }
         }
         config.dxwrapperConfig["async"]?.let { dxwUpdates["async"] = it } // flag, always safe
         if (dxwUpdates.isNotEmpty()) {
@@ -138,18 +172,71 @@ object CommunityConfigApply {
                 shortcut.saveData()
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to persist shortcut after apply", e)
-                return ConfigApplyResult(false, "Failed to save shortcut: ${e.message ?: e.javaClass.simpleName}", changed, advisories)
+                return ConfigApplyResult(
+                    false, "Failed to save shortcut: ${e.message ?: e.javaClass.simpleName}",
+                    changed, missing, advisories,
+                )
             }
         }
 
         val message = when {
-            changed.isEmpty() && advisories.isEmpty() ->
+            changed.isEmpty() && advisories.isEmpty() && missing.isEmpty() ->
                 "Already aligned — your shortcut matches this config; nothing to change."
             changed.isEmpty() ->
                 "Nothing changed — this config needs components you don't have installed yet."
             else -> "Applied ${changed.size} change${if (changed.size == 1) "" else "s"} to \"${shortcut.name}\"."
         }
-        return ConfigApplyResult(true, message, changed, advisories)
+        return ConfigApplyResult(true, message, changed, missing, advisories)
+    }
+
+    /**
+     * Post-install fixup: after the user installs a build for a [mc], re-resolve it against [installed]
+     * and, if it now resolves, SURGICALLY write the matching version sub-field into [shortcut] using the
+     * same merge as [apply] (preserving every other sub-field). Returns true when the shortcut now
+     * honors the requested component (whether that needed a write or it was already aligned), false when
+     * it still isn't installed. Safe off the main thread (blocking saveData()).
+     */
+    fun applyResolvedComponent(
+        shortcut: Shortcut,
+        mc: MissingComponent,
+        installed: InstalledComponents,
+    ): Boolean {
+        val type = installedType(mc.type) ?: return false
+        val r = installed.resolve(type, mc.wanted, mc.current)
+        if (r !is InstalledComponents.Resolution.Match) return false
+        val token = r.token // null = already aligned; resolved, nothing to write.
+        if (token != null) {
+            when (mc.type) {
+                ContentProfile.ContentType.CONTENT_TYPE_DXVK -> {
+                    val cur = currentOrDefault(shortcut, "dxwrapperConfig", shortcut.container?.getDXWrapperConfig())
+                    shortcut.putExtra("dxwrapperConfig", mergeList(cur, linkedMapOf("version" to token), ","))
+                }
+                ContentProfile.ContentType.CONTENT_TYPE_VKD3D -> {
+                    val cur = currentOrDefault(shortcut, "dxwrapperConfig", shortcut.container?.getDXWrapperConfig())
+                    shortcut.putExtra("dxwrapperConfig", mergeList(cur, linkedMapOf("vkd3dVersion" to token), ","))
+                }
+                ContentProfile.ContentType.CONTENT_TYPE_FEXCORE -> {
+                    shortcut.putExtra("emulator", "fexcore")
+                    shortcut.putExtra("fexcoreVersion", token)
+                }
+                else -> return false
+            }
+            try {
+                shortcut.saveData()
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to persist shortcut after component install", e)
+                return false
+            }
+        }
+        return true
+    }
+
+    /** Map a sheet-installable [ContentProfile.ContentType] to its [InstalledComponents] type key. */
+    private fun installedType(type: ContentProfile.ContentType): String? = when (type) {
+        ContentProfile.ContentType.CONTENT_TYPE_DXVK -> "DXVK"
+        ContentProfile.ContentType.CONTENT_TYPE_VKD3D -> "VKD3D"
+        ContentProfile.ContentType.CONTENT_TYPE_FEXCORE -> "FEXCore"
+        else -> null
     }
 
     /** Set a scalar extra, recording the change only when it actually differs from the current value. */
@@ -170,11 +257,20 @@ object CommunityConfigApply {
         current: String?,
         installed: InstalledComponents,
         advisories: MutableList<String>,
+        missing: MutableList<MissingComponent>? = null,
+        missingType: ContentProfile.ContentType? = null,
     ): String? = when (val r = installed.resolve(installedType, wanted, current)) {
         is InstalledComponents.Resolution.Match -> r.token // null = already aligned
         InstalledComponents.Resolution.Missing -> {
             val have = current?.takeIf { it.isNotBlank() }?.let { " you have $it —" } ?: ""
-            advisories.add("config wants $label $wanted;$have install it to honor.")
+            val text = "config wants $label $wanted;$have install it to honor."
+            // Sheet-installable types get a structured entry (→ Install button); everything else
+            // (Turnip / adrenotools) stays a plain advisory line.
+            if (missing != null && missingType != null) {
+                missing.add(MissingComponent(missingType, text, wanted, current))
+            } else {
+                advisories.add(text)
+            }
             null
         }
     }
