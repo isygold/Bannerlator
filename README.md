@@ -51,15 +51,30 @@
 |---|---|
 | **App label** | `Bannerlator Bionic` (standard) · `Bannerlator Bionic PuBG` (pubg) · `Bannerlator Bionic Ludashi` (ludashi) |
 | **Packages** | `com.winlator.banner` (standard) · `com.tencent.ig` (pubg) · `com.ludashi.benchmark` (ludashi) |
-| **Version** | Bannerlator **V 2.5.1** — built from Star **marcescence** (`versionName 2.5.1`, `versionCode 41`) |
+| **Version** | Bannerlator **V 2.5.2** — built from Star **marcescence** (`versionName 2.5.2`, `versionCode 42`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
 
 ---
 
-## 🆕 What's New in 2.5.1
+## 🆕 What's New in 2.5.2
 
-2.5.1 is a **compatibility-and-tooling** follow-up to 2.5: it fixes crashes and swapped colours on the **SurfaceFlinger** renderer, adds a live **FEX runtime indicator** so you can see exactly what's translating your game, makes **FEXCore unixlib (`.so`)** handling correct when you swap FEXCore versions per game, and expands the **Environment Variable presets**. Like 2.5 it's an **app-side** update — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched; just install over 2.5.
+2.5.2 adds **Community Configs** — a way to browse **community-shared, per-game/per-device tuning configs** right inside the app and apply a known-good setup to your game in one tap, without hunting through Discord screenshots. It also ships **two new Proton 11 x86-64 compatibility layers** in the downloadable catalog. Like the last few releases it's an **app-side** update — **no ImageFS reinstall** — your containers, themes, custom accent and per-game settings carry over untouched; just install over 2.5.1.
+
+**🌐 Community Configs — new.** A new **globe** button in the **Games** header opens a browsable catalog of community game-configs. Bannerlator matches your installed games to the catalog, and a **"Matches my device"** filter narrows it to configs shared from hardware like yours. Each shared config is its own card showing its **★ upvotes** and **↓ downloads** (best-rated first), the device it came from, and its date.
+
+- **One-tap Apply.** Tap a config → **Apply to game** and Bannerlator **surgically merges** just that config's settings — DXVK / VKD3D / Turnip driver / FEX preset / renderer / resolution / launch args / environment variables — into your shortcut, **preserving everything else you've set** (BCn options, HUD, colour toggles, and the rest are untouched). It'll even apply a config to a *different* game, warning you first.
+- **Smart install of what's missing.** If a config needs a **DXVK / VKD3D / FEXCore** build or a **Turnip GPU driver** you don't have, install it inline right there — an exact match installs with one confirm, or you pick from the closest versions (or browse all) — and the config **auto-applies** once it lands, with a ✓. FEX date-stamped builds are matched by their **YYMM** build tag so a dated config resolves to the right monthly build, and a component you already have is recognised instead of erroring.
+- **Config detail page.** Tap **View details** for a config's provenance (source device / SoC / app / date), exactly **what it sets** in Bannerlator's own component terms, and a **preview of what would change** on your shortcut before you apply. The detail page also shows the config's **description, upvotes, downloads and comments** live — and you can **upvote** and **leave a comment** yourself.
+
+> ℹ️ Community Configs is **read-only for your setup** — it only ever changes a shortcut when *you* tap Apply, and it never touches your containers, imagefs or existing settings.
+
+**🍷 Two new Proton 11 x86-64 compatibility layers — new.** Two **Proton 11.0-1 (x86_64)** compatibility layers are now downloadable in-app from the **Compatibility Layers** menu (Wine/Proton tab): **`proton-11.0-1-x86_64-sdk28`** for Android 9-era devices and **`proton-11.0-1-x86_64-sdk35`** for Android 15 — pick the one matching your Android version.
+
+<details>
+<summary><b>Previously in 2.5.1</b> — the compatibility & tooling release</summary>
+
+2.5.1 is a **compatibility-and-tooling** follow-up to 2.5: it fixes crashes and swapped colours on the **SurfaceFlinger** renderer, adds a live **FEX runtime indicator** so you can see exactly what's translating your game, makes **FEXCore unixlib (`.so`)** handling correct when you swap FEXCore versions per game, and expands the **Environment Variable presets**.
 
 **🎨 SurfaceFlinger renderer: colour & crash fix — new.** The **SurfaceFlinger** host renderer (ASurfaceRenderer) gets a crash-and-colour-accuracy fix: the red/blue channel swap is corrected, a GPU-side format converter and proper fencing are added, and the OpenGL / Vulkan / DRI3 paths are left untouched. A new **"Correct SurfaceFlinger colours"** toggle is available **per container and per game** (shown inline under the **Renderer** picker when SurfaceFlinger is selected, on by default). Device-verified on **Adreno 750**: *DiRT 3* on **DXVK + SurfaceFlinger** renders with correct colours, no R/B swap, and no Vulkan / OpenGL regression. *(Ported from [GameNative](https://github.com/utkarshdalal/GameNative) #1620 / #1644.)*
 
@@ -80,6 +95,7 @@
 
 **🔧 Fixes.** The `wrapper_DestroyBuffer: null buffer` **log spam is eliminated** (bundled Vulkan wrapper bumped to **ETC2-Milestone-2**); the in-game **Copy-logs action row is pinned on-screen** (it was pushed off the bottom in landscape); and the **release-notes pipeline is hardened** against backticks / shell metacharacters.
 
+</details>
 </details>
 
 <details>
@@ -182,7 +198,7 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 - **DXVK** — DirectX 8 / 9 / 10 / 11 → Vulkan (with GPLAsync and Sarek variants).
 - **VKD3D-Proton** — DirectX 12 → Vulkan.
 - **WineD3D / DirectDraw** OpenGL fallback paths for older titles.
-- **Proton bionic** translation layers (via GameNative).
+- **Proton bionic** translation layers (via GameNative) — including **Proton 11.0-1** in **arm64ec** and **x86-64** builds, packaged per Android SDK (**SDK 28** for Android 9-era, **SDK 35** for Android 15) and downloadable from the Compatibility Layers menu.
 - **VEGAS** — Adreno-optimized DXVK for reduced stutter and real-time upscaling on mobile GPUs.
   - > 📖 **New to VEGAS?** Read the **[VEGAS DXVK FAQ](https://htmlpreview.github.io/?https://github.com/The412Banner/Bannerlator/blob/main/docs/vegas_faq.html)** — install, config, FSR, tiers, frame generation & shader-stutter troubleshooting.
   - > 🚀 **Support VEGAS Development** — low-level graphics dev & vibecoder: debugging, refactoring & improving original DXVK code for Adreno. **[❤️ Sponsor isygold →](https://github.com/sponsors/isygold)**
@@ -231,6 +247,15 @@ Everything Bannerlator offers, at a glance. No PC and no root required — it ru
 - Per-game settings including display language / locale.
 - **Customizable on-screen touch controls** and virtual gamepad overlays, which **follow your app theme** or take a **per-game custom colour** you set in the Controls editor.
 - **Physical controller** support (SDL2), plus touchpad / mouse emulation with adjustable cursor speed. The **external controller-binding screen** lists each input as a card with readable labels, and buttons you press while binding appear instantly.
+
+### 🌐 Community Configs
+Browse **community-shared, per-game / per-device tuning configs** in-app and apply a known-good setup in one tap.
+- **Catalog browser** (globe button in the Games header) with search, Steam / Title filters, sort by upvotes / name / device count, and a **"Matches my device"** filter that narrows to configs shared from hardware like yours.
+- **Per-config cards** showing **★ upvotes** and **↓ downloads** (best-rated first), the source device / SoC and the date, aggregated across every folder a game is known by.
+- **One-tap Apply** that **surgically merges** just the config's settings — DXVK / VKD3D / Turnip driver / FEX preset / renderer / resolution / launch args / environment variables — into your shortcut, **preserving everything else you've set**. Applies to any shortcut, warning you if it doesn't match the game.
+- **Smart install** of a config's missing **DXVK / VKD3D / FEXCore** build or **Turnip GPU driver**: an exact match installs with one confirm, otherwise pick from the closest versions (or browse all), and the config **auto-applies** afterward. FEX date builds match by their **YYMM** monthly tag; components you already have are recognised, not re-installed.
+- **Config detail page** — provenance (source device / SoC / app / date), a plain-language list of **what the config sets** in Bannerlator's own component terms, and a **before-you-apply diff** against your shortcut, plus the config's **live description, upvotes, downloads and comments** — you can **upvote** and **comment** yourself.
+- **Read-only for your setup** — nothing changes unless *you* tap Apply; your containers, imagefs and existing settings are never touched.
 
 ### 🛒 Built-in stores & cross-store Download Manager
 Sign in to your existing storefronts and play from libraries **you already own** — Bannerlator does not sell, bundle or circumvent any game or DRM.
@@ -414,7 +439,7 @@ This build stands on a long chain of prior work — its direct lineage, plus the
 | **JavaSteam** | [JavaSteam](https://github.com/Longi94/JavaSteam) (`in.dragonbra:javasteam`) by **Longi94** — the Steam **connection-manager client** the built-in Steam store logs in and talks to Steam with, and — via the **`javasteam-depotdownloader`** fork by **joshuatam** — the **entire depot-download engine** Bannerlator's Steam store is built on. |
 | **Goldberg Steam Emu / gbe_fork** | [Goldberg Steam Emu](https://mr_goldberg.gitlab.io/goldberg_emulator/) by **Mr_Goldberg**, and **gbe_fork** by **[Detanup01](https://github.com/Detanup01/gbe_fork)** — the Steam emulator Bannerlator's **Goldberg auto-patch** installs (Regular / Experimental / ColdClient tiers) for offline / emulated play of games you own. |
 | **Pluvia** | [Pluvia](https://github.com/oxters168/Pluvia) — an Android Steam client whose patterns were **referenced alongside GameNative** while building the Steam store's login / session handling. |
-| **The412Banner** | Full Jetpack Compose UI migration, in-game overlay rewrite, controller-support restore (SDL2 SoName fix + four event files), Box64 edit-dialog fix, theme system, and CI/release infrastructure. **In 2.3**, building on JavaSteam / GameNative / Goldberg, the original engineering is Bannerlator's own: the **cross-store Download Manager**, the **four storefront integrations** (Steam / Epic / GOG / Amazon), the multi-week **Steam session-hardening** work, the depot **OOM fix**, the **Goldberg auto-patch** integration, the store **Material-3 restyle**, and the store-log **credential redaction** (`StoreLog.redactUrl`). **In 2.4**, the **fullscreen aspect-ratio pipeline** (Off/Fit/Stretch/Fill/Integer across all three renderers), the **in-app File-Manager import picker** replacing SAF (with image thumbnails + percent/ETA import progress), the **DLC picker**, the **true-size depot install fix**, **per-game persistence** of scaling / fullscreen / HUD position, and the **container wallpaper picker**. **In 2.5**, the **Mali / BCn hardening** — wiring leegao's bcn_layer (shader-v3) + ETC2-Milestone-2 wrapper into the **"Wrapper + bcn_layer"** and experimental **"Wrapper-gamenative"** drivers, the **BCn Layer Settings** UI, and the **in-game logging overhaul** (copy-logs button, selectable log location, co-located DXVK/VKD3D logs, scrollable debug-channels dialog). **In 2.5.1**, the **SurfaceFlinger colour + crash fix** and per-container / per-game **"Correct SurfaceFlinger colours"** toggle (ASurfaceRenderer R/B-swap fix + GPU converter, ported from GameNative #1620 / #1644), the in-game **FEX runtime indicator** (arm64ec / x86-64 · FEXCore / wowbox64 / Box64 · unixlib / DLL, read live from `/proc/<pid>/maps`), the **FEXCore unixlib (`.so`) auto-match** at launch (per-game version sync + uninstall cleanup), and **18 new Environment Variable presets** (DXVK / VKD3D / Wine / Mesa). Also maintains the [Nightlies WCP Hub](https://github.com/The412Banner/Nightlies) and [Banners-Turnip](https://github.com/The412Banner/Banners-Turnip). |
+| **The412Banner** | Full Jetpack Compose UI migration, in-game overlay rewrite, controller-support restore (SDL2 SoName fix + four event files), Box64 edit-dialog fix, theme system, and CI/release infrastructure. **In 2.3**, building on JavaSteam / GameNative / Goldberg, the original engineering is Bannerlator's own: the **cross-store Download Manager**, the **four storefront integrations** (Steam / Epic / GOG / Amazon), the multi-week **Steam session-hardening** work, the depot **OOM fix**, the **Goldberg auto-patch** integration, the store **Material-3 restyle**, and the store-log **credential redaction** (`StoreLog.redactUrl`). **In 2.4**, the **fullscreen aspect-ratio pipeline** (Off/Fit/Stretch/Fill/Integer across all three renderers), the **in-app File-Manager import picker** replacing SAF (with image thumbnails + percent/ETA import progress), the **DLC picker**, the **true-size depot install fix**, **per-game persistence** of scaling / fullscreen / HUD position, and the **container wallpaper picker**. **In 2.5**, the **Mali / BCn hardening** — wiring leegao's bcn_layer (shader-v3) + ETC2-Milestone-2 wrapper into the **"Wrapper + bcn_layer"** and experimental **"Wrapper-gamenative"** drivers, the **BCn Layer Settings** UI, and the **in-game logging overhaul** (copy-logs button, selectable log location, co-located DXVK/VKD3D logs, scrollable debug-channels dialog). **In 2.5.1**, the **SurfaceFlinger colour + crash fix** and per-container / per-game **"Correct SurfaceFlinger colours"** toggle (ASurfaceRenderer R/B-swap fix + GPU converter, ported from GameNative #1620 / #1644), the in-game **FEX runtime indicator** (arm64ec / x86-64 · FEXCore / wowbox64 / Box64 · unixlib / DLL, read live from `/proc/<pid>/maps`), the **FEXCore unixlib (`.so`) auto-match** at launch (per-game version sync + uninstall cleanup), and **18 new Environment Variable presets** (DXVK / VKD3D / Wine / Mesa). **In 2.5.2**, the **Community Configs** system — the in-app catalog browser, per-uploaded-config cards with live upvotes / downloads / comments, the surgical config-apply engine, and the smart inline installer for DXVK / VKD3D / FEXCore + Turnip drivers — plus **two new Proton 11.0-1 x86-64 compatibility layers** (SDK 28 / SDK 35) built and published to the downloadable catalog. Also maintains the [Nightlies WCP Hub](https://github.com/The412Banner/Nightlies) and [Banners-Turnip](https://github.com/The412Banner/Banners-Turnip). |
 
 ### Upstream stack
 
