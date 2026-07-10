@@ -14,6 +14,8 @@
 >
 > **⚠️ Gotcha:** index cache is in-memory (`cachedGames`)+disk+24h → server fixes need app FORCE-STOP or 24h. **TODO: refresh affordance / ETag.**
 >
+>
+> **Install flow (evolved through on-device testing, 2026-07-10):** (a) Apply screen's missing-component advisories (DXVK/VKD3D/FEXCore) got **Install buttons** → version-list picker → install → auto-apply → checkmark (CI 29097942831, APK `install-buttons`). (b) **Dialog-stacking fix** (CI 29099460009, APK `install-fix`): the download sheet (`ContentDownloadSheet` = ModalBottomSheet) rendered *behind* the community `Dialog` windows — user couldn't see it until closing them; fix gates ALL community dialog layers (browser / apply-picker / per-shortcut / result) on `installSheetFor==null`. (c) **Smart inline install** (branch `d08dabac`, CI 29101574597): Install now resolves the wanted version vs the catalog — **exact** → "Install `<ver>`?" confirm → **inline** download+install+auto-apply+checkmark (no menu); **no-exact** → ~3 closest versions + "Browse all" fallback. Proton/Turnip stay advisory-only.
 > **▶️ NEXT:** on-device verify APPLY (DiRT 3/Crysis 3 → shortcut; surgical merge preserves settings; component resolution; FEX date-ver flags "install"). Then refresh-affordance TODO, then Phase 3 export/import. NOT merged — awaiting on-device sign-off.
 
 ## 2026-07-08 — 🚧 2.6-pre: port GameNative #1620 (+#1644) — ASR SurfaceFlinger crash + BGRA→RGBA color fix
