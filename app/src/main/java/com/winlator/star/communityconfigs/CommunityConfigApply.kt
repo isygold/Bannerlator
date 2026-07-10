@@ -105,6 +105,57 @@ object CommunityConfigApply {
         containerWineVersion: String?,
         isAdreno: Boolean,
     ): ConfigApplyResult {
+        // Write-through: build() computes the diff and pushes each field via putExtra as it goes,
+        // exactly as before; then persist once if anything actually changed.
+        val result = build(shortcut, config, installed, containerWineVersion, isAdreno) { key, value ->
+            shortcut.putExtra(key, value)
+        }
+        if (result.changed.isNotEmpty()) {
+            try {
+                shortcut.saveData()
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to persist shortcut after apply", e)
+                return result.copy(
+                    ok = false,
+                    message = "Failed to save shortcut: ${e.message ?: e.javaClass.simpleName}",
+                )
+            }
+        }
+        return result
+    }
+
+    /**
+     * Non-mutating twin of [apply]: computes the exact same diff ([ConfigApplyResult.changed],
+     * [ConfigApplyResult.missingComponents], [ConfigApplyResult.missingDrivers],
+     * [ConfigApplyResult.advisories]) WITHOUT writing anything to [shortcut] and WITHOUT persisting.
+     * Its {@code changed} lines describe what WOULD change ("dxwrapperConfig.version -> 2.7"); the
+     * shortcut is left untouched. Shares [build] with [apply] so the two can never drift — the only
+     * difference is that here the commit sink is a no-op and there is no {@code saveData()}. Safe on
+     * any thread (pure reads).
+     */
+    fun preview(
+        shortcut: Shortcut,
+        config: ShortcutConfig,
+        installed: InstalledComponents,
+        containerWineVersion: String?,
+        isAdreno: Boolean,
+    ): ConfigApplyResult =
+        build(shortcut, config, installed, containerWineVersion, isAdreno) { _, _ -> }
+
+    /**
+     * Shared change-computation for [apply] and [preview]. Reads the shortcut's current values (each
+     * field is read exactly once, before it is written, and no field is re-read after a write), decides
+     * what would change, and routes every intended write through [commit] — a write-through putExtra for
+     * [apply], a no-op for [preview]. Does NOT persist; the caller owns {@code saveData()}.
+     */
+    private fun build(
+        shortcut: Shortcut,
+        config: ShortcutConfig,
+        installed: InstalledComponents,
+        containerWineVersion: String?,
+        isAdreno: Boolean,
+        commit: (key: String, value: String) -> Unit,
+    ): ConfigApplyResult {
         val changed = ArrayList<String>()
         val advisories = ArrayList<String>()
         val missing = ArrayList<MissingComponent>()
@@ -118,9 +169,9 @@ object CommunityConfigApply {
         if (wantedEmulator == "fexcore" && !wantedFex.isNullOrBlank()) {
             when (val r = installed.resolve("FEXCore", wantedFex, shortcut.getExtra("fexcoreVersion"))) {
                 is InstalledComponents.Resolution.Match -> {
-                    setScalar(shortcut, "emulator", "fexcore", changed)
+                    setScalar(shortcut, "emulator", "fexcore", changed, commit)
                     val token = r.token ?: wantedFex
-                    setScalar(shortcut, "fexcoreVersion", token, changed)
+                    setScalar(shortcut, "fexcoreVersion", token, changed, commit)
                 }
                 InstalledComponents.Resolution.Missing -> {
                     writeEmulatorFex = false
@@ -140,10 +191,10 @@ object CommunityConfigApply {
         for ((key, value) in config.scalars) {
             if (key == "emulator" || key == "fexcoreVersion") {
                 if (!writeEmulatorFex) continue
-                if (key == "emulator" && value != "fexcore") setScalar(shortcut, key, value, changed)
+                if (key == "emulator" && value != "fexcore") setScalar(shortcut, key, value, changed, commit)
                 continue
             }
-            setScalar(shortcut, key, value, changed)
+            setScalar(shortcut, key, value, changed, commit)
         }
 
         // dxwrapperConfig — comma k=v list; merge ONLY version / vkd3dVersion / async, preserve the rest.
@@ -165,7 +216,7 @@ object CommunityConfigApply {
         if (dxwUpdates.isNotEmpty()) {
             val merged = mergeList(dxwCurrent, dxwUpdates, ",")
             if (merged != dxwCurrent) {
-                shortcut.putExtra("dxwrapperConfig", merged)
+                commit("dxwrapperConfig", merged)
                 dxwUpdates.forEach { (k, v) -> changed.add("dxwrapperConfig.$k → $v") }
             }
         }
@@ -183,7 +234,7 @@ object CommunityConfigApply {
                     if (token != null) {
                         val merged = mergeList(gdcCurrent, linkedMapOf("version" to token), ";")
                         if (merged != gdcCurrent) {
-                            shortcut.putExtra("graphicsDriverConfig", merged)
+                            commit("graphicsDriverConfig", merged)
                             changed.add("graphicsDriverConfig.version → $token")
                         }
                     }
@@ -204,18 +255,6 @@ object CommunityConfigApply {
         config.advisories["wineVersion"]?.let { proton ->
             val have = containerWineVersion?.takeIf { it.isNotBlank() } ?: "your container's"
             advisories.add("config used $proton (container-only) — your container is $have; change it in the container editor if needed.")
-        }
-
-        if (changed.isNotEmpty()) {
-            try {
-                shortcut.saveData()
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to persist shortcut after apply", e)
-                return ConfigApplyResult(
-                    false, "Failed to save shortcut: ${e.message ?: e.javaClass.simpleName}",
-                    changed, missing, advisories, missingDrivers,
-                )
-            }
         }
 
         val message = when {
@@ -409,10 +448,19 @@ object CommunityConfigApply {
         else -> null
     }
 
-    /** Set a scalar extra, recording the change only when it actually differs from the current value. */
-    private fun setScalar(shortcut: Shortcut, key: String, value: String, changed: MutableList<String>) {
+    /**
+     * Set a scalar extra, recording the change only when it actually differs from the current value.
+     * The write is routed through [commit] so [preview] can compute the same diff without mutating.
+     */
+    private fun setScalar(
+        shortcut: Shortcut,
+        key: String,
+        value: String,
+        changed: MutableList<String>,
+        commit: (String, String) -> Unit,
+    ) {
         if (shortcut.getExtra(key) == value) return
-        shortcut.putExtra(key, value)
+        commit(key, value)
         changed.add("$key → $value")
     }
 

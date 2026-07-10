@@ -17,7 +17,9 @@ import com.winlator.star.communityconfigs.CanonicalGame
 import com.winlator.star.communityconfigs.CommunityConfigApply
 import com.winlator.star.communityconfigs.CommunityConfigFetcher
 import com.winlator.star.communityconfigs.CommunityConfigRepository
+import com.winlator.star.communityconfigs.ConfigMeta
 import com.winlator.star.communityconfigs.ConfigTranslator
+import com.winlator.star.communityconfigs.ShortcutConfig
 import com.winlator.star.communityconfigs.DeviceIdentity
 import com.winlator.star.communityconfigs.GameMatcher
 import com.winlator.star.communityconfigs.InstalledComponents
@@ -70,6 +72,22 @@ data class CommunityCatalog(
     val userSoc: String?,
     val userGpu: String?,
     val hardwareLabel: String?,
+)
+
+/**
+ * Everything the read-only Community Config detail page renders — provenance ([meta]), the config in
+ * our own shortcut terms ([config]), and, when a target shortcut was supplied, the non-mutating
+ * pre-apply diff ([preview]). All of it comes from the same fetch+translate the apply path uses; the
+ * detail page adds NO new network surface. [preview] is null when no shortcut was given (the browser
+ * "View details" with no chosen target) or when the fetch failed.
+ */
+data class CommunityConfigDetail(
+    val game: CanonicalGame,
+    val device: CanonicalDevice,
+    val fileName: String,
+    val meta: ConfigMeta,
+    val config: ShortcutConfig,
+    val preview: CommunityConfigApply.ConfigApplyResult?,
 )
 
 class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
@@ -205,6 +223,39 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (result.ok && result.changed.isNotEmpty()) refresh()
             onResult(result)
+        }
+    }
+
+    /**
+     * Read-only twin of [applyCommunityConfig] for the detail page: fetch [game]+[device]'s config,
+     * translate it, parse its provenance ([ConfigMeta]) and — when [target] is non-null — compute the
+     * non-mutating pre-apply diff via [CommunityConfigApply.preview] (NOTHING is written or persisted).
+     * All IO is off the main thread; returns null on a fetch/translate failure so the UI shows the same
+     * clean "couldn't fetch" message the apply path does.
+     */
+    fun loadCommunityConfigDetail(
+        game: CanonicalGame,
+        device: CanonicalDevice,
+        target: Shortcut?,
+        onResult: (CommunityConfigDetail?) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val detail = withContext(Dispatchers.IO) {
+                val fetched = CommunityConfigFetcher.fetchForDevice(game, device) ?: return@withContext null
+                val config = ConfigTranslator.translate(fetched.json)
+                val meta = ConfigMeta.parse(fetched.json.optJSONObject("meta"), fetched.fileName)
+                val preview = target?.let {
+                    CommunityConfigApply.preview(
+                        shortcut = it,
+                        config = config,
+                        installed = InstalledComponents.read(getApplication()),
+                        containerWineVersion = it.container?.getWineVersion(),
+                        isAdreno = GPUInformation.isAdrenoGPU(getApplication()),
+                    )
+                }
+                CommunityConfigDetail(game, device, fetched.fileName, meta, config, preview)
+            }
+            onResult(detail)
         }
     }
 

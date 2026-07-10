@@ -87,6 +87,7 @@ import com.winlator.star.communityconfigs.CanonicalDevice
 import com.winlator.star.communityconfigs.CanonicalGame
 import com.winlator.star.communityconfigs.CommunityConfigApply
 import com.winlator.star.communityconfigs.GameMatcher
+import com.winlator.star.communityconfigs.ShortcutConfig
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -226,12 +227,21 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var installSheetFor by remember { mutableStateOf<CommunityConfigApply.MissingComponent?>(null) }
     // Missing GPU driver the user tapped "Browse all drivers" on → opens the adrenotools driver browser.
     var driverSheetFor by remember { mutableStateOf<CommunityConfigApply.MissingDriver?>(null) }
+    // A tapped config row → small "Apply to game… | View details" chooser. Triple carries the config's
+    // game+device plus the in-context shortcut (non-null from the per-shortcut sheet, null from the
+    // catalog browser where a target hasn't been chosen yet).
+    var configAction by remember { mutableStateOf<Triple<CanonicalGame, CanonicalDevice, Shortcut?>?>(null) }
+    // The config whose read-only detail page is open (same game+device+optional-context-shortcut triple).
+    var detailFor by remember { mutableStateOf<Triple<CanonicalGame, CanonicalDevice, Shortcut?>?>(null) }
     // Labels of missing components/drivers that resolved after an install (→ checkmark instead of a
     // button). Drivers are namespaced "driver:<wanted>" so they can't collide with component labels.
     val resolvedMissing = remember(applyResult) { mutableStateListOf<String>() }
-    // Any install sheet (component OR driver) open → hide the community dialog layers so the
+    // Any install sheet (component OR driver) open → hide EVERY community dialog layer so the
     // ModalBottomSheet isn't rendered behind an AlertDialog's window; they reappear when it closes.
-    val communityDialogsGated = installSheetFor != null || driverSheetFor != null
+    // The chooser + detail layers join the predicate so the lower community dialogs (match/browser/
+    // picker/result) don't stack behind them; the chooser/detail themselves are gated on installSheetOpen.
+    val installSheetOpen = installSheetFor != null || driverSheetFor != null
+    val communityDialogsGated = installSheetOpen || configAction != null || detailFor != null
     val scope = rememberCoroutineScope()
 
     // Shared apply runner — used by both the catalog browser and the per-shortcut sheet.
@@ -243,6 +253,12 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             applyBusy = false
             applyResult = res
         }
+    }
+    // Kick off the real apply for a config: with an in-context shortcut (per-shortcut sheet) run it
+    // straight; without one (browser) fall to the target picker. Reused by BOTH the chooser's "Apply to
+    // game…" and the detail dialog's "Apply" so details never duplicates the apply/install flow.
+    val startConfigApply: (CanonicalGame, CanonicalDevice, Shortcut?) -> Unit = { g, d, sc ->
+        if (sc != null) runCommunityApply(sc, g, d) else applyPicker = g to d
     }
     // Pick a target shortcut for a browser-selected config; warn when its game doesn't match.
     val chooseApplyTarget: (Shortcut, CanonicalGame, CanonicalDevice) -> Unit = { sc, g, d ->
@@ -848,9 +864,10 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                                 )
                                             }
                                         }
-                                        // Surgical merge into this exact shortcut (the matched target).
+                                        // Tap → chooser (Apply to this shortcut / View details). The
+                                        // in-context shortcut `s` is carried so details can preview the diff.
                                         OutlinedButton(
-                                            onClick = { runCommunityApply(s, game, d) },
+                                            onClick = { configAction = Triple(game, d, s) },
                                             enabled = !applyBusy,
                                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                                         ) { Text("Apply") }
@@ -873,7 +890,66 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         CommunityCatalogBrowser(
             vm = vm,
             onDismiss = { showCommunityBrowser = false },
-            onApply = { g, d -> applyPicker = g to d },
+            // No in-context shortcut from the browser (null) → chooser's "Apply to game…" runs the picker.
+            onApply = { g, d -> configAction = Triple(g, d, null) },
+        )
+    }
+
+    // Config-row chooser — "Apply to game… | View details" before any apply happens. Gated only on an
+    // open install sheet (it IS one of the layers communityDialogsGated hides beneath itself).
+    if (!installSheetOpen) configAction?.let { (game, device, ctxShortcut) ->
+        AlertDialog(
+            onDismissRequest = { configAction = null },
+            title = { Text(game.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            text = {
+                Text(
+                    "Config from ${device.model.ifBlank { "that device" }}.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    configAction = null
+                    startConfigApply(game, device, ctxShortcut)
+                }) { Text("Apply to game…") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    configAction = null
+                    detailFor = Triple(game, device, ctxShortcut)
+                }) { Text("View details") }
+            },
+        )
+    }
+
+    // Read-only Community Config detail page. Loads fetch+translate (+preview when a shortcut is in
+    // context) via the VM, then renders provenance + "what it sets" + the pre-apply diff. Apply reuses
+    // the same startConfigApply → applyResult → smart-install flow, so details never duplicates apply.
+    if (!installSheetOpen) detailFor?.let { (game, device, ctxShortcut) ->
+        var detail by remember(game, device, ctxShortcut) { mutableStateOf<CommunityConfigDetail?>(null) }
+        var detailLoading by remember(game, device, ctxShortcut) { mutableStateOf(true) }
+        var detailFailed by remember(game, device, ctxShortcut) { mutableStateOf(false) }
+        LaunchedEffect(game, device, ctxShortcut) {
+            detailLoading = true
+            detailFailed = false
+            vm.loadCommunityConfigDetail(game, device, ctxShortcut) { d ->
+                detail = d
+                detailLoading = false
+                detailFailed = d == null
+            }
+        }
+        CommunityConfigDetailDialog(
+            game = game,
+            device = device,
+            detail = detail,
+            loading = detailLoading,
+            failed = detailFailed,
+            onApply = {
+                detailFor = null
+                startConfigApply(game, device, ctxShortcut)
+            },
+            onDismiss = { detailFor = null },
         )
     }
 
@@ -1754,6 +1830,222 @@ private fun CommunityDevicePanel(
             Header()
             Divider(color = DividerColor)
             DeviceList(modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+// Turn a translated config into "what it sets" lines in OUR component terms (the same fields the apply
+// engine consumes). Only present fields are listed; Proton/wineVersion is advisory (container-only) so
+// it is surfaced separately, not here.
+private fun configSummaryLines(config: ShortcutConfig): List<Pair<String, String>> {
+    val out = ArrayList<Pair<String, String>>()
+    config.dxwrapperConfig["version"]?.takeIf { it.isNotBlank() }?.let { out.add("DXVK" to it) }
+    config.dxwrapperConfig["vkd3dVersion"]?.takeIf { it.isNotBlank() }?.let { out.add("VKD3D" to it) }
+    config.dxwrapperConfig["async"]?.let { out.add("DXVK async" to if (it == "1") "on" else "off") }
+    config.graphicsDriverConfig["version"]?.takeIf { it.isNotBlank() }?.let { out.add("Turnip driver" to it) }
+    config.scalars["dxwrapper"]?.takeIf { it.isNotBlank() }?.let { out.add("DX wrapper" to it) }
+    config.scalars["emulator"]?.let { emu ->
+        val fex = config.scalars["fexcoreVersion"]
+        out.add("x86 translator" to if (emu == "fexcore" && !fex.isNullOrBlank()) "FEXCore $fex" else emu)
+    }
+    config.scalars["audioDriver"]?.takeIf { it.isNotBlank() }?.let { out.add("Audio driver" to it) }
+    config.scalars["inputType"]?.let { out.add("XInput" to if (it == "1") "on" else "off") }
+    config.scalars["screenSize"]?.takeIf { it.isNotBlank() }?.let { out.add("Resolution" to it) }
+    config.scalars["renderer"]?.takeIf { it.isNotBlank() }?.let { out.add("Renderer" to it) }
+    config.scalars["execArgs"]?.takeIf { it.isNotBlank() }?.let { out.add("Launch args" to it) }
+    config.scalars["envVars"]?.takeIf { it.isNotBlank() }?.let { out.add("Env vars" to it) }
+    return out
+}
+
+// Read-only Community Config detail page. Renders only data we already fetch: provenance ([detail.meta]),
+// the config in our own component terms ([configSummaryLines]), and (when a target shortcut was in
+// context) the non-mutating pre-apply diff ([detail.preview]). Apply is delegated to the caller, which
+// hands it to the shared apply → applyResult → smart-install flow — this page never applies/installs itself.
+@Composable
+private fun CommunityConfigDetailDialog(
+    game: CanonicalGame,
+    device: CanonicalDevice,
+    detail: CommunityConfigDetail?,
+    loading: Boolean,
+    failed: Boolean,
+    onApply: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    // Provenance — game · device · soc · uploaded date · BannerHub source badge. Prefers the config's
+    // own meta, falling back to the catalog device row when a field is blank.
+    @Composable
+    fun Provenance(modifier: Modifier) {
+        Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                game.name,
+                style = MaterialTheme.typography.titleMedium,
+                color = OnSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val meta = detail?.meta
+            val dev = meta?.device ?: device.model.ifBlank { null }
+            val soc = meta?.soc ?: device.soc.ifBlank { null }
+            val hw = listOfNotNull(dev, device.gpu.ifBlank { null }, soc).distinct().joinToString(" · ")
+            if (hw.isNotEmpty()) {
+                Text(hw, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+            }
+            meta?.uploadedDate?.let {
+                Text("Uploaded $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CommunityStoreBadge(isSteam = game.isSteam)
+                meta?.bhVersion?.let {
+                    Surface(
+                        color = SurfaceVariantColor,
+                        shape = MaterialTheme.shapes.small,
+                    ) {
+                        Text(
+                            "From BannerHub $it",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = OnSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // "What this config sets" + (when previewed) the pre-apply diff against the in-context shortcut.
+    @Composable
+    fun Body(modifier: Modifier) {
+        Column(
+            modifier = modifier,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            when {
+                loading -> {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Text("Loading config…", color = OnSurfaceVariant)
+                    }
+                }
+                failed || detail == null -> {
+                    Text(
+                        "Couldn't fetch this config (offline, or no matching file in the repo).",
+                        color = OnSurfaceVariant,
+                    )
+                }
+                else -> {
+                    Text("What this config sets", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+                    val lines = configSummaryLines(detail.config)
+                    if (lines.isEmpty()) {
+                        Text("Nothing this app can set.", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+                    } else {
+                        lines.forEach { (label, value) ->
+                            Text(
+                                "• $label: $value",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = OnSurfaceVariant,
+                            )
+                        }
+                    }
+                    detail.config.advisories["wineVersion"]?.let { proton ->
+                        Text(
+                            "• Proton (container-only): $proton",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnSurfaceVariant,
+                        )
+                    }
+
+                    // Pre-apply diff — only when a target shortcut was in context.
+                    detail.preview?.let { pre ->
+                        Divider(color = DividerColor)
+                        Text("Changes to \"${game.name}\"", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+                        Text(pre.message, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+                        if (pre.changed.isNotEmpty()) {
+                            Text("Would change", style = MaterialTheme.typography.labelMedium, color = OnSurface)
+                            pre.changed.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant) }
+                        }
+                        if (pre.missingComponents.isNotEmpty()) {
+                            Text("Needs a component", style = MaterialTheme.typography.labelMedium, color = OnSurface)
+                            pre.missingComponents.forEach { Text("• ${it.label}", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant) }
+                        }
+                        if (pre.missingDrivers.isNotEmpty()) {
+                            Text("Needs a GPU driver", style = MaterialTheme.typography.labelMedium, color = OnSurface)
+                            pre.missingDrivers.forEach {
+                                val had = it.current?.let { c -> " (you have $c)" } ?: ""
+                                Text("• Turnip ${it.wanted}$had", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+                            }
+                        }
+                        if (pre.advisories.isNotEmpty()) {
+                            Text("Heads up", style = MaterialTheme.typography.labelMedium, color = OnSurface)
+                            pre.advisories.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.92f),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Config details",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
+                }
+                Divider(color = DividerColor)
+
+                // Landscape (wide): provenance pinned left, "what it sets" + diff scroll on the right.
+                // Portrait (narrow): a single top-to-bottom scroll of both.
+                BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    if (maxWidth >= 600.dp) {
+                        Row(modifier = Modifier.fillMaxSize()) {
+                            Provenance(
+                                modifier = Modifier
+                                    .width(320.dp)
+                                    .fillMaxHeight()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(12.dp),
+                            )
+                            Box(modifier = Modifier.fillMaxHeight().width(1.dp).background(DividerColor))
+                            Body(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(12.dp),
+                            )
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Provenance(modifier = Modifier.fillMaxWidth())
+                            Divider(color = DividerColor)
+                            Body(modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                }
+                Divider(color = DividerColor)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Close") }
+                    TextButton(onClick = onApply, enabled = detail != null) { Text("Apply") }
+                }
+            }
         }
     }
 }
