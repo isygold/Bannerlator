@@ -1,0 +1,133 @@
+package com.winlator.star.communityconfigs
+
+import org.json.JSONArray
+import org.json.JSONObject
+
+/**
+ * PHASE 3 step 1 — the reverse of [ConfigTranslator]: turn a Bannerlator shortcut's effective
+ * {@code [Extra Data]} settings back into a shareable community-config JSON in the GameHub
+ * {@code pc_*} format that BOTH BannerHub and Bannerlator can read.
+ *
+ * This object is the PURE CORE — deterministic and Android-free so the round-trip
+ * (export then {@link ConfigTranslator#translate}) can be exercised on the JVM. All non-deterministic
+ * inputs (the {@code upload_token}, the file-name timestamp, the device/soc/version strings) are
+ * produced by the Android adapter [ShortcutExporter] and passed in via [ExportMeta] / [fileName].
+ *
+ * The mapping is the exact inverse of [ConfigTranslator] (same keys, inverse value transforms):
+ *   dxwrapperConfig.version → pc_ls_DXVK; dxwrapperConfig.vkd3dVersion → pc_ls_VK3k;
+ *   graphicsDriverConfig.version → pc_ls_GPU_DRIVER_; emulator+fexcoreVersion → pc_set_constant_95;
+ *   wineVersion → pc_ls_CONTAINER_LIST; audioDriver → pc_ls_AUDIO_DRIVER; inputType →
+ *   pc_ls_update_enable_xinput; envVars → pc_ls_environment_variable; execArgs → pc_ls_boot_option.
+ * Each component-bearing value is a JSON STRING with a {@code name} (matching BannerHub's own
+ * export shape, so {@link ConfigTranslator#jname} reads it back). Only present/non-blank source
+ * fields emit a key; {@code settings_count} / {@code components_count} are computed from what emitted.
+ */
+object ConfigExporter {
+
+    /**
+     * The non-deterministic provenance the adapter supplies. Kept out of the pure core so [export]
+     * stays reproducible for the same inputs.
+     *
+     *  - [appSource] — OUR namespace, always {@code "bannerlator"} (never {@code "bannerhub"}).
+     *  - [device] / [soc] — the hardware the config was captured on ({@code Build.MANUFACTURER MODEL}
+     *    and the GPU-renderer probe), matching BannerHub's {@code detectSoc} meaning.
+     *  - [version] — the app version string, written as {@code meta.bh_version} (informational).
+     *  - [uploadToken] — variable-length lowercase hex, generated in the adapter (Random is fine there);
+     *    embedded in {@code meta} for later describe/delete recovery.
+     */
+    data class ExportMeta(
+        val appSource: String,
+        val device: String?,
+        val soc: String?,
+        val version: String?,
+        val uploadToken: String,
+    )
+
+    /**
+     * Serialize [effective] (resolved shortcut {@code [Extra Data]} keys) into a
+     * {@code {meta, settings, components}} config JSON string. Pure and deterministic: identical
+     * [effective] + [meta] always produce semantically identical output. Never throws on ordinary input.
+     */
+    fun export(effective: Map<String, String>, meta: ExportMeta): String {
+        val settings = JSONObject()
+        val components = JSONArray()
+
+        // DXVK / VKD3D live inside the comma-delimited dxwrapperConfig k=v list.
+        val dxwCfg = effective["dxwrapperConfig"].orEmpty()
+        val dxvk = subValue(dxwCfg, ",", "version")
+        val vkd3d = subValue(dxwCfg, ",", "vkd3dVersion")
+        // Turnip lives inside the semicolon-delimited graphicsDriverConfig k=v list.
+        val turnip = subValue(effective["graphicsDriverConfig"].orEmpty(), ";", "version")
+        // FEXCore only when the shortcut actually selects it as the x86 translator.
+        val fex = if (effective["emulator"] == "fexcore") effective["fexcoreVersion"].nonBlank() else null
+        // Proton / Wine is container-scoped; still emitted so the config is self-describing.
+        val proton = effective["wineVersion"].nonBlank()
+
+        if (dxvk != null) { putNamed(settings, "pc_ls_DXVK", dxvk); addComponent(components, dxvk, "DXVK") }
+        if (vkd3d != null) { putNamed(settings, "pc_ls_VK3k", vkd3d); addComponent(components, vkd3d, "VKD3D") }
+        if (turnip != null) { putNamed(settings, "pc_ls_GPU_DRIVER_", turnip); addComponent(components, turnip, "GPU") }
+        if (fex != null) { putNamed(settings, "pc_set_constant_95", fex); addComponent(components, fex, "FEXCore") }
+        if (proton != null) putNamed(settings, "pc_ls_CONTAINER_LIST", proton)
+
+        // audioDriver → "1" for pulseaudio else "0" (inverse of the translator's read).
+        effective["audioDriver"].nonBlank()?.let {
+            settings.put("pc_ls_AUDIO_DRIVER", if (it == "pulseaudio") "1" else "0")
+        }
+        // inputType "1"/"0" → xinput-enabled boolean.
+        effective["inputType"].nonBlank()?.let {
+            settings.put("pc_ls_update_enable_xinput", it == "1")
+        }
+        effective["envVars"].nonBlank()?.let { settings.put("pc_ls_environment_variable", it) }
+        effective["execArgs"].nonBlank()?.let { settings.put("pc_ls_boot_option", it) }
+
+        val metaObj = JSONObject()
+        metaObj.put("app_source", meta.appSource)
+        meta.device.nonBlank()?.let { metaObj.put("device", it) }
+        meta.soc.nonBlank()?.let { metaObj.put("soc", it) }
+        meta.version.nonBlank()?.let { metaObj.put("bh_version", it) }
+        metaObj.put("upload_token", meta.uploadToken)
+        metaObj.put("settings_count", settings.length())
+        metaObj.put("components_count", components.length())
+
+        val root = JSONObject()
+        root.put("meta", metaObj)
+        root.put("settings", settings)
+        root.put("components", components)
+        return root.toString(2)
+    }
+
+    /**
+     * Build the config file name exactly as BannerHub's {@code BhSettingsExporter} does — five fields
+     * sanitized {@code [^a-zA-Z0-9_\-] -> _}, then a trailing UNIX-SECONDS timestamp:
+     * {@code <safeGame>-<safeMfr>-<safeModel>-<safeSoc>-<unixSeconds>.json}. The timestamp is passed in
+     * (from the adapter) so the core stays deterministic.
+     */
+    fun fileName(game: String, mfr: String, model: String, soc: String, epochSeconds: Long): String =
+        "${safe(game)}-${safe(mfr)}-${safe(model)}-${safe(soc)}-$epochSeconds.json"
+
+    /** Wrap a version token as a {@code {"name":"<token>"}} JSON STRING value, matching BannerHub. */
+    private fun putNamed(settings: JSONObject, key: String, name: String) {
+        settings.put(key, JSONObject().put("name", name).toString())
+    }
+
+    /** Informational component entry (name + type only — we never invent download URLs). */
+    private fun addComponent(arr: JSONArray, name: String, type: String) {
+        arr.put(JSONObject().put("name", name).put("type", type))
+    }
+
+    /** Value of one sub-key inside a delimited {@code k=v} list, or null when absent/blank. */
+    private fun subValue(list: String, delim: String, key: String): String? {
+        if (list.isBlank()) return null
+        for (part in list.split(delim)) {
+            val eq = part.indexOf('=')
+            if (eq <= 0) continue
+            if (part.substring(0, eq).trim() == key) return part.substring(eq + 1).nonBlank()
+        }
+        return null
+    }
+
+    private fun safe(s: String): String = s.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+
+    /** Trimmed value, or null when null/blank — the single "only emit present fields" gate. */
+    private fun String?.nonBlank(): String? = this?.trim()?.takeIf { it.isNotEmpty() }
+}

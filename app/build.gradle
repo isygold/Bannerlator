@@ -213,4 +213,9 @@ dependencies {
     implementation 'com.kohlschutter.junixsocket:junixsocket-common:2.6.0'
     implementation 'com.kohlschutter.junixsocket:junixsocket-native-common:2.6.0'
     annotationProcessor 'com.github.bumptech.glide:compiler:4.11.0'
+
+    // JVM unit tests (community-config export round-trip). org.json is a real artifact here so the
+    // core's JSONObject calls run on the JVM instead of hitting android.jar's "not mocked" stubs.
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20231013'
 }
