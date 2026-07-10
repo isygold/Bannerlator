@@ -87,8 +87,10 @@ import androidx.compose.material3.OutlinedTextField
 import com.winlator.star.communityconfigs.CanonicalDevice
 import com.winlator.star.communityconfigs.CanonicalGame
 import com.winlator.star.communityconfigs.CommunityConfigApply
+import com.winlator.star.communityconfigs.CommunityConfigRef
 import com.winlator.star.communityconfigs.GameMatcher
 import com.winlator.star.communityconfigs.ShortcutConfig
+import com.winlator.star.communityconfigs.WorkerConfigEntry
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -218,8 +220,8 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var communitySearchResults by remember(communityTarget) { mutableStateOf<List<CanonicalGame>>(emptyList()) }
     // Catalog browser (catalog-first entry from the header) + the shared Phase 2 apply flow.
     var showCommunityBrowser by remember { mutableStateOf(false) }
-    var applyPicker by remember { mutableStateOf<Pair<CanonicalGame, CanonicalDevice>?>(null) }
-    var applyMismatch by remember { mutableStateOf<Triple<Shortcut, CanonicalGame, CanonicalDevice>?>(null) }
+    var applyPicker by remember { mutableStateOf<CommunityPick?>(null) }
+    var applyMismatch by remember { mutableStateOf<Pair<Shortcut, CommunityPick>?>(null) }
     var applyBusy by remember { mutableStateOf(false) }
     var applyResult by remember { mutableStateOf<CommunityConfigApply.ConfigApplyResult?>(null) }
     // The shortcut the current result was applied to — threaded through so a post-install component
@@ -229,12 +231,12 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var installSheetFor by remember { mutableStateOf<CommunityConfigApply.MissingComponent?>(null) }
     // Missing GPU driver the user tapped "Browse all drivers" on → opens the adrenotools driver browser.
     var driverSheetFor by remember { mutableStateOf<CommunityConfigApply.MissingDriver?>(null) }
-    // A tapped config row → small "Apply to game… | View details" chooser. Triple carries the config's
-    // game+device plus the in-context shortcut (non-null from the per-shortcut sheet, null from the
-    // catalog browser where a target hasn't been chosen yet).
-    var configAction by remember { mutableStateOf<Triple<CanonicalGame, CanonicalDevice, Shortcut?>?>(null) }
-    // The config whose read-only detail page is open (same game+device+optional-context-shortcut triple).
-    var detailFor by remember { mutableStateOf<Triple<CanonicalGame, CanonicalDevice, Shortcut?>?>(null) }
+    // A tapped config row → small "Apply to game… | View details" chooser. The pair carries the picked
+    // config (a specific uploaded file, or a device-row fallback) plus the in-context shortcut (non-null
+    // from the per-shortcut sheet, null from the catalog browser where a target hasn't been chosen yet).
+    var configAction by remember { mutableStateOf<Pair<CommunityPick, Shortcut?>?>(null) }
+    // The config whose read-only detail page is open (same pick + optional-context-shortcut pair).
+    var detailFor by remember { mutableStateOf<Pair<CommunityPick, Shortcut?>?>(null) }
     // Labels of missing components/drivers that resolved after an install (→ checkmark instead of a
     // button). Drivers are namespaced "driver:<wanted>" so they can't collide with component labels.
     val resolvedMissing = remember(applyResult) { mutableStateListOf<String>() }
@@ -246,27 +248,33 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     val communityDialogsGated = installSheetOpen || configAction != null || detailFor != null
     val scope = rememberCoroutineScope()
 
-    // Shared apply runner — used by both the catalog browser and the per-shortcut sheet.
-    val runCommunityApply: (Shortcut, CanonicalGame, CanonicalDevice) -> Unit = { sc, g, d ->
+    // Shared apply runner — used by both the catalog browser and the per-shortcut sheet. Dispatches by
+    // pick kind: a specific uploaded file applies THAT file; a device-row fallback applies the
+    // best-for-device pick (offline path). Same downstream applyResult → smart-install flow either way.
+    val runCommunityApply: (Shortcut, CommunityPick) -> Unit = { sc, pick ->
         applyBusy = true
         applyResult = null
         applyTarget = sc
-        vm.applyCommunityConfig(sc, g, d) { res ->
+        val onDone: (CommunityConfigApply.ConfigApplyResult) -> Unit = { res ->
             applyBusy = false
             applyResult = res
+        }
+        when (pick) {
+            is CommunityPick.File -> vm.applyCommunityConfigFile(sc, pick.ref, onDone)
+            is CommunityPick.Device -> vm.applyCommunityConfig(sc, pick.game, pick.device, onDone)
         }
     }
     // Kick off the real apply for a config: with an in-context shortcut (per-shortcut sheet) run it
     // straight; without one (browser) fall to the target picker. Reused by BOTH the chooser's "Apply to
     // game…" and the detail dialog's "Apply" so details never duplicates the apply/install flow.
-    val startConfigApply: (CanonicalGame, CanonicalDevice, Shortcut?) -> Unit = { g, d, sc ->
-        if (sc != null) runCommunityApply(sc, g, d) else applyPicker = g to d
+    val startConfigApply: (CommunityPick, Shortcut?) -> Unit = { pick, sc ->
+        if (sc != null) runCommunityApply(sc, pick) else applyPicker = pick
     }
     // Pick a target shortcut for a browser-selected config; warn when its game doesn't match.
-    val chooseApplyTarget: (Shortcut, CanonicalGame, CanonicalDevice) -> Unit = { sc, g, d ->
+    val chooseApplyTarget: (Shortcut, CommunityPick) -> Unit = { sc, pick ->
         applyPicker = null
-        if (GameMatcher.match(sc.name, listOf(g)).isNotEmpty()) runCommunityApply(sc, g, d)
-        else applyMismatch = Triple(sc, g, d)
+        if (GameMatcher.match(sc.name, listOf(pick.game)).isNotEmpty()) runCommunityApply(sc, pick)
+        else applyMismatch = sc to pick
     }
 
     // Shared "Scrape cover" action so both grid tiles and list rows fire the same flow.
@@ -832,37 +840,83 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     color = OnSurfaceVariant,
                                 )
                             }
+                            // "Matches my device" — filters the per-config list to configs whose
+                            // device/soc match your hardware. Mirrors the catalog browser's chip; enabled
+                            // only when we actually detected a SoC/GPU to compare against.
+                            val uSoc = result?.userSoc
+                            val uGpu = result?.userGpu
+                            var matchesMine by rememberSaveable(game.identity) { mutableStateOf(false) }
+                            FilterChip(
+                                selected = matchesMine,
+                                onClick = { matchesMine = !matchesMine },
+                                label = { Text("Matches my device") },
+                                enabled = uSoc != null || uGpu != null,
+                            )
                             Divider(color = DividerColor)
-                            if (result?.rankedDevices.isNullOrEmpty()) {
-                                Text("No device configs listed.", color = OnSurfaceVariant)
-                            } else {
-                                val hw = result?.userHardwareLabel?.lowercase()
-                                result?.rankedDevices?.forEach { d ->
-                                    val isMatch = hw != null && (
-                                        (d.soc.isNotBlank() && (hw.contains(d.soc.lowercase()) || d.soc.lowercase().contains(hw))) ||
-                                        (d.gpu.isNotBlank() && (hw.contains(d.gpu.lowercase()) || d.gpu.lowercase().contains(hw)))
+                            // One card per uploaded config from the worker (already votes-desc). Offline /
+                            // bucket miss → fall back to the per-device index rows so apply-by-device still
+                            // works (no vote counts in that mode). Whole card taps → the chooser; the
+                            // in-context shortcut `s` is carried so details can preview the diff.
+                            val cfg = rememberGameConfigs(vm, game)
+                            when {
+                                cfg.loading -> Text("Loading configs…", color = OnSurfaceVariant)
+                                cfg.entries.isNotEmpty() && cfg.workerGame != null -> {
+                                    val shown = if (!matchesMine) cfg.entries
+                                        else cfg.entries.filter {
+                                            GameMatcher.hardwareMatchesUser(uSoc, uGpu, listOf(it.device, it.soc))
+                                        }
+                                    if (shown.isEmpty()) {
+                                        Text("No uploaded configs match your device.", color = OnSurfaceVariant)
+                                    } else {
+                                        shown.forEach { e ->
+                                            val isMatch = (uSoc != null || uGpu != null) &&
+                                                GameMatcher.hardwareMatchesUser(uSoc, uGpu, listOf(e.device, e.soc))
+                                            CommunityConfigEntryCard(entry = e, isMatch = isMatch) {
+                                                configAction = CommunityPick.File(
+                                                    game,
+                                                    CommunityConfigRef(game, cfg.workerGame!!, e.filename, e.sha.ifBlank { null }),
+                                                    e,
+                                                ) to s
+                                            }
+                                        }
+                                    }
+                                }
+                                result?.rankedDevices.isNullOrEmpty() -> Text("No device configs listed.", color = OnSurfaceVariant)
+                                else -> {
+                                    Text(
+                                        "Showing device configs (vote counts unavailable offline).",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = OnSurfaceVariant,
                                     )
-                                    // Whole config card taps → chooser (Apply to this shortcut / View
-                                    // details). The in-context shortcut `s` is carried so details can
-                                    // preview the diff.
-                                    CommunityCard(onClick = { configAction = Triple(game, d, s) }) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = d.model.ifBlank { "Unknown device" },
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = if (isMatch) MaterialTheme.colorScheme.primary else OnSurface,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            val sub = listOf(d.gpu, d.soc).filter { it.isNotBlank() }.joinToString(" · ")
-                                            if (sub.isNotEmpty()) {
+                                    val hw = result?.userHardwareLabel?.lowercase()
+                                    val devs = result?.rankedDevices.orEmpty().let { list ->
+                                        if (!matchesMine) list
+                                        else list.filter { GameMatcher.deviceMatchesUser(it, uSoc, uGpu) }
+                                    }
+                                    devs.forEach { d ->
+                                        val isMatch = hw != null && (
+                                            (d.soc.isNotBlank() && (hw.contains(d.soc.lowercase()) || d.soc.lowercase().contains(hw))) ||
+                                            (d.gpu.isNotBlank() && (hw.contains(d.gpu.lowercase()) || d.gpu.lowercase().contains(hw)))
+                                        )
+                                        CommunityCard(onClick = { configAction = CommunityPick.Device(game, d) to s }) {
+                                            Column(modifier = Modifier.weight(1f)) {
                                                 Text(
-                                                    text = sub,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = OnSurfaceVariant,
+                                                    text = d.model.ifBlank { "Unknown device" },
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = if (isMatch) MaterialTheme.colorScheme.primary else OnSurface,
                                                     maxLines = 1,
                                                     overflow = TextOverflow.Ellipsis,
                                                 )
+                                                val sub = listOf(d.gpu, d.soc).filter { it.isNotBlank() }.joinToString(" · ")
+                                                if (sub.isNotEmpty()) {
+                                                    Text(
+                                                        text = sub,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = OnSurfaceVariant,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -885,33 +939,33 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             vm = vm,
             onDismiss = { showCommunityBrowser = false },
             // No in-context shortcut from the browser (null) → chooser's "Apply to game…" runs the picker.
-            onApply = { g, d -> configAction = Triple(g, d, null) },
+            onPick = { pick -> configAction = pick to null },
         )
     }
 
     // Config-row chooser — "Apply to game… | View details" before any apply happens. Gated only on an
     // open install sheet (it IS one of the layers communityDialogsGated hides beneath itself).
-    if (!installSheetOpen) configAction?.let { (game, device, ctxShortcut) ->
+    if (!installSheetOpen) configAction?.let { (pick, ctxShortcut) ->
+        val subtitle = when (pick) {
+            is CommunityPick.File -> "Config from ${pick.entry.device.ifBlank { pick.entry.soc.ifBlank { "that device" } }}."
+            is CommunityPick.Device -> "Config from ${pick.device.model.ifBlank { "that device" }}."
+        }
         AlertDialog(
             onDismissRequest = { configAction = null },
-            title = { Text(game.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            title = { Text(pick.game.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
             text = {
-                Text(
-                    "Config from ${device.model.ifBlank { "that device" }}.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = OnSurfaceVariant,
-                )
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
             },
             confirmButton = {
                 TextButton(onClick = {
                     configAction = null
-                    startConfigApply(game, device, ctxShortcut)
+                    startConfigApply(pick, ctxShortcut)
                 }) { Text("Apply to game…") }
             },
             dismissButton = {
                 TextButton(onClick = {
                     configAction = null
-                    detailFor = Triple(game, device, ctxShortcut)
+                    detailFor = pick to ctxShortcut
                 }) { Text("View details") }
             },
         )
@@ -920,37 +974,51 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // Read-only Community Config detail page. Loads fetch+translate (+preview when a shortcut is in
     // context) via the VM, then renders provenance + "what it sets" + the pre-apply diff. Apply reuses
     // the same startConfigApply → applyResult → smart-install flow, so details never duplicates apply.
-    if (!installSheetOpen) detailFor?.let { (game, device, ctxShortcut) ->
-        var detail by remember(game, device, ctxShortcut) { mutableStateOf<CommunityConfigDetail?>(null) }
-        var detailLoading by remember(game, device, ctxShortcut) { mutableStateOf(true) }
-        var detailFailed by remember(game, device, ctxShortcut) { mutableStateOf(false) }
-        LaunchedEffect(game, device, ctxShortcut) {
+    if (!installSheetOpen) detailFor?.let { (pick, ctxShortcut) ->
+        var detail by remember(pick, ctxShortcut) { mutableStateOf<CommunityConfigDetail?>(null) }
+        var detailLoading by remember(pick, ctxShortcut) { mutableStateOf(true) }
+        var detailFailed by remember(pick, ctxShortcut) { mutableStateOf(false) }
+        LaunchedEffect(pick, ctxShortcut) {
             detailLoading = true
             detailFailed = false
-            vm.loadCommunityConfigDetail(game, device, ctxShortcut) { d ->
+            val onDetail: (CommunityConfigDetail?) -> Unit = { d ->
                 detail = d
                 detailLoading = false
                 detailFailed = d == null
             }
+            when (pick) {
+                is CommunityPick.File -> vm.loadCommunityConfigDetail(pick.ref, ctxShortcut, onDetail)
+                is CommunityPick.Device -> vm.loadCommunityConfigDetail(pick.game, pick.device, ctxShortcut, onDetail)
+            }
+        }
+        // Provenance fallback device — the real device row for a device pick, or one synthesized from
+        // the uploaded config's own device/soc so the detail page reads identically.
+        val provDevice = when (pick) {
+            is CommunityPick.File -> CanonicalDevice(pick.entry.device, "", pick.entry.soc)
+            is CommunityPick.Device -> pick.device
         }
         CommunityConfigDetailDialog(
-            game = game,
-            device = device,
+            game = pick.game,
+            device = provDevice,
             detail = detail,
             loading = detailLoading,
             failed = detailFailed,
             vm = vm,
             onApply = {
                 detailFor = null
-                startConfigApply(game, device, ctxShortcut)
+                startConfigApply(pick, ctxShortcut)
             },
             onDismiss = { detailFor = null },
         )
     }
 
     // Apply-target picker — choose which of your shortcuts to apply a browser-selected config to.
-    if (!communityDialogsGated) applyPicker?.let { (game, device) ->
+    if (!communityDialogsGated) applyPicker?.let { pick ->
         val shortcutList = vm.currentShortcuts()
+        val fromLabel = when (pick) {
+            is CommunityPick.File -> pick.entry.device.ifBlank { pick.entry.soc.ifBlank { "a device" } }
+            is CommunityPick.Device -> pick.device.model.ifBlank { "a device" }
+        }
         AlertDialog(
             onDismissRequest = { applyPicker = null },
             title = { Text("Apply to game…") },
@@ -962,7 +1030,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                         modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
                     ) {
                         Text(
-                            "Config from ${device.model.ifBlank { "device" }} for \"${game.name}\".",
+                            "Config from $fromLabel for \"${pick.game.name}\".",
                             style = MaterialTheme.typography.bodySmall,
                             color = OnSurfaceVariant,
                             modifier = Modifier.padding(bottom = 6.dp),
@@ -972,7 +1040,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                 text = sc.name,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { chooseApplyTarget(sc, game, device) }
+                                    .clickable { chooseApplyTarget(sc, pick) }
                                     .padding(vertical = 12.dp),
                                 color = OnSurface,
                             )
@@ -986,15 +1054,15 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     }
 
     // Mismatch confirmation — target shortcut's game doesn't match the config's game.
-    applyMismatch?.let { (sc, game, device) ->
+    applyMismatch?.let { (sc, pick) ->
         AlertDialog(
             onDismissRequest = { applyMismatch = null },
             title = { Text("Different game") },
-            text = { Text("This config is for \"${game.name}\" — apply to \"${sc.name}\" anyway?") },
+            text = { Text("This config is for \"${pick.game.name}\" — apply to \"${sc.name}\" anyway?") },
             confirmButton = {
                 TextButton(onClick = {
                     applyMismatch = null
-                    runCommunityApply(sc, game, device)
+                    runCommunityApply(sc, pick)
                 }) { Text("Apply anyway") }
             },
             dismissButton = { TextButton(onClick = { applyMismatch = null }) { Text("Cancel") } },
@@ -1510,7 +1578,7 @@ private enum class CatalogSort { CONFIGS, NAME, DEVICES }
 private fun CommunityCatalogBrowser(
     vm: ShortcutsViewModel,
     onDismiss: () -> Unit,
-    onApply: (CanonicalGame, CanonicalDevice) -> Unit,
+    onPick: (CommunityPick) -> Unit,
 ) {
     var catalog by remember { mutableStateOf<CommunityCatalog?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -1660,11 +1728,12 @@ private fun CommunityCatalogBrowser(
                     when {
                         loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                         selectedGame != null -> CommunityDevicePanel(
+                            vm = vm,
                             game = selectedGame,
                             userSoc = userSoc,
                             userGpu = userGpu,
                             hardwareLabel = catalog?.hardwareLabel,
-                            onApply = onApply,
+                            onPick = onPick,
                             wide = wide,
                         )
                         games.isEmpty() -> Text(
@@ -1720,6 +1789,76 @@ private fun CommunityCard(
     }
 }
 
+// What the chooser / detail / apply flow acts on when a config card is tapped. A [File] is a specific
+// uploaded config from the worker (with votes/downloads, applied exactly); a [Device] is the offline
+// fallback — a canonical device row whose best-matching file is resolved at apply time (no vote counts).
+private sealed class CommunityPick {
+    abstract val game: CanonicalGame
+
+    data class File(
+        override val game: CanonicalGame,
+        val ref: CommunityConfigRef,
+        val entry: WorkerConfigEntry,
+    ) : CommunityPick()
+
+    data class Device(
+        override val game: CanonicalGame,
+        val device: CanonicalDevice,
+    ) : CommunityPick()
+}
+
+// Async state of the per-game worker fetch: [workerGame] is the resolved `/list` key (null while
+// loading or when nothing was found), [entries] the uploaded configs (votes-desc), [loading] the gate.
+private data class GameConfigsState(
+    val loading: Boolean,
+    val workerGame: String?,
+    val entries: List<WorkerConfigEntry>,
+)
+
+// Fetch (once per [game]) the uploaded configs for a game from the worker and expose them as Compose
+// state. Shared by the per-shortcut sheet and the catalog browser's device panel.
+@Composable
+private fun rememberGameConfigs(vm: ShortcutsViewModel, game: CanonicalGame): GameConfigsState {
+    var loading by remember(game) { mutableStateOf(true) }
+    var workerGame by remember(game) { mutableStateOf<String?>(null) }
+    var entries by remember(game) { mutableStateOf<List<WorkerConfigEntry>>(emptyList()) }
+    LaunchedEffect(game) {
+        loading = true
+        vm.fetchGameConfigs(game) { key, list ->
+            workerGame = key
+            entries = list
+            loading = false
+        }
+    }
+    return GameConfigsState(loading, workerGame, entries)
+}
+
+// One card per uploaded config: primary = the device it was captured on (soc/filename fallback),
+// sub-line = soc · date, and a `★ votes  ↓ downloads` stats row (same iconography as the detail page).
+// The primary line is emphasized in the theme's primary colour when this config matches your hardware.
+@Composable
+private fun CommunityConfigEntryCard(entry: WorkerConfigEntry, isMatch: Boolean, onClick: () -> Unit) {
+    CommunityCard(onClick = onClick) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = entry.device.ifBlank { entry.soc.ifBlank { entry.filename } },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isMatch) MaterialTheme.colorScheme.primary else OnSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val sub = listOf(entry.soc, entry.date).filter { it.isNotBlank() }.joinToString(" · ")
+            if (sub.isNotEmpty()) {
+                Text(sub, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("★ ${entry.votes}", style = MaterialTheme.typography.labelMedium, color = OnSurface)
+            Text("↓ ${entry.downloads}", style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
+        }
+    }
+}
+
 // One game card in the catalog browser: name, Steam/Title badge, config + device counts.
 @Composable
 private fun CommunityGameRow(game: CanonicalGame, onClick: () -> Unit) {
@@ -1744,20 +1883,33 @@ private fun CommunityGameRow(game: CanonicalGame, onClick: () -> Unit) {
     }
 }
 
-// Per-device config list for a browser-selected game (user's-hardware first); each config is a
-// whole-row-tappable card that opens the Apply-to-game… | View-details chooser.
+// Per-uploaded-config list for a browser-selected game: one card per config the worker returns (votes
+// desc), each whole-row-tappable → the Apply-to-game… | View-details chooser. A "Matches my device"
+// toggle filters to configs matching your hardware. Offline / bucket miss falls back to the per-device
+// index rows (apply-by-device, no vote counts). Header sits on top in portrait, in the left column in
+// landscape; the two-column landscape layout is preserved.
 @Composable
 private fun CommunityDevicePanel(
+    vm: ShortcutsViewModel,
     game: CanonicalGame,
     userSoc: String?,
     userGpu: String?,
     hardwareLabel: String?,
-    onApply: (CanonicalGame, CanonicalDevice) -> Unit,
+    onPick: (CommunityPick) -> Unit,
     wide: Boolean,
 ) {
-    val ranked = remember(game, userSoc, userGpu) { GameMatcher.rankDevices(game.devices, userSoc, userGpu) }
+    val cfg = rememberGameConfigs(vm, game)
+    val fallback = remember(game, userSoc, userGpu) { GameMatcher.rankDevices(game.devices, userSoc, userGpu) }
+    var matchesMyDevice by rememberSaveable(game.identity) { mutableStateOf(false) }
+    val hwEnabled = userSoc != null || userGpu != null
 
-    // Header (counts + store badge + your-device). Sits on top in portrait, in the left column in landscape.
+    val shownEntries = remember(cfg.entries, matchesMyDevice, userSoc, userGpu) {
+        if (!matchesMyDevice) cfg.entries
+        else cfg.entries.filter { GameMatcher.hardwareMatchesUser(userSoc, userGpu, listOf(it.device, it.soc)) }
+    }
+
+    // Header (counts + store badge + your-device + the "Matches my device" toggle). Sits on top in
+    // portrait, in the left column in landscape.
     @Composable
     fun Header() {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1774,35 +1926,73 @@ private fun CommunityDevicePanel(
         hardwareLabel?.let {
             Text("Your device: $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
         }
+        FilterChip(
+            selected = matchesMyDevice,
+            onClick = { matchesMyDevice = !matchesMyDevice },
+            label = { Text("Matches my device") },
+            enabled = hwEnabled,
+        )
     }
 
-    // The per-device config cards (whole-row tap → chooser). `modifier` provides the scroll container.
+    // The config cards (whole-row tap → chooser). `modifier` provides the scroll container.
     @Composable
-    fun DeviceList(modifier: Modifier) {
-        if (ranked.isEmpty()) {
-            Text("No device configs listed.", color = OnSurfaceVariant, modifier = modifier.padding(12.dp))
-        } else {
-            val hw = hardwareLabel?.lowercase()
-            // Each config is a thin outlined card; the whole card taps through to the chooser
-            // (Apply to game… | View details) via [onApply] — no per-row button.
-            Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                ranked.forEach { d ->
-                    val isMatch = hw != null && (
-                        (d.soc.isNotBlank() && (hw.contains(d.soc.lowercase()) || d.soc.lowercase().contains(hw))) ||
-                        (d.gpu.isNotBlank() && (hw.contains(d.gpu.lowercase()) || d.gpu.lowercase().contains(hw)))
+    fun ConfigList(modifier: Modifier) {
+        Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            when {
+                cfg.loading -> {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Text("Loading configs…", color = OnSurfaceVariant)
+                    }
+                }
+                cfg.entries.isNotEmpty() && cfg.workerGame != null -> {
+                    if (shownEntries.isEmpty()) {
+                        Text("No uploaded configs match your device.", color = OnSurfaceVariant)
+                    } else {
+                        shownEntries.forEach { e ->
+                            val isMatch = hwEnabled &&
+                                GameMatcher.hardwareMatchesUser(userSoc, userGpu, listOf(e.device, e.soc))
+                            CommunityConfigEntryCard(entry = e, isMatch = isMatch) {
+                                onPick(
+                                    CommunityPick.File(
+                                        game,
+                                        CommunityConfigRef(game, cfg.workerGame!!, e.filename, e.sha.ifBlank { null }),
+                                        e,
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+                fallback.isEmpty() -> Text("No configs listed.", color = OnSurfaceVariant)
+                else -> {
+                    // Offline fallback: per-device index rows (best-matching file resolved at apply).
+                    Text(
+                        "Showing device configs (vote counts unavailable offline).",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = OnSurfaceVariant,
                     )
-                    CommunityCard(onClick = { onApply(game, d) }) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = d.model.ifBlank { "Unknown device" },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (isMatch) MaterialTheme.colorScheme.primary else OnSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            val sub = listOf(d.gpu, d.soc).filter { it.isNotBlank() }.joinToString(" · ")
-                            if (sub.isNotEmpty()) {
-                                Text(sub, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val hw = hardwareLabel?.lowercase()
+                    val devs = if (!matchesMyDevice) fallback
+                        else fallback.filter { GameMatcher.deviceMatchesUser(it, userSoc, userGpu) }
+                    devs.forEach { d ->
+                        val isMatch = hw != null && (
+                            (d.soc.isNotBlank() && (hw.contains(d.soc.lowercase()) || d.soc.lowercase().contains(hw))) ||
+                            (d.gpu.isNotBlank() && (hw.contains(d.gpu.lowercase()) || d.gpu.lowercase().contains(hw)))
+                        )
+                        CommunityCard(onClick = { onPick(CommunityPick.Device(game, d)) }) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = d.model.ifBlank { "Unknown device" },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (isMatch) MaterialTheme.colorScheme.primary else OnSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                val sub = listOf(d.gpu, d.soc).filter { it.isNotBlank() }.joinToString(" · ")
+                                if (sub.isNotEmpty()) {
+                                    Text(sub, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
                             }
                         }
                     }
@@ -1823,7 +2013,7 @@ private fun CommunityDevicePanel(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) { Header() }
             Box(modifier = Modifier.fillMaxHeight().width(1.dp).background(DividerColor))
-            DeviceList(
+            ConfigList(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
@@ -1839,7 +2029,7 @@ private fun CommunityDevicePanel(
         ) {
             Header()
             Divider(color = DividerColor)
-            DeviceList(modifier = Modifier.fillMaxWidth())
+            ConfigList(modifier = Modifier.fillMaxWidth())
         }
     }
 }

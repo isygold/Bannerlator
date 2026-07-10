@@ -131,12 +131,25 @@ object GameMatcher {
      * catalog browser's "Matches my device" filter.
      */
     fun deviceMatchesUser(device: CanonicalDevice, userSoc: String?, userGpu: String?): Boolean =
-        deviceOverlaps(device, userTokens(userSoc, userGpu))
+        hardwareMatchesUser(userSoc, userGpu, listOf(device.soc, device.gpu, device.model))
+
+    /**
+     * True when any of the user's hardware tokens overlaps any of the supplied hardware [fields], all
+     * normalized ([normHw]). The generic core [deviceMatchesUser] delegates to — pass a device's
+     * soc/gpu/model, or an uploaded config's device/soc strings, and it matches the same way regardless
+     * of which named field a renderer/SoC spelling happens to land in. Used by the "Matches my device"
+     * filters over both the catalog device rows and the per-uploaded-config list.
+     */
+    fun hardwareMatchesUser(userSoc: String?, userGpu: String?, fields: List<String>): Boolean =
+        tokensOverlap(userTokens(userSoc, userGpu), fields.map { normHw(it) }.filter { it.length >= 3 })
 
     /** Any user hardware token overlaps any of the device's fields (soc/gpu/model), all normalized. */
-    private fun deviceOverlaps(device: CanonicalDevice, userToks: List<String>): Boolean {
-        if (userToks.isEmpty()) return false
-        val devToks = listOf(device.soc, device.gpu, device.model).map { normHw(it) }.filter { it.length >= 3 }
+    private fun deviceOverlaps(device: CanonicalDevice, userToks: List<String>): Boolean =
+        tokensOverlap(userToks, listOf(device.soc, device.gpu, device.model).map { normHw(it) }.filter { it.length >= 3 })
+
+    /** Any user token overlaps any device token (both already normalized). */
+    private fun tokensOverlap(userToks: List<String>, devToks: List<String>): Boolean {
+        if (userToks.isEmpty() || devToks.isEmpty()) return false
         for (u in userToks) for (d in devToks) if (hwOverlap(u, d)) return true
         return false
     }

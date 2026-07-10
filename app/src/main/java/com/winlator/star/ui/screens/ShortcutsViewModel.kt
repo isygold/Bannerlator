@@ -16,9 +16,11 @@ import com.winlator.star.communityconfigs.CanonicalDevice
 import com.winlator.star.communityconfigs.CanonicalGame
 import com.winlator.star.communityconfigs.CommunityConfigApply
 import com.winlator.star.communityconfigs.CommunityConfigFetcher
+import com.winlator.star.communityconfigs.CommunityConfigRef
 import com.winlator.star.communityconfigs.CommunityConfigRepository
 import com.winlator.star.communityconfigs.CommunityConfigWorker
 import com.winlator.star.communityconfigs.WorkerComment
+import com.winlator.star.communityconfigs.WorkerConfigEntry
 import com.winlator.star.communityconfigs.ConfigMeta
 import com.winlator.star.communityconfigs.ConfigTranslator
 import com.winlator.star.communityconfigs.ShortcutConfig
@@ -63,6 +65,10 @@ data class CommunityMatchResult(
     val match: CanonicalGame?,
     val rankedDevices: List<CanonicalDevice>,
     val userHardwareLabel: String?,
+    // Raw detected hardware — kept alongside the display label so the sheet's per-config list can drive
+    // the "Matches my device" filter (which matches SoC/GPU against each config's device/soc strings).
+    val userSoc: String? = null,
+    val userGpu: String? = null,
 )
 
 /**
@@ -153,6 +159,8 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
                     match = best,
                     rankedDevices = devices,
                     userHardwareLabel = userSoc ?: userGpu,
+                    userSoc = userSoc,
+                    userGpu = userGpu,
                 )
             }
             onResult(result)
@@ -178,6 +186,8 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
                     match = game,
                     rankedDevices = GameMatcher.rankDevices(game.devices, userSoc, userGpu),
                     userHardwareLabel = userSoc ?: userGpu,
+                    userSoc = userSoc,
+                    userGpu = userGpu,
                 )
             }
             onResult(result)
@@ -197,6 +207,27 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
                 CommunityCatalog(games, userSoc, userGpu, userSoc ?: userGpu)
             }
             onResult(catalog)
+        }
+    }
+
+    /**
+     * Fetch every uploaded config for [game] from the configs worker (`/list`, already sorted votes
+     * desc). Resolves the worker key by trying the game's [CanonicalGame.folders] then its name — the
+     * same resolution the detail page uses — so the list hits the SAME KV bucket a later apply/detail
+     * `/download` will. Delivers the resolved key + entries on the main thread; the key is null and the
+     * list empty when nothing was found (offline / bucket miss → the UI falls back to per-device rows).
+     */
+    fun fetchGameConfigs(game: CanonicalGame, onResult: (String?, List<WorkerConfigEntry>) -> Unit) {
+        viewModelScope.launch {
+            val resolved = withContext(Dispatchers.IO) {
+                val candidates = (game.folders + game.name).distinct()
+                for (key in candidates) {
+                    val list = CommunityConfigWorker.list(key)
+                    if (list.isNotEmpty()) return@withContext key to list
+                }
+                null to emptyList<WorkerConfigEntry>()
+            }
+            onResult(resolved.first, resolved.second)
         }
     }
 
@@ -234,6 +265,89 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (result.ok && result.changed.isNotEmpty()) refresh()
             onResult(result)
+        }
+    }
+
+    /**
+     * Per-uploaded-config twin of [applyCommunityConfig]: fetch THAT exact file (via the worker's
+     * `/download`), translate it, resolve components against what's installed, SURGICALLY merge into
+     * [shortcut], persist, and report back. Same downstream flow as [applyCommunityConfig] — only the
+     * fetch differs (an exact file instead of the best-for-device pick). All IO is off the main thread.
+     */
+    fun applyCommunityConfigFile(
+        shortcut: Shortcut,
+        ref: CommunityConfigRef,
+        onResult: (CommunityConfigApply.ConfigApplyResult) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                val fetched = CommunityConfigFetcher.fetchForFile(ref.workerGame, ref.filename)
+                    ?: return@withContext CommunityConfigApply.ConfigApplyResult(
+                        ok = false,
+                        message = "Couldn't fetch that config (offline, or it's no longer in the repo).",
+                    )
+                val config = ConfigTranslator.translate(fetched.json)
+                val installed = InstalledComponents.read(getApplication())
+                CommunityConfigApply.apply(
+                    shortcut = shortcut,
+                    config = config,
+                    installed = installed,
+                    containerWineVersion = shortcut.container?.getWineVersion(),
+                    isAdreno = GPUInformation.isAdrenoGPU(getApplication()),
+                )
+            }
+            if (result.ok && result.changed.isNotEmpty()) refresh()
+            onResult(result)
+        }
+    }
+
+    /**
+     * Per-uploaded-config twin of [loadCommunityConfigDetail]: load the read-only detail for THAT exact
+     * file (via `/download`), including the live social layer keyed off [ref] (sha / votes / downloads /
+     * description / comments). Returns null on a fetch/translate failure so the UI shows the same clean
+     * "couldn't fetch" message. The [CommunityConfigDetail.device] is synthesized from the config's own
+     * meta so the detail page's provenance reads identically to the device-picked path.
+     */
+    fun loadCommunityConfigDetail(
+        ref: CommunityConfigRef,
+        target: Shortcut?,
+        onResult: (CommunityConfigDetail?) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val detail = withContext(Dispatchers.IO) {
+                val fetched = CommunityConfigFetcher.fetchForFile(ref.workerGame, ref.filename)
+                    ?: return@withContext null
+                val config = ConfigTranslator.translate(fetched.json)
+                val meta = ConfigMeta.parse(fetched.json.optJSONObject("meta"), fetched.fileName)
+                val preview = target?.let {
+                    CommunityConfigApply.preview(
+                        shortcut = it,
+                        config = config,
+                        installed = InstalledComponents.read(getApplication()),
+                        containerWineVersion = it.container?.getWineVersion(),
+                        isAdreno = GPUInformation.isAdrenoGPU(getApplication()),
+                    )
+                }
+                // Live social layer for the exact file: sha comes off the ref when present, otherwise
+                // (and for votes/downloads) from this file's /list entry under the same worker key.
+                var sha = ref.sha
+                var votes = 0
+                var downloads = 0
+                CommunityConfigWorker.list(ref.workerGame).firstOrNull { it.filename == ref.filename }?.let { e ->
+                    if (sha.isNullOrBlank()) sha = e.sha.ifBlank { null }
+                    votes = e.votes
+                    downloads = e.downloads
+                }
+                val description = sha?.let { CommunityConfigWorker.desc(it) } ?: ""
+                val comments = CommunityConfigWorker.comments(ref.workerGame, ref.filename)
+                val device = CanonicalDevice(model = meta.device ?: "", gpu = "", soc = meta.soc ?: "")
+                CommunityConfigDetail(
+                    ref.game, device, fetched.fileName, meta, config, preview,
+                    sha = sha, workerGame = ref.workerGame, votes = votes, downloads = downloads,
+                    description = description, comments = comments,
+                )
+            }
+            onResult(detail)
         }
     }
 
