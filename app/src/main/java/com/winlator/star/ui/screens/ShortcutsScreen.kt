@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -105,6 +106,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import com.winlator.star.ui.LocalTopBarActions
 import androidx.compose.ui.Alignment
@@ -1196,17 +1198,20 @@ private fun CommunityCatalogBrowser(
 ) {
     var catalog by remember { mutableStateOf<CommunityCatalog?>(null) }
     var loading by remember { mutableStateOf(true) }
-    var query by remember { mutableStateOf("") }
-    var matchesMyDevice by remember { mutableStateOf(false) }
-    var storeFilter by remember { mutableStateOf(CatalogStoreFilter.ALL) }
-    var sort by remember { mutableStateOf(CatalogSort.CONFIGS) }
-    var selectedGame by remember { mutableStateOf<CanonicalGame?>(null) }
+    // Filters/search/selection survive rotation (rememberSaveable) so the user keeps their place;
+    // the drilled-in game is keyed by its identity string (CanonicalGame isn't itself saveable).
+    var query by rememberSaveable { mutableStateOf("") }
+    var matchesMyDevice by rememberSaveable { mutableStateOf(false) }
+    var storeFilter by rememberSaveable { mutableStateOf(CatalogStoreFilter.ALL) }
+    var sort by rememberSaveable { mutableStateOf(CatalogSort.CONFIGS) }
+    var selectedIdentity by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) { vm.getCommunityCatalog { catalog = it; loading = false } }
 
     val userSoc = catalog?.userSoc
     val userGpu = catalog?.userGpu
     val games = catalog?.games ?: emptyList()
+    val selectedGame = selectedIdentity?.let { id -> games.firstOrNull { it.identity == id } }
 
     val visible: List<CanonicalGame> = remember(games, query, matchesMyDevice, storeFilter, sort, userSoc, userGpu) {
         val base = if (query.trim().length >= 2) GameMatcher.search(query, games, limit = 200) else games
@@ -1238,6 +1243,75 @@ private fun CommunityCatalogBrowser(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
         ) {
+            // Game-list controls (device line + search + filter/sort chips + count). Extracted as a
+            // local composable so portrait (stacked) and landscape (left column) share one definition.
+            @Composable
+            fun ListControls(modifier: Modifier) {
+                Column(
+                    modifier = modifier,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    catalog?.hardwareLabel?.let { hw ->
+                        Text(
+                            "Your device: $hw",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnSurfaceVariant,
+                        )
+                    }
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = { Text("Search all games") },
+                        leadingIcon = { Icon(Icons.Filled.Search, null) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    // Store filter + "matches my device".
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        FilterChip(selected = storeFilter == CatalogStoreFilter.ALL, onClick = { storeFilter = CatalogStoreFilter.ALL }, label = { Text("All") })
+                        FilterChip(selected = storeFilter == CatalogStoreFilter.STEAM, onClick = { storeFilter = CatalogStoreFilter.STEAM }, label = { Text("Steam") })
+                        FilterChip(selected = storeFilter == CatalogStoreFilter.TITLE, onClick = { storeFilter = CatalogStoreFilter.TITLE }, label = { Text("Title") })
+                    }
+                    FilterChip(
+                        selected = matchesMyDevice,
+                        onClick = { matchesMyDevice = !matchesMyDevice },
+                        label = { Text("Matches my device") },
+                        enabled = userSoc != null || userGpu != null,
+                    )
+                    // Sort.
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Sort:", style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
+                        FilterChip(selected = sort == CatalogSort.CONFIGS, onClick = { sort = CatalogSort.CONFIGS }, label = { Text("Configs") })
+                        FilterChip(selected = sort == CatalogSort.NAME, onClick = { sort = CatalogSort.NAME }, label = { Text("Name") })
+                        FilterChip(selected = sort == CatalogSort.DEVICES, onClick = { sort = CatalogSort.DEVICES }, label = { Text("Devices") })
+                    }
+                    Text(
+                        "${visible.size} game${if (visible.size == 1) "" else "s"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = OnSurfaceVariant,
+                    )
+                }
+            }
+
+            // The scrollable game list (or its empty state). `modifier` sizes the LazyColumn.
+            @Composable
+            fun GameList(modifier: Modifier) {
+                if (visible.isEmpty()) {
+                    Text(
+                        "No games match your filters.",
+                        color = OnSurfaceVariant,
+                        modifier = Modifier.padding(24.dp),
+                    )
+                } else {
+                    LazyColumn(modifier = modifier) {
+                        items(visible, key = { it.identity }) { g ->
+                            CommunityGameRow(game = g, onClick = { selectedIdentity = g.identity })
+                            Divider(color = DividerColor)
+                        }
+                    }
+                }
+            }
+
             Column {
                 // Title bar (with a back affordance when drilled into a game).
                 Row(
@@ -1245,7 +1319,7 @@ private fun CommunityCatalogBrowser(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (selectedGame != null) {
-                        IconButton(onClick = { selectedGame = null }) {
+                        IconButton(onClick = { selectedIdentity = null }) {
                             Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                         }
                     }
@@ -1260,15 +1334,19 @@ private fun CommunityCatalogBrowser(
                 }
                 Divider(color = DividerColor)
 
-                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                // Landscape (wide): controls/header become a left column so the scrollable list keeps
+                // the full height. Portrait (narrow): the original single-column top-to-bottom stack.
+                BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    val wide = maxWidth >= 600.dp
                     when {
                         loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                         selectedGame != null -> CommunityDevicePanel(
-                            game = selectedGame!!,
+                            game = selectedGame,
                             userSoc = userSoc,
                             userGpu = userGpu,
                             hardwareLabel = catalog?.hardwareLabel,
                             onApply = onApply,
+                            wide = wide,
                         )
                         games.isEmpty() -> Text(
                             "No community configs available yet (offline, or the index hasn't been fetched).",
@@ -1276,66 +1354,21 @@ private fun CommunityCatalogBrowser(
                             modifier = Modifier.align(Alignment.Center).padding(24.dp),
                             textAlign = TextAlign.Center,
                         )
+                        wide -> Row(modifier = Modifier.fillMaxSize()) {
+                            ListControls(
+                                modifier = Modifier
+                                    .width(320.dp)
+                                    .fillMaxHeight()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                            )
+                            Box(modifier = Modifier.fillMaxHeight().width(1.dp).background(DividerColor))
+                            GameList(modifier = Modifier.weight(1f).fillMaxHeight())
+                        }
                         else -> Column(modifier = Modifier.fillMaxSize()) {
-                            Column(
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                catalog?.hardwareLabel?.let { hw ->
-                                    Text(
-                                        "Your device: $hw",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = OnSurfaceVariant,
-                                    )
-                                }
-                                OutlinedTextField(
-                                    value = query,
-                                    onValueChange = { query = it },
-                                    label = { Text("Search all games") },
-                                    leadingIcon = { Icon(Icons.Filled.Search, null) },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                                // Store filter + "matches my device".
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    FilterChip(selected = storeFilter == CatalogStoreFilter.ALL, onClick = { storeFilter = CatalogStoreFilter.ALL }, label = { Text("All") })
-                                    FilterChip(selected = storeFilter == CatalogStoreFilter.STEAM, onClick = { storeFilter = CatalogStoreFilter.STEAM }, label = { Text("Steam") })
-                                    FilterChip(selected = storeFilter == CatalogStoreFilter.TITLE, onClick = { storeFilter = CatalogStoreFilter.TITLE }, label = { Text("Title") })
-                                }
-                                FilterChip(
-                                    selected = matchesMyDevice,
-                                    onClick = { matchesMyDevice = !matchesMyDevice },
-                                    label = { Text("Matches my device") },
-                                    enabled = userSoc != null || userGpu != null,
-                                )
-                                // Sort.
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("Sort:", style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
-                                    FilterChip(selected = sort == CatalogSort.CONFIGS, onClick = { sort = CatalogSort.CONFIGS }, label = { Text("Configs") })
-                                    FilterChip(selected = sort == CatalogSort.NAME, onClick = { sort = CatalogSort.NAME }, label = { Text("Name") })
-                                    FilterChip(selected = sort == CatalogSort.DEVICES, onClick = { sort = CatalogSort.DEVICES }, label = { Text("Devices") })
-                                }
-                                Text(
-                                    "${visible.size} game${if (visible.size == 1) "" else "s"}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = OnSurfaceVariant,
-                                )
-                            }
+                            ListControls(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
                             Divider(color = DividerColor)
-                            if (visible.isEmpty()) {
-                                Text(
-                                    "No games match your filters.",
-                                    color = OnSurfaceVariant,
-                                    modifier = Modifier.padding(24.dp),
-                                )
-                            } else {
-                                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                                    items(visible, key = { it.identity }) { g ->
-                                        CommunityGameRow(game = g, onClick = { selectedGame = g })
-                                        Divider(color = DividerColor)
-                                    }
-                                }
-                            }
+                            GameList(modifier = Modifier.fillMaxSize())
                         }
                     }
                 }
@@ -1383,12 +1416,13 @@ private fun CommunityDevicePanel(
     userGpu: String?,
     hardwareLabel: String?,
     onApply: (CanonicalGame, CanonicalDevice) -> Unit,
+    wide: Boolean,
 ) {
     val ranked = remember(game, userSoc, userGpu) { GameMatcher.rankDevices(game.devices, userSoc, userGpu) }
-    Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
+
+    // Header (counts + store badge + your-device). Sits on top in portrait, in the left column in landscape.
+    @Composable
+    fun Header() {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val cfgWord = if (game.configCount == 1) "config" else "configs"
             val devWord = if (game.devices.size == 1) "device" else "devices"
@@ -1403,40 +1437,78 @@ private fun CommunityDevicePanel(
         hardwareLabel?.let {
             Text("Your device: $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
         }
-        Divider(color = DividerColor)
+    }
+
+    // The per-device config rows with "Apply to game…" buttons. `modifier` provides the scroll container.
+    @Composable
+    fun DeviceList(modifier: Modifier) {
         if (ranked.isEmpty()) {
-            Text("No device configs listed.", color = OnSurfaceVariant)
+            Text("No device configs listed.", color = OnSurfaceVariant, modifier = modifier.padding(12.dp))
         } else {
             val hw = hardwareLabel?.lowercase()
-            ranked.forEach { d ->
-                val isMatch = hw != null && (
-                    (d.soc.isNotBlank() && (hw.contains(d.soc.lowercase()) || d.soc.lowercase().contains(hw))) ||
-                    (d.gpu.isNotBlank() && (hw.contains(d.gpu.lowercase()) || d.gpu.lowercase().contains(hw)))
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = d.model.ifBlank { "Unknown device" },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = if (isMatch) MaterialTheme.colorScheme.primary else OnSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        val sub = listOf(d.gpu, d.soc).filter { it.isNotBlank() }.joinToString(" · ")
-                        if (sub.isNotEmpty()) {
-                            Text(sub, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ranked.forEach { d ->
+                    val isMatch = hw != null && (
+                        (d.soc.isNotBlank() && (hw.contains(d.soc.lowercase()) || d.soc.lowercase().contains(hw))) ||
+                        (d.gpu.isNotBlank() && (hw.contains(d.gpu.lowercase()) || d.gpu.lowercase().contains(hw)))
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = d.model.ifBlank { "Unknown device" },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (isMatch) MaterialTheme.colorScheme.primary else OnSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            val sub = listOf(d.gpu, d.soc).filter { it.isNotBlank() }.joinToString(" · ")
+                            if (sub.isNotEmpty()) {
+                                Text(sub, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
                         }
+                        OutlinedButton(
+                            onClick = { onApply(game, d) },
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        ) { Text("Apply to game…") }
                     }
-                    OutlinedButton(
-                        onClick = { onApply(game, d) },
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    ) { Text("Apply to game…") }
                 }
             }
+        }
+    }
+
+    if (wide) {
+        // Landscape: header pinned in a left column, config list scrolls on the right at full height.
+        Row(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .width(320.dp)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) { Header() }
+            Box(modifier = Modifier.fillMaxHeight().width(1.dp).background(DividerColor))
+            DeviceList(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+                    .padding(12.dp),
+            )
+        }
+    } else {
+        // Portrait: the original single scrolling column (header, divider, then the config rows).
+        Column(
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Header()
+            Divider(color = DividerColor)
+            DeviceList(modifier = Modifier.fillMaxWidth())
         }
     }
 }
