@@ -1,5 +1,21 @@
 # Star-Compose — Progress Log
 
+## 2026-07-10 — 🌐 Community Configs: browse/apply BannerHub configs in-app (Phase 1 device-verified + Phase 2 CI-green)
+
+> **Branch `feat/community-configs-v1` (tip `712dfaad`, CI GREEN, NOT merged/tagged). APK staged: `/sdcard/Download/bannerlator-catalog-apply-712dfaa-standard.apk`. Full detail in memory [[project_bannerlator_bannerhub_config_crossuse]].**
+>
+> **The initiative:** consume the community BannerHub game-configs (per-game/per-device tuning) inside Bannerlator. Built a **separate isolated repo** `The412Banner/bannerlator-game-configs` (reads BannerHub read-only, writes only itself — zero upstream impact; PR #1 on the orig repo = fallback). Index: 2116 folders → **1261 canonical games merged by identity**, **config-coverage 92%** (namespaced key: numeric Steam appid | `name:<slug>` non-Steam like PES). HTML catalog + Artifact published.
+>
+> **In-app consumer (this branch):**
+> - **Phase 1 — DEVICE-VERIFIED:** per-shortcut ⋮ → "Community configs" sheet — fuzzy-match shortcut name → canonical game, per-device configs (your-SoC ranked first), + a **manual search box** fallback. Screenshots confirm Crysis 3 + DiRT 3 match correctly.
+> - **Phase 2 — CI-green, on-device UNVERIFIED:** **globe button in Games header** → `CommunityCatalogBrowser` (search · "Matches my device" + Steam/Title filters · Configs/Name/Devices sort · "Your device: <SoC>" chip) → game → per-device configs → **"Apply to game…"** → shortcut picker (**apply-any-to-any, warns on game mismatch**). Apply engine: `CommunityConfigFetcher` (GitHub contents-API → device-token filename match → raw) → `ConfigTranslator` (pc_ls_* → `[Extra Data]`, mirrors `bgc-repo/tools/translate.py`) → `InstalledComponents` (reads `filesDir/contents/{DXVK,VKD3D,Proton,FEXCore,adrenotools}`, minor-aware Match/Missing) → **SURGICAL sub-field merge** (only version/vkd3dVersion/async in dxwrapperConfig + driver version in graphicsDriverConfig; PRESERVES BCn/vulkanVersion/HUD/everything else) → `Shortcut.putExtra`. **wineVersion/Proton = advisory-only**. Per-shortcut sheet's Apply now runs the same engine. Export-ready via reversible `ShortcutConfig` (Phase 3 = export/import/contribute).
+>
+> **Bugs found/fixed on real device:** (1) **matcher scoring** rewritten coverage-based (`0.7·covGame + 0.3·covQuery + 0.001·inter`) — subset formula diluted short names, DiRT 3 lost to Fallout 3 / the DLC; now "Dirt 3" wins 0.82. (2) **index**: DiRT 3 → 44500 "Dirt 3" (delisted, hardcoded) + re-homed `Colin_Mcrae__Dirt_2`→`name:dirt-2` to kill the DiRT-Rally-2.0-DLC false-positive; validated ArmA2/CS/L4D2/Divinity-OS-EE/Walking-Dead-S2 aliases. (3) name-derivation must NOT stylize "DiRT" (breaks camelCase tokenizer→di+rt). (4) CI red once = `/*` inside a KDoc `{@code files/contents/*}` (Kotlin nests block comments→swallowed file); fixed `712dfaad`.
+>
+> **⚠️ Gotcha:** index cache is in-memory (`cachedGames`)+disk+24h → server fixes need app FORCE-STOP or 24h. **TODO: refresh affordance / ETag.**
+>
+> **▶️ NEXT:** on-device verify APPLY (DiRT 3/Crysis 3 → shortcut; surgical merge preserves settings; component resolution; FEX date-ver flags "install"). Then refresh-affordance TODO, then Phase 3 export/import. NOT merged — awaiting on-device sign-off.
+
 ## 2026-07-08 — 🚧 2.6-pre: port GameNative #1620 (+#1644) — ASR SurfaceFlinger crash + BGRA→RGBA color fix
 
 > **Branch `feat/asr-gn1620` off main `0ff4df95` (clean post-2.5 base). NOT yet CI-verified/device-tested. 2.6-preN material.**
