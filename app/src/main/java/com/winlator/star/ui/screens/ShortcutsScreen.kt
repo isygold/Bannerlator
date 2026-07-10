@@ -676,7 +676,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     }
 
     // Community configs dialog (Phase 1 — match + suggest, read-only)
-    communityTarget?.let { s ->
+    if (installSheetFor == null) communityTarget?.let { s ->
         val dismiss = { communityTarget = null; communityResult = null }
         AlertDialog(
             onDismissRequest = dismiss,
@@ -828,7 +828,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     }
 
     // Catalog browser (Part A) — full-catalog entry from the header button.
-    if (showCommunityBrowser) {
+    if (showCommunityBrowser && installSheetFor == null) {
         CommunityCatalogBrowser(
             vm = vm,
             onDismiss = { showCommunityBrowser = false },
@@ -837,7 +837,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     }
 
     // Apply-target picker — choose which of your shortcuts to apply a browser-selected config to.
-    applyPicker?.let { (game, device) ->
+    if (installSheetFor == null) applyPicker?.let { (game, device) ->
         val shortcutList = vm.currentShortcuts()
         AlertDialog(
             onDismissRequest = { applyPicker = null },
