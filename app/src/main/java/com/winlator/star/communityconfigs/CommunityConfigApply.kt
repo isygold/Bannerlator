@@ -14,7 +14,7 @@ import com.winlator.star.container.Shortcut
  *  - {@code dxwrapperConfig} ("k=v," list) and {@code graphicsDriverConfig} ("k=v;" list) get a
  *    SUB-FIELD merge: replace ONLY the config-named versions, PRESERVE every other sub-key the user
  *    already has (BCn settings, vulkanVersion, gpuName, HUD, fps, renderer, …).
- *  - Component versions are resolved against what's installed under {@code files/contents/*},
+ *  - Component versions are resolved against what's installed under the files/contents dirs,
  *    minor-version-aware; prefer an installed-compatible version, flag installs for material diffs.
  *
  * Reference translate+validate logic: tools/translate.py in The412Banner/bannerlator-game-configs.
