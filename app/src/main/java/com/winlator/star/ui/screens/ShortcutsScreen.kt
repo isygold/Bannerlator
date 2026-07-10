@@ -1844,6 +1844,17 @@ private fun CommunityDevicePanel(
     }
 }
 
+// Human display name for a config's meta.app_source — the actual project that produced it. BannerHub
+// and BannerHub Lite are distinct apps writing "bannerhub" / "bannerhub_lite"; ours would be "bannerlator".
+private fun communitySourceLabel(appSource: String?): String = when (appSource?.lowercase()?.trim()) {
+    "bannerhub" -> "BannerHub"
+    "bannerhub_lite" -> "BannerHub Lite"
+    "bannerlator" -> "Bannerlator"
+    null, "" -> "BannerHub"
+    else -> appSource.split('_', ' ').filter { it.isNotBlank() }
+        .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+}
+
 // Turn a translated config into "what it sets" lines in OUR component terms (the same fields the apply
 // engine consumes). Only present fields are listed; Proton/wineVersion is advisory (container-only) so
 // it is surfaced separately, not here.
@@ -2008,13 +2019,16 @@ private fun CommunityConfigDetailDialog(
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CommunityStoreBadge(isSteam = game.isSteam)
-                meta?.bhVersion?.let {
+                if (meta != null) {
+                    // Name the actual source project (meta.app_source distinguishes BannerHub vs
+                    // BannerHub Lite vs a future Bannerlator upload), with the version appended if present.
+                    val label = "From ${communitySourceLabel(meta.appSource)}" + (meta.bhVersion?.let { " $it" } ?: "")
                     Surface(
                         color = SurfaceVariantColor,
                         shape = MaterialTheme.shapes.small,
                     ) {
                         Text(
-                            "From BannerHub $it",
+                            label,
                             style = MaterialTheme.typography.labelSmall,
                             color = OnSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
