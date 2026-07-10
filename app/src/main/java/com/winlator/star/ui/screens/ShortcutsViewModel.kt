@@ -211,23 +211,37 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Fetch every uploaded config for [game] from the configs worker (`/list`, already sorted votes
-     * desc). Resolves the worker key by trying the game's [CanonicalGame.folders] then its name — the
-     * same resolution the detail page uses — so the list hits the SAME KV bucket a later apply/detail
-     * `/download` will. Delivers the resolved key + entries on the main thread; the key is null and the
-     * list empty when nothing was found (offline / bucket miss → the UI falls back to per-device rows).
+     * Fetch every uploaded config for [game] across ALL of its worker folders and merge them. A
+     * canonical game aggregates several BannerHub folder names under one appid, so we must query each
+     * folder (in parallel) and CONCATENATE — querying only the first non-empty folder drops the rest.
+     * Each entry is paired with the folder (`/list` key) it came from so its [CommunityConfigRef.workerGame]
+     * is correct PER ENTRY (vote/comment/download then hit the right KV bucket). The merged set is
+     * deduped by sha (globally unique per repo file; folder+filename when sha is blank) and re-sorted
+     * votes-desc then date-desc, because the worker only sorts WITHIN a folder. Falls back to the game
+     * name as a key only when [CanonicalGame.folders] is empty. Empty on offline / bucket miss → the UI
+     * falls back to per-device rows.
      */
-    fun fetchGameConfigs(game: CanonicalGame, onResult: (String?, List<WorkerConfigEntry>) -> Unit) {
+    fun fetchGameConfigs(game: CanonicalGame, onResult: (List<Pair<String, WorkerConfigEntry>>) -> Unit) {
         viewModelScope.launch {
-            val resolved = withContext(Dispatchers.IO) {
-                val candidates = (game.folders + game.name).distinct()
-                for (key in candidates) {
-                    val list = CommunityConfigWorker.list(key)
-                    if (list.isNotEmpty()) return@withContext key to list
+            val merged = withContext(Dispatchers.IO) {
+                val keys = game.folders.ifEmpty { listOf(game.name) }.distinct()
+                val perFolder = keys
+                    .map { key -> async { key to CommunityConfigWorker.list(key) } }
+                    .awaitAll()
+                val seen = HashSet<String>()
+                val out = ArrayList<Pair<String, WorkerConfigEntry>>()
+                for ((folder, list) in perFolder) {
+                    for (entry in list) {
+                        val dedupKey = entry.sha.ifBlank { "$folder/${entry.filename}" }
+                        if (seen.add(dedupKey)) out.add(folder to entry)
+                    }
                 }
-                null to emptyList<WorkerConfigEntry>()
+                out.sortedWith(
+                    compareByDescending<Pair<String, WorkerConfigEntry>> { it.second.votes }
+                        .thenByDescending { it.second.date }
+                )
             }
-            onResult(resolved.first, resolved.second)
+            onResult(merged)
         }
     }
 

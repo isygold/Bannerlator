@@ -860,21 +860,21 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                             val cfg = rememberGameConfigs(vm, game)
                             when {
                                 cfg.loading -> Text("Loading configs…", color = OnSurfaceVariant)
-                                cfg.entries.isNotEmpty() && cfg.workerGame != null -> {
+                                cfg.entries.isNotEmpty() -> {
                                     val shown = if (!matchesMine) cfg.entries
                                         else cfg.entries.filter {
-                                            GameMatcher.hardwareMatchesUser(uSoc, uGpu, listOf(it.device, it.soc))
+                                            GameMatcher.hardwareMatchesUser(uSoc, uGpu, listOf(it.second.device, it.second.soc))
                                         }
                                     if (shown.isEmpty()) {
                                         Text("No uploaded configs match your device.", color = OnSurfaceVariant)
                                     } else {
-                                        shown.forEach { e ->
+                                        shown.forEach { (folder, e) ->
                                             val isMatch = (uSoc != null || uGpu != null) &&
                                                 GameMatcher.hardwareMatchesUser(uSoc, uGpu, listOf(e.device, e.soc))
                                             CommunityConfigEntryCard(entry = e, isMatch = isMatch) {
                                                 configAction = CommunityPick.File(
                                                     game,
-                                                    CommunityConfigRef(game, cfg.workerGame!!, e.filename, e.sha.ifBlank { null }),
+                                                    CommunityConfigRef(game, folder, e.filename, e.sha.ifBlank { null }),
                                                     e,
                                                 ) to s
                                             }
@@ -1807,12 +1807,12 @@ private sealed class CommunityPick {
     ) : CommunityPick()
 }
 
-// Async state of the per-game worker fetch: [workerGame] is the resolved `/list` key (null while
-// loading or when nothing was found), [entries] the uploaded configs (votes-desc), [loading] the gate.
+// Async state of the per-game worker fetch. [entries] is the merged, deduped, votes-desc list across
+// ALL the game's folders; each entry is paired with the folder (`/list` key) it came from so its
+// per-entry [CommunityConfigRef.workerGame] is correct. [loading] gates the spinner.
 private data class GameConfigsState(
     val loading: Boolean,
-    val workerGame: String?,
-    val entries: List<WorkerConfigEntry>,
+    val entries: List<Pair<String, WorkerConfigEntry>>,
 )
 
 // Fetch (once per [game]) the uploaded configs for a game from the worker and expose them as Compose
@@ -1820,17 +1820,15 @@ private data class GameConfigsState(
 @Composable
 private fun rememberGameConfigs(vm: ShortcutsViewModel, game: CanonicalGame): GameConfigsState {
     var loading by remember(game) { mutableStateOf(true) }
-    var workerGame by remember(game) { mutableStateOf<String?>(null) }
-    var entries by remember(game) { mutableStateOf<List<WorkerConfigEntry>>(emptyList()) }
+    var entries by remember(game) { mutableStateOf<List<Pair<String, WorkerConfigEntry>>>(emptyList()) }
     LaunchedEffect(game) {
         loading = true
-        vm.fetchGameConfigs(game) { key, list ->
-            workerGame = key
+        vm.fetchGameConfigs(game) { list ->
             entries = list
             loading = false
         }
     }
-    return GameConfigsState(loading, workerGame, entries)
+    return GameConfigsState(loading, entries)
 }
 
 // One card per uploaded config: primary = the device it was captured on (soc/filename fallback),
@@ -1905,7 +1903,7 @@ private fun CommunityDevicePanel(
 
     val shownEntries = remember(cfg.entries, matchesMyDevice, userSoc, userGpu) {
         if (!matchesMyDevice) cfg.entries
-        else cfg.entries.filter { GameMatcher.hardwareMatchesUser(userSoc, userGpu, listOf(it.device, it.soc)) }
+        else cfg.entries.filter { GameMatcher.hardwareMatchesUser(userSoc, userGpu, listOf(it.second.device, it.second.soc)) }
     }
 
     // Header (counts + store badge + your-device + the "Matches my device" toggle). Sits on top in
@@ -1945,18 +1943,18 @@ private fun CommunityDevicePanel(
                         Text("Loading configs…", color = OnSurfaceVariant)
                     }
                 }
-                cfg.entries.isNotEmpty() && cfg.workerGame != null -> {
+                cfg.entries.isNotEmpty() -> {
                     if (shownEntries.isEmpty()) {
                         Text("No uploaded configs match your device.", color = OnSurfaceVariant)
                     } else {
-                        shownEntries.forEach { e ->
+                        shownEntries.forEach { (folder, e) ->
                             val isMatch = hwEnabled &&
                                 GameMatcher.hardwareMatchesUser(userSoc, userGpu, listOf(e.device, e.soc))
                             CommunityConfigEntryCard(entry = e, isMatch = isMatch) {
                                 onPick(
                                     CommunityPick.File(
                                         game,
-                                        CommunityConfigRef(game, cfg.workerGame!!, e.filename, e.sha.ifBlank { null }),
+                                        CommunityConfigRef(game, folder, e.filename, e.sha.ifBlank { null }),
                                         e,
                                     )
                                 )
