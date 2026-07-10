@@ -447,12 +447,14 @@ private fun loadProfiles(
     onResult(all.distinctBy { ContentsManager.getEntryName(it) })
 }
 
-private fun downloadToCache(context: Context, profile: ContentProfile, onProgress: (Float) -> Unit): Uri? {
+// internal (not private): the community-config inline installer reuses this same download path.
+internal fun downloadToCache(context: Context, profile: ContentProfile, onProgress: (Float) -> Unit): Uri? {
     val f = File(context.cacheDir, "temp_${System.currentTimeMillis()}")
     return if (Downloader.downloadFile(profile.remoteUrl, f) { frac -> onProgress(frac) }) Uri.fromFile(f) else null
 }
 
-private fun installContent(
+// internal (not private): reused by the community-config inline installer (same install path).
+internal fun installContent(
     context: Context,
     cm: ContentsManager,
     uri: Uri,

@@ -231,6 +231,77 @@ object CommunityConfigApply {
         return true
     }
 
+    /**
+     * The smart shortlist for a [MissingComponent]: an [exact] downloadable profile (verName
+     * normalizes-equal to the wanted version) when one exists, plus the [closest] few remaining
+     * profiles ranked by version distance (same major preferred). Fed by the inline installer on the
+     * "Config applied" screen so the user can install without opening the full version menu.
+     */
+    data class VersionShortlist(
+        val exact: ContentProfile?,
+        val closest: List<ContentProfile>,
+    )
+
+    /**
+     * Rank downloadable [profiles] against the requested [wanted] version:
+     *  - [VersionShortlist.exact] is the normalize-equal profile, if any.
+     *  - [VersionShortlist.closest] is up to [limit] remaining profiles, nearest first by version
+     *    distance, with the same major always ahead of a different major.
+     *
+     * Dotted versions (2.4.1) rank by major/minor/patch distance; date or build-style FEXCore
+     * versions (Fex_20260428, FEX-2607) rank by the numeric build's absolute distance. When the
+     * wanted version can't be parsed, [closest] is empty (caller falls back to "Browse all versions").
+     */
+    fun rankVersions(
+        wanted: String,
+        profiles: List<ContentProfile>,
+        limit: Int = 3,
+    ): VersionShortlist {
+        if (profiles.isEmpty()) return VersionShortlist(null, emptyList())
+        val wantNorm = normalizeVer(wanted)
+        val exact = profiles.firstOrNull { normalizeVer(it.verName) == wantNorm }
+        val wantKey = versionKey(wanted)
+        val closest = profiles.asSequence()
+            .filter { it !== exact }
+            .mapNotNull { p -> versionKey(p.verName)?.let { p to versionDistance(wantKey, it) } }
+            .filter { it.second != Long.MAX_VALUE }
+            .sortedBy { it.second }
+            .map { it.first }
+            .take(limit)
+            .toList()
+        return VersionShortlist(exact, closest)
+    }
+
+    /** Loose equality for version strings: case-insensitive, whitespace-stripped, leading "v" dropped. */
+    private fun normalizeVer(v: String): String =
+        v.trim().lowercase().removePrefix("v").replace(" ", "")
+
+    // Parsed comparison key. First element tags the format (0 = dotted x.y.z, 1 = single build/date
+    // number); remaining elements are the numeric components. Null when nothing numeric parses.
+    private fun versionKey(v: String): LongArray? {
+        val dotted = Regex("(\\d+)\\.(\\d+)(?:\\.(\\d+))?").find(v)
+        if (dotted != null) {
+            val maj = dotted.groupValues[1].toLongOrNull() ?: 0L
+            val min = dotted.groupValues[2].toLongOrNull() ?: 0L
+            val pat = dotted.groupValues.getOrNull(3)?.toLongOrNull() ?: 0L
+            return longArrayOf(0L, maj, min, pat)
+        }
+        val big = Regex("\\d+").findAll(v).map { it.value }.maxByOrNull { it.length }?.toLongOrNull()
+            ?: return null
+        return longArrayOf(1L, big)
+    }
+
+    // Distance between two version keys; MAX_VALUE when formats differ or either is unparseable.
+    private fun versionDistance(a: LongArray?, b: LongArray?): Long {
+        if (a == null || b == null || a[0] != b[0]) return Long.MAX_VALUE
+        return if (a[0] == 0L) {
+            // Weight major far above minor above patch so same-major always sorts ahead.
+            Math.abs(a[1] - b[1]) * 1_000_000L + Math.abs(a[2] - b[2]) * 1_000L + Math.abs(a[3] - b[3])
+        } else {
+            Math.abs(a[1] - b[1])
+        }
+    }
+
     /** Map a sheet-installable [ContentProfile.ContentType] to its [InstalledComponents] type key. */
     private fun installedType(type: ContentProfile.ContentType): String? = when (type) {
         ContentProfile.ContentType.CONTENT_TYPE_DXVK -> "DXVK"

@@ -78,6 +78,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -140,6 +141,8 @@ import com.winlator.star.reshade.ReshadeManager
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog
 import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
+import com.winlator.star.contents.Downloader
+import com.winlator.star.ui.findActivity
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.KeyValueSet
@@ -276,6 +279,32 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         vm.matchCommunityConfigs(shortcut) { result ->
             communityResult = result
             communityLoading = false
+        }
+    }
+
+    // Post-install fixup shared by the inline installer and the "Browse all versions" fallback sheet:
+    // re-read what's on disk off-main, surgically auto-apply the resolved version to the target
+    // shortcut, then mark the row done + refresh. Same behaviour the download sheet's onContentChanged had.
+    val applyAfterInstall: (CommunityConfigApply.MissingComponent) -> Unit = { mc ->
+        val target = applyTarget
+        if (target != null) {
+            scope.launch {
+                val resolved = withContext(Dispatchers.IO) {
+                    val installed = com.winlator.star.communityconfigs.InstalledComponents.read(context)
+                    CommunityConfigApply.applyResolvedComponent(target, mc, installed)
+                }
+                if (resolved) {
+                    if (mc.label !in resolvedMissing) resolvedMissing.add(mc.label)
+                    vm.refresh()
+                    Toast.makeText(context, "Installed and applied to \"${target.name}\".", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(
+                        context,
+                        "Installed, but couldn't auto-apply — open \"Browse all versions\" to finish.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
         }
     }
 
@@ -908,6 +937,23 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // sheet is open (a ModalBottomSheet renders behind an AlertDialog's window); it reappears — with
     // any new checkmark — once the sheet closes, since applyResult / resolvedMissing persist.
     if (installSheetFor == null) applyResult?.let { res ->
+        // Downloadable catalog for the inline installer — one fetch per result, per missing type.
+        // null value = still loading (row shows a spinner instead of a button).
+        val installCm = remember(res) { ContentsManager(context) }
+        var remoteByType by remember(res) {
+            mutableStateOf<Map<ContentProfile.ContentType, List<ContentProfile>>?>(null)
+        }
+        LaunchedEffect(res) {
+            if (res.missingComponents.isEmpty()) { remoteByType = emptyMap(); return@LaunchedEffect }
+            val types = res.missingComponents.map { it.type }.toSet()
+            remoteByType = withContext(Dispatchers.IO) {
+                val json = Downloader.downloadString(ContentsManager.REMOTE_PROFILES)
+                if (json != null) installCm.setRemoteProfiles(json) else installCm.syncContents()
+                types.associateWith { t ->
+                    (installCm.getProfiles(t) ?: emptyList()).filter { it.remoteUrl != null }
+                }
+            }
+        }
         AlertDialog(
             onDismissRequest = { applyResult = null },
             title = { Text(if (res.ok) "Config applied" else "Couldn't apply") },
@@ -922,36 +968,21 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                         Text("Changed", style = MaterialTheme.typography.labelLarge, color = OnSurface)
                         res.changed.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant) }
                     }
-                    // Missing components that ARE installable via the download sheet — text + Install button.
+                    // Missing components — smart inline installer: exact-match confirm, or a shortlist of
+                    // the closest catalog versions, with "Browse all versions" as the full-menu fallback.
                     if (res.missingComponents.isNotEmpty()) {
                         Divider(color = DividerColor)
                         Text("Needs a component", style = MaterialTheme.typography.labelLarge, color = OnSurface)
                         res.missingComponents.forEach { mc ->
-                            val done = mc.label in resolvedMissing
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Text(
-                                    "• ${mc.label}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = OnSurfaceVariant,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                if (done) {
-                                    Icon(
-                                        Icons.Filled.CheckCircle,
-                                        contentDescription = "Installed",
-                                        tint = Color(0xFF4FC3F7),
-                                        modifier = Modifier.size(20.dp),
-                                    )
-                                } else {
-                                    TextButton(onClick = { installSheetFor = mc }) {
-                                        Text("Install", color = MaterialTheme.colorScheme.primary)
-                                    }
-                                }
-                            }
+                            SmartComponentInstallRow(
+                                mc = mc,
+                                done = mc.label in resolvedMissing,
+                                candidates = remoteByType?.get(mc.type) ?: emptyList(),
+                                catalogLoading = remoteByType == null,
+                                cm = installCm,
+                                onBrowseAll = { installSheetFor = mc },
+                                onProfileInstalled = { applyAfterInstall(mc) },
+                            )
                         }
                     }
                     if (res.advisories.isNotEmpty()) {
@@ -972,20 +1003,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         ContentDownloadSheet(
             contentType = mc.type,
             onDismiss = { installSheetFor = null },
-            onContentChanged = {
-                val target = applyTarget ?: return@ContentDownloadSheet
-                scope.launch {
-                    val resolved = withContext(Dispatchers.IO) {
-                        val installed = com.winlator.star.communityconfigs.InstalledComponents.read(context)
-                        CommunityConfigApply.applyResolvedComponent(target, mc, installed)
-                    }
-                    if (resolved) {
-                        if (mc.label !in resolvedMissing) resolvedMissing.add(mc.label)
-                        vm.refresh()
-                        Toast.makeText(context, "Installed and applied to \"${target.name}\".", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            },
+            onContentChanged = { applyAfterInstall(mc) },
         )
     }
 
@@ -1013,6 +1031,153 @@ private fun CommunityStoreBadge(isSteam: Boolean) {
             text = if (isSteam) "STEAM" else "TITLE",
             style = MaterialTheme.typography.labelSmall,
             color = fg,
+        )
+    }
+}
+
+// One missing-component row on the "Config applied" screen — the SMART inline installer. Resolves the
+// config's wanted version against the downloadable catalog and offers the shortest path:
+//  - exact match  → "Install" → a small confirm → inline download+install → auto-apply → checkmark.
+//  - no exact      → "Install" reveals the ~3 closest versions (press = install, no confirm) plus a
+//                    "Browse all versions…" link that opens the full single-type download sheet.
+// Download + install reuse the same downloadToCache / installContent path as the sheet; the actual
+// version write-back (auto-apply) happens in the parent via [onProfileInstalled].
+@Composable
+private fun SmartComponentInstallRow(
+    mc: CommunityConfigApply.MissingComponent,
+    done: Boolean,
+    candidates: List<ContentProfile>,
+    catalogLoading: Boolean,
+    cm: ContentsManager,
+    onBrowseAll: () -> Unit,
+    onProfileInstalled: () -> Unit,
+) {
+    val context = LocalContext.current
+    val activity = context.findActivity()
+    val scope = rememberCoroutineScope()
+    val installedBlue = Color(0xFF4FC3F7) // intentional: matches the sheet's installed/in-use status blue
+
+    val shortlist = remember(candidates, mc.wanted) {
+        CommunityConfigApply.rankVersions(mc.wanted, candidates)
+    }
+
+    var expanded by remember { mutableStateOf(false) }                       // shortlist revealed (no-exact case)
+    var confirmProfile by remember { mutableStateOf<ContentProfile?>(null) } // exact-match confirm
+    var busy by remember { mutableStateOf(false) }
+    var installing by remember { mutableStateOf(false) }                     // false = downloading phase
+    var progress by remember { mutableStateOf(0f) }
+
+    fun install(profile: ContentProfile) {
+        confirmProfile = null
+        expanded = false
+        busy = true
+        installing = false
+        progress = 0f
+        scope.launch {
+            val uri = withContext(Dispatchers.IO) {
+                downloadToCache(context, profile) { frac -> activity?.runOnUiThread { progress = frac } }
+            }
+            if (uri == null) {
+                busy = false
+                Toast.makeText(context, "Download failed.", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            installing = true
+            progress = 0f
+            // installContent already marshals onProgress / onDone back to the UI thread.
+            installContent(context, cm, uri, onProgress = { f, _ -> progress = maxOf(progress, f) }) { ok ->
+                busy = false
+                if (ok) onProfileInstalled()
+                else Toast.makeText(context, "Install failed.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "• ${mc.label}",
+                style = MaterialTheme.typography.bodySmall,
+                color = OnSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            when {
+                done -> Icon(
+                    Icons.Filled.CheckCircle, contentDescription = "Installed",
+                    tint = installedBlue, modifier = Modifier.size(20.dp),
+                )
+                busy || catalogLoading -> CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                else -> {
+                    val exact = shortlist.exact
+                    TextButton(onClick = {
+                        when {
+                            exact != null -> confirmProfile = exact
+                            shortlist.closest.isEmpty() -> onBrowseAll()
+                            else -> expanded = !expanded
+                        }
+                    }) { Text("Install", color = MaterialTheme.colorScheme.primary) }
+                }
+            }
+        }
+
+        // Progress line under the label while downloading / installing.
+        if (busy) {
+            val frac = progress.coerceIn(0f, 1f)
+            Text(
+                if (installing) "Installing…" else "Downloading ${(frac * 100).toInt()}%…",
+                style = MaterialTheme.typography.labelSmall,
+                color = OnSurfaceVariant,
+                modifier = Modifier.padding(start = 10.dp, top = 2.dp),
+            )
+            LinearProgressIndicator(
+                progress = frac,
+                modifier = Modifier.fillMaxWidth().height(3.dp).padding(top = 2.dp),
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        // Shortlist (no exact match) — the ~3 closest versions + "Browse all versions".
+        if (!busy && !done && expanded && shortlist.exact == null) {
+            Column(
+                modifier = Modifier.padding(start = 10.dp, top = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                shortlist.closest.forEach { p ->
+                    Text(
+                        "Install ${p.verName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { install(p) }
+                            .padding(vertical = 6.dp),
+                    )
+                }
+                Text(
+                    "Browse all versions…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { expanded = false; onBrowseAll() }
+                        .padding(vertical = 6.dp),
+                )
+            }
+        }
+    }
+
+    // Exact-match confirm dialog (stacks over the result dialog).
+    confirmProfile?.let { p ->
+        AlertDialog(
+            onDismissRequest = { confirmProfile = null },
+            title = { Text("Install ${p.verName}?") },
+            text = { Text("Download and install ${mc.type} ${p.verName}, then apply it to this shortcut?") },
+            confirmButton = { TextButton(onClick = { install(p) }) { Text("Install") } },
+            dismissButton = { TextButton(onClick = { confirmProfile = null }) { Text("Cancel") } },
         )
     }
 }
