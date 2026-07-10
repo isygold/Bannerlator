@@ -2,7 +2,16 @@
 
 ## 2026-07-10 — 🌐 Community Configs: browse/apply BannerHub configs in-app (Phase 1 device-verified + Phase 2 CI-green)
 
-> **Branch `feat/community-configs-v1` (tip `9f7ed579`, CI GREEN run 29105237641, NOT merged/tagged). APK staged: `/sdcard/Download/bannerlator-turnip-smart-install-9f7ed57-standard.apk`. Full detail in memory [[project_bannerlator_bannerhub_config_crossuse]].**
+> **Branch `feat/community-configs-v1` (tip `29120035264`-build = commit after `a9095b4b`, CI GREEN run 29120035264, NOT merged/tagged). APK staged: `/sdcard/Download/bannerlator-per-file-config-cards-*-standard.apk`. Full detail in memory [[project_bannerlator_bannerhub_config_crossuse]] + backend reference [[reference_bannerhub_config_worker_contract]] (repo doc `docs/bannerhub_config_system_reference.md`).**
+>
+> **BACKEND DISCOVERY (2026-07-10): the whole community-config system is FIRST-PARTY user-owned — one Cloudflare worker (`bannerhub-configs-worker.the412banner.workers.dev`, the SAME one Bannerlator already uses for /steam/search) + KV + the GitHub repo. Upvotes/comments/uploads/downloads all live there (NOT XiaoJi). `app_source` tags each upload (`bannerhub`/`bannerhub_lite`/ours→`bannerlator`) and `/admin/purge` deletes by it → Bannerlator reuses the SAME worker, no new backend/repo. Full endpoint+format contract in the repo doc.**
+>
+> **NEWEST (this session, all on the branch, CI-green, device-UNVERIFIED unless noted):** worker-wired detail page (live ★votes/↓downloads/description/comments + upvote + add-comment); whole-row-tappable **thin outlined cards** (match FileManager look) for game + config lists; **per-uploaded-config cards** (worker `/list`, sorted by votes, each `★votes ↓downloads · device · soc · date`; tap→chooser→apply/detail THAT file; offline fallback = per-device rows); **"Matches my device" toggle** on the config-list screen; **source label** by `app_source` (BannerHub / BannerHub Lite / Bannerlator). **DEVICE-VERIFIED fixes:** landscape two-column browser; **"Matches my device" matcher fix** (`GameMatcher` — normalize hardware strings, match user SoC/GPU against ALL device fields since config `soc` is a GPU-renderer string; user confirmed configs now show); source-label rename.
+>
+> **▶️ NEXT-STEP PLAN (agreed 2026-07-10):** (1) on-device VERIFY the 5 still-unproven paths — apply/surgical-merge, smart component install, smart Turnip driver install, worker social round-trips (vote/comment/desc actually hitting the worker), per-file cards; (2) then MERGE `feat/community-configs-v1` → main + cut **`2.6-preN`** (pre-release, not stable, per versioning rule); (3) then **Track 3 = uploads from Bannerlator** (`POST /upload`, `app_source="bannerlator"`, reverse-`ConfigTranslator` → `pc_*` config) = the "makes it ours" step; (4) loose ends: cache-refresh affordance (index needs force-stop today), app_source on cards, browser drill-position.
+>
+> ---
+> _(original 2026-07-10 Community Configs entry — superseded above, kept for detail)_
 >
 > **The initiative:** consume the community BannerHub game-configs (per-game/per-device tuning) inside Bannerlator. Built a **separate isolated repo** `The412Banner/bannerlator-game-configs` (reads BannerHub read-only, writes only itself — zero upstream impact; PR #1 on the orig repo = fallback). Index: 2116 folders → **1261 canonical games merged by identity**, **config-coverage 92%** (namespaced key: numeric Steam appid | `name:<slug>` non-Steam like PES). HTML catalog + Artifact published.
 >
