@@ -39,6 +39,40 @@ public abstract class HttpUtils {
         Executors.newSingleThreadExecutor().execute(() -> downloadAsync(url, onDownloadComplete));
     }
 
+    private static void postAsync(String url, String jsonBody, Callback<String> onComplete) {
+        try {
+            HttpURLConnection connection = (HttpURLConnection)(new URL(url)).openConnection();
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("User-Agent", "Bannerlator");
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setDoOutput(true);
+            try (OutputStream outStream = connection.getOutputStream()) {
+                outStream.write(jsonBody.getBytes(StandardCharsets.UTF_8));
+            }
+
+            int code = connection.getResponseCode();
+            InputStream inStream = (code >= 200 && code < 300)
+                    ? connection.getInputStream() : connection.getErrorStream();
+            if (inStream == null) {
+                onComplete.call(null);
+                return;
+            }
+            byte[] bytes;
+            try (InputStream in = inStream) {
+                bytes = StreamUtils.copyToByteArray(in);
+            }
+            onComplete.call(code >= 200 && code < 300 ? new String(bytes, StandardCharsets.UTF_8) : null);
+        }
+        catch (Exception e) {
+            onComplete.call(null);
+        }
+    }
+
+    /** POST a JSON body (Content-Type: application/json); the callback receives the response body or null. */
+    public static void post(final String url, final String jsonBody, final Callback<String> onComplete) {
+        Executors.newSingleThreadExecutor().execute(() -> postAsync(url, jsonBody, onComplete));
+    }
+
     private static void downloadAsync(String url, File destination, AtomicBoolean interruptRef, Callback<Integer> onPublishProgress, Callback<Boolean> onDownloadComplete) {
         try {
             interruptRef.set(false);

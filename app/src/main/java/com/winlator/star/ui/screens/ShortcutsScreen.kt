@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.winlator.star.ui.screens
 
 import android.app.Activity
@@ -20,6 +22,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,8 +32,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -51,6 +57,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddToHomeScreen
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.ViewList
@@ -60,6 +68,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Upload
@@ -71,9 +80,17 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import com.winlator.star.communityconfigs.CanonicalDevice
+import com.winlator.star.communityconfigs.CanonicalGame
+import com.winlator.star.communityconfigs.CommunityConfigApply
+import com.winlator.star.communityconfigs.CommunityConfigRef
+import com.winlator.star.communityconfigs.GameMatcher
+import com.winlator.star.communityconfigs.ShortcutConfig
+import com.winlator.star.communityconfigs.WorkerConfigEntry
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -93,6 +110,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import com.winlator.star.ui.LocalTopBarActions
 import androidx.compose.ui.Alignment
@@ -127,8 +145,14 @@ import com.winlator.star.container.Container
 import com.winlator.star.container.Shortcut
 import com.winlator.star.reshade.ReshadeManager
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog
+import com.winlator.star.contents.AdrenotoolsManager
 import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
+import com.winlator.star.contents.Downloader
+import com.winlator.star.ui.findActivity
+import com.winlator.star.ui.screens.adrenodownload.AdrenoDriverDownloadSheet
+import com.winlator.star.ui.screens.adrenodownload.RemoteDriverEntry
+import com.winlator.star.ui.screens.adrenodownload.RemoteDriverRepository
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.KeyValueSet
@@ -151,6 +175,7 @@ import com.winlator.star.widget.CPUListView
 import com.winlator.star.widget.EnvVarsView
 import com.winlator.star.winhandler.WinHandler
 import android.net.Uri
+import android.os.Build
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -188,7 +213,69 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var scrapeTarget by remember { mutableStateOf<Shortcut?>(null) }
     val scrapeCovers = remember { mutableStateListOf<Pair<Bitmap, String>>() }
     var scrapeLoading by remember { mutableStateOf(false) }
+    var communityTarget by remember { mutableStateOf<Shortcut?>(null) }
+    var communityResult by remember { mutableStateOf<CommunityMatchResult?>(null) }
+    var communityLoading by remember { mutableStateOf(false) }
+    var communitySearch by remember(communityTarget) { mutableStateOf("") }
+    var communitySearchResults by remember(communityTarget) { mutableStateOf<List<CanonicalGame>>(emptyList()) }
+    // Catalog browser (catalog-first entry from the header) + the shared Phase 2 apply flow.
+    var showCommunityBrowser by remember { mutableStateOf(false) }
+    var applyPicker by remember { mutableStateOf<CommunityPick?>(null) }
+    var applyMismatch by remember { mutableStateOf<Pair<Shortcut, CommunityPick>?>(null) }
+    var applyBusy by remember { mutableStateOf(false) }
+    var applyResult by remember { mutableStateOf<CommunityConfigApply.ConfigApplyResult?>(null) }
+    // The shortcut the current result was applied to — threaded through so a post-install component
+    // fixup can write the resolved version sub-field back to the right shortcut.
+    var applyTarget by remember { mutableStateOf<Shortcut?>(null) }
+    // Missing component the user tapped "Install" on → opens its single-type download sheet.
+    var installSheetFor by remember { mutableStateOf<CommunityConfigApply.MissingComponent?>(null) }
+    // Missing GPU driver the user tapped "Browse all drivers" on → opens the adrenotools driver browser.
+    var driverSheetFor by remember { mutableStateOf<CommunityConfigApply.MissingDriver?>(null) }
+    // A tapped config row → small "Apply to game… | View details" chooser. The pair carries the picked
+    // config (a specific uploaded file, or a device-row fallback) plus the in-context shortcut (non-null
+    // from the per-shortcut sheet, null from the catalog browser where a target hasn't been chosen yet).
+    var configAction by remember { mutableStateOf<Pair<CommunityPick, Shortcut?>?>(null) }
+    // The config whose read-only detail page is open (same pick + optional-context-shortcut pair).
+    var detailFor by remember { mutableStateOf<Pair<CommunityPick, Shortcut?>?>(null) }
+    // Labels of missing components/drivers that resolved after an install (→ checkmark instead of a
+    // button). Drivers are namespaced "driver:<wanted>" so they can't collide with component labels.
+    val resolvedMissing = remember(applyResult) { mutableStateListOf<String>() }
+    // Any install sheet (component OR driver) open → hide EVERY community dialog layer so the
+    // ModalBottomSheet isn't rendered behind an AlertDialog's window; they reappear when it closes.
+    // The chooser + detail layers join the predicate so the lower community dialogs (match/browser/
+    // picker/result) don't stack behind them; the chooser/detail themselves are gated on installSheetOpen.
+    val installSheetOpen = installSheetFor != null || driverSheetFor != null
+    val communityDialogsGated = installSheetOpen || configAction != null || detailFor != null
     val scope = rememberCoroutineScope()
+
+    // Shared apply runner — used by both the catalog browser and the per-shortcut sheet. Dispatches by
+    // pick kind: a specific uploaded file applies THAT file; a device-row fallback applies the
+    // best-for-device pick (offline path). Same downstream applyResult → smart-install flow either way.
+    val runCommunityApply: (Shortcut, CommunityPick) -> Unit = { sc, pick ->
+        applyBusy = true
+        applyResult = null
+        applyTarget = sc
+        val onDone: (CommunityConfigApply.ConfigApplyResult) -> Unit = { res ->
+            applyBusy = false
+            applyResult = res
+        }
+        when (pick) {
+            is CommunityPick.File -> vm.applyCommunityConfigFile(sc, pick.ref, onDone)
+            is CommunityPick.Device -> vm.applyCommunityConfig(sc, pick.game, pick.device, onDone)
+        }
+    }
+    // Kick off the real apply for a config: with an in-context shortcut (per-shortcut sheet) run it
+    // straight; without one (browser) fall to the target picker. Reused by BOTH the chooser's "Apply to
+    // game…" and the detail dialog's "Apply" so details never duplicates the apply/install flow.
+    val startConfigApply: (CommunityPick, Shortcut?) -> Unit = { pick, sc ->
+        if (sc != null) runCommunityApply(sc, pick) else applyPicker = pick
+    }
+    // Pick a target shortcut for a browser-selected config; warn when its game doesn't match.
+    val chooseApplyTarget: (Shortcut, CommunityPick) -> Unit = { sc, pick ->
+        applyPicker = null
+        if (GameMatcher.match(sc.name, listOf(pick.game)).isNotEmpty()) runCommunityApply(sc, pick)
+        else applyMismatch = sc to pick
+    }
 
     // Shared "Scrape cover" action so both grid tiles and list rows fire the same flow.
     val scrapeCoverFor: (Shortcut) -> Unit = { shortcut ->
@@ -218,6 +305,43 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 scrapeCovers.clear()
                 scrapeCovers.addAll(covers)
                 scrapeLoading = false
+            }
+        }
+    }
+
+    // Shared "Community configs" action — opens the sheet and kicks off the offline-first match.
+    val communityConfigsFor: (Shortcut) -> Unit = { shortcut ->
+        communityTarget = shortcut
+        communityResult = null
+        communityLoading = true
+        vm.matchCommunityConfigs(shortcut) { result ->
+            communityResult = result
+            communityLoading = false
+        }
+    }
+
+    // Post-install fixup shared by the inline installer and the "Browse all versions" fallback sheet:
+    // re-read what's on disk off-main, surgically auto-apply the resolved version to the target
+    // shortcut, then mark the row done + refresh. Same behaviour the download sheet's onContentChanged had.
+    val applyAfterInstall: (CommunityConfigApply.MissingComponent) -> Unit = { mc ->
+        val target = applyTarget
+        if (target != null) {
+            scope.launch {
+                val resolved = withContext(Dispatchers.IO) {
+                    val installed = com.winlator.star.communityconfigs.InstalledComponents.read(context)
+                    CommunityConfigApply.applyResolvedComponent(target, mc, installed)
+                }
+                if (resolved) {
+                    if (mc.label !in resolvedMissing) resolvedMissing.add(mc.label)
+                    vm.refresh()
+                    Toast.makeText(context, "Installed and applied to \"${target.name}\".", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(
+                        context,
+                        "Installed, but couldn't auto-apply — open \"Browse all versions\" to finish.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
             }
         }
     }
@@ -255,6 +379,13 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // parent's clear when it fires post-commit.
     LaunchedEffect(isGridView) {
         topBarActions.value = {
+            IconButton(onClick = { showCommunityBrowser = true }) {
+                Icon(
+                    imageVector = Icons.Filled.Public,
+                    contentDescription = "Community configs",
+                    tint = androidx.compose.ui.graphics.Color.White,
+                )
+            }
             IconButton(onClick = { vm.setGridView(!isGridView) }) {
                 Icon(
                     imageVector = if (isGridView) Icons.Filled.ViewList else Icons.Filled.GridView,
@@ -330,6 +461,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     onExport = { exportShortcut(context, shortcut) },
                                     onProperties = { propertiesShortcut = shortcut },
                                     onScrapeCover = { scrapeCoverFor(shortcut) },
+                                    onCommunityConfigs = { communityConfigsFor(shortcut) },
                                 )
                             }
                         }
@@ -353,6 +485,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                     onExport = itemExport,
                                     onProperties = itemProperties,
                                     onScrapeCover = { scrapeCoverFor(shortcut) },
+                                    onCommunityConfigs = { communityConfigsFor(shortcut) },
                                 )
                             }
                         }
@@ -609,12 +742,1630 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         )
     }
 
+    // Community configs dialog (Phase 1 — match + suggest, read-only)
+    if (!communityDialogsGated) communityTarget?.let { s ->
+        val dismiss = { communityTarget = null; communityResult = null }
+        AlertDialog(
+            onDismissRequest = dismiss,
+            title = { Text("Community configs") },
+            text = {
+                val result = communityResult
+                val game = result?.match
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = communitySearch,
+                    onValueChange = { q ->
+                        communitySearch = q
+                        if (q.trim().length >= 2) vm.searchCommunityGames(q) { communitySearchResults = it }
+                        else communitySearchResults = emptyList()
+                    },
+                    label = { Text("Search all games") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (communitySearch.trim().length >= 2) {
+                    if (communitySearchResults.isEmpty()) {
+                        Text("No games match \"$communitySearch\".", color = OnSurfaceVariant)
+                    } else {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 360.dp)
+                                .verticalScroll(rememberScrollState()),
+                        ) {
+                            communitySearchResults.forEach { cg ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            vm.selectCommunityGame(cg) { communityResult = it }
+                                            communitySearch = ""
+                                            communitySearchResults = emptyList()
+                                        }
+                                        .padding(vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        text = cg.name,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = OnSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text("${cg.configCount}", style = MaterialTheme.typography.labelSmall, color = OnSurfaceVariant)
+                                    CommunityStoreBadge(isSteam = cg.isSteam)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                when {
+                    communityLoading -> Text("Matching \"${s.name}\"…", color = OnSurfaceVariant)
+                    game == null -> Text("No auto-match for \"${s.name}\" — search above to pick one.", color = OnSurfaceVariant)
+                    else -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 420.dp)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Text(
+                                    text = game.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = OnSurface,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                CommunityStoreBadge(isSteam = game.isSteam)
+                            }
+                            val devWord = if (game.devices.size == 1) "device" else "devices"
+                            val cfgWord = if (game.configCount == 1) "config" else "configs"
+                            Text(
+                                text = "${game.configCount} $cfgWord · ${game.devices.size} $devWord",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = OnSurfaceVariant,
+                            )
+                            result?.userHardwareLabel?.let { hw ->
+                                Text(
+                                    text = "Your device: $hw",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = OnSurfaceVariant,
+                                )
+                            }
+                            // "Matches my device" — filters the per-config list to configs whose
+                            // device/soc match your hardware. Mirrors the catalog browser's chip; enabled
+                            // only when we actually detected a SoC/GPU to compare against.
+                            val uSoc = result?.userSoc
+                            val uGpu = result?.userGpu
+                            var matchesMine by rememberSaveable(game.identity) { mutableStateOf(false) }
+                            FilterChip(
+                                selected = matchesMine,
+                                onClick = { matchesMine = !matchesMine },
+                                label = { Text("Matches my device") },
+                                enabled = uSoc != null || uGpu != null,
+                            )
+                            Divider(color = DividerColor)
+                            // One card per uploaded config from the worker (already votes-desc). Offline /
+                            // bucket miss → fall back to the per-device index rows so apply-by-device still
+                            // works (no vote counts in that mode). Whole card taps → the chooser; the
+                            // in-context shortcut `s` is carried so details can preview the diff.
+                            val cfg = rememberGameConfigs(vm, game)
+                            when {
+                                cfg.loading -> Text("Loading configs…", color = OnSurfaceVariant)
+                                cfg.entries.isNotEmpty() -> {
+                                    val shown = if (!matchesMine) cfg.entries
+                                        else cfg.entries.filter {
+                                            GameMatcher.hardwareMatchesUser(uSoc, uGpu, listOf(it.second.device, it.second.soc))
+                                        }
+                                    if (shown.isEmpty()) {
+                                        Text("No uploaded configs match your device.", color = OnSurfaceVariant)
+                                    } else {
+                                        shown.forEach { (folder, e) ->
+                                            val isMatch = (uSoc != null || uGpu != null) &&
+                                                GameMatcher.hardwareMatchesUser(uSoc, uGpu, listOf(e.device, e.soc))
+                                            CommunityConfigEntryCard(entry = e, isMatch = isMatch) {
+                                                configAction = CommunityPick.File(
+                                                    game,
+                                                    CommunityConfigRef(game, folder, e.filename, e.sha.ifBlank { null }),
+                                                    e,
+                                                ) to s
+                                            }
+                                        }
+                                    }
+                                }
+                                result?.rankedDevices.isNullOrEmpty() -> Text("No device configs listed.", color = OnSurfaceVariant)
+                                else -> {
+                                    Text(
+                                        "Showing device configs (vote counts unavailable offline).",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = OnSurfaceVariant,
+                                    )
+                                    val hw = result?.userHardwareLabel?.lowercase()
+                                    val devs = result?.rankedDevices.orEmpty().let { list ->
+                                        if (!matchesMine) list
+                                        else list.filter { GameMatcher.deviceMatchesUser(it, uSoc, uGpu) }
+                                    }
+                                    devs.forEach { d ->
+                                        val isMatch = hw != null && (
+                                            (d.soc.isNotBlank() && (hw.contains(d.soc.lowercase()) || d.soc.lowercase().contains(hw))) ||
+                                            (d.gpu.isNotBlank() && (hw.contains(d.gpu.lowercase()) || d.gpu.lowercase().contains(hw)))
+                                        )
+                                        CommunityCard(onClick = { configAction = CommunityPick.Device(game, d) to s }) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = d.model.ifBlank { "Unknown device" },
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = if (isMatch) MaterialTheme.colorScheme.primary else OnSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                                val sub = listOf(d.gpu, d.soc).filter { it.isNotBlank() }.joinToString(" · ")
+                                                if (sub.isNotEmpty()) {
+                                                    Text(
+                                                        text = sub,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = OnSurfaceVariant,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = dismiss) { Text("Close") } },
+        )
+    }
+
+    // Catalog browser (Part A) — full-catalog entry from the header button.
+    if (showCommunityBrowser && !communityDialogsGated) {
+        CommunityCatalogBrowser(
+            vm = vm,
+            onDismiss = { showCommunityBrowser = false },
+            // No in-context shortcut from the browser (null) → chooser's "Apply to game…" runs the picker.
+            onPick = { pick -> configAction = pick to null },
+        )
+    }
+
+    // Config-row chooser — "Apply to game… | View details" before any apply happens. Gated only on an
+    // open install sheet (it IS one of the layers communityDialogsGated hides beneath itself).
+    if (!installSheetOpen) configAction?.let { (pick, ctxShortcut) ->
+        val subtitle = when (pick) {
+            is CommunityPick.File -> "Config from ${pick.entry.device.ifBlank { pick.entry.soc.ifBlank { "that device" } }}."
+            is CommunityPick.Device -> "Config from ${pick.device.model.ifBlank { "that device" }}."
+        }
+        AlertDialog(
+            onDismissRequest = { configAction = null },
+            title = { Text(pick.game.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+            text = {
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    configAction = null
+                    startConfigApply(pick, ctxShortcut)
+                }) { Text("Apply to game…") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    configAction = null
+                    detailFor = pick to ctxShortcut
+                }) { Text("View details") }
+            },
+        )
+    }
+
+    // Read-only Community Config detail page. Loads fetch+translate (+preview when a shortcut is in
+    // context) via the VM, then renders provenance + "what it sets" + the pre-apply diff. Apply reuses
+    // the same startConfigApply → applyResult → smart-install flow, so details never duplicates apply.
+    if (!installSheetOpen) detailFor?.let { (pick, ctxShortcut) ->
+        var detail by remember(pick, ctxShortcut) { mutableStateOf<CommunityConfigDetail?>(null) }
+        var detailLoading by remember(pick, ctxShortcut) { mutableStateOf(true) }
+        var detailFailed by remember(pick, ctxShortcut) { mutableStateOf(false) }
+        LaunchedEffect(pick, ctxShortcut) {
+            detailLoading = true
+            detailFailed = false
+            val onDetail: (CommunityConfigDetail?) -> Unit = { d ->
+                detail = d
+                detailLoading = false
+                detailFailed = d == null
+            }
+            when (pick) {
+                is CommunityPick.File -> vm.loadCommunityConfigDetail(pick.ref, ctxShortcut, onDetail)
+                is CommunityPick.Device -> vm.loadCommunityConfigDetail(pick.game, pick.device, ctxShortcut, onDetail)
+            }
+        }
+        // Provenance fallback device — the real device row for a device pick, or one synthesized from
+        // the uploaded config's own device/soc so the detail page reads identically.
+        val provDevice = when (pick) {
+            is CommunityPick.File -> CanonicalDevice(pick.entry.device, "", pick.entry.soc)
+            is CommunityPick.Device -> pick.device
+        }
+        CommunityConfigDetailDialog(
+            game = pick.game,
+            device = provDevice,
+            detail = detail,
+            loading = detailLoading,
+            failed = detailFailed,
+            vm = vm,
+            onApply = {
+                detailFor = null
+                startConfigApply(pick, ctxShortcut)
+            },
+            onDismiss = { detailFor = null },
+        )
+    }
+
+    // Apply-target picker — choose which of your shortcuts to apply a browser-selected config to.
+    if (!communityDialogsGated) applyPicker?.let { pick ->
+        val shortcutList = vm.currentShortcuts()
+        val fromLabel = when (pick) {
+            is CommunityPick.File -> pick.entry.device.ifBlank { pick.entry.soc.ifBlank { "a device" } }
+            is CommunityPick.Device -> pick.device.model.ifBlank { "a device" }
+        }
+        AlertDialog(
+            onDismissRequest = { applyPicker = null },
+            title = { Text("Apply to game…") },
+            text = {
+                if (shortcutList.isEmpty()) {
+                    Text("You have no shortcuts yet.", color = OnSurfaceVariant)
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
+                    ) {
+                        Text(
+                            "Config from $fromLabel for \"${pick.game.name}\".",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 6.dp),
+                        )
+                        shortcutList.forEach { sc ->
+                            Text(
+                                text = sc.name,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { chooseApplyTarget(sc, pick) }
+                                    .padding(vertical = 12.dp),
+                                color = OnSurface,
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { applyPicker = null }) { Text("Cancel") } },
+        )
+    }
+
+    // Mismatch confirmation — target shortcut's game doesn't match the config's game.
+    applyMismatch?.let { (sc, pick) ->
+        AlertDialog(
+            onDismissRequest = { applyMismatch = null },
+            title = { Text("Different game") },
+            text = { Text("This config is for \"${pick.game.name}\" — apply to \"${sc.name}\" anyway?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    applyMismatch = null
+                    runCommunityApply(sc, pick)
+                }) { Text("Apply anyway") }
+            },
+            dismissButton = { TextButton(onClick = { applyMismatch = null }) { Text("Cancel") } },
+        )
+    }
+
+    // Applying spinner (blocking) while the config is fetched + merged.
+    if (applyBusy) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Applying config") },
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text("Fetching and merging…", color = OnSurfaceVariant)
+                }
+            },
+            confirmButton = {},
+        )
+    }
+
+    // Result summary — what changed + install / Proton advisories. Hidden while a component-install
+    // sheet is open (a ModalBottomSheet renders behind an AlertDialog's window); it reappears — with
+    // any new checkmark — once the sheet closes, since applyResult / resolvedMissing persist.
+    if (!communityDialogsGated) applyResult?.let { res ->
+        // Downloadable catalog for the inline installer — one fetch per result, per missing type.
+        // null value = still loading (row shows a spinner instead of a button).
+        val installCm = remember(res) { ContentsManager(context) }
+        var remoteByType by remember(res) {
+            mutableStateOf<Map<ContentProfile.ContentType, List<ContentProfile>>?>(null)
+        }
+        LaunchedEffect(res) {
+            if (res.missingComponents.isEmpty()) { remoteByType = emptyMap(); return@LaunchedEffect }
+            val types = res.missingComponents.map { it.type }.toSet()
+            remoteByType = withContext(Dispatchers.IO) {
+                val json = Downloader.downloadString(ContentsManager.REMOTE_PROFILES)
+                if (json != null) installCm.setRemoteProfiles(json) else installCm.syncContents()
+                types.associateWith { t ->
+                    (installCm.getProfiles(t) ?: emptyList()).filter { it.remoteUrl != null }
+                }
+            }
+        }
+        AlertDialog(
+            onDismissRequest = { applyResult = null },
+            title = { Text(if (res.ok) "Config applied" else "Couldn't apply") },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(res.message, color = OnSurface)
+                    if (res.changed.isNotEmpty()) {
+                        Divider(color = DividerColor)
+                        Text("Changed", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+                        res.changed.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant) }
+                    }
+                    // Missing components — smart inline installer: exact-match confirm, or a shortlist of
+                    // the closest catalog versions, with "Browse all versions" as the full-menu fallback.
+                    if (res.missingComponents.isNotEmpty()) {
+                        Divider(color = DividerColor)
+                        Text("Needs a component", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+                        res.missingComponents.forEach { mc ->
+                            SmartComponentInstallRow(
+                                mc = mc,
+                                done = mc.label in resolvedMissing,
+                                candidates = remoteByType?.get(mc.type) ?: emptyList(),
+                                catalogLoading = remoteByType == null,
+                                cm = installCm,
+                                onBrowseAll = { installSheetFor = mc },
+                                onProfileInstalled = { applyAfterInstall(mc) },
+                            )
+                        }
+                    }
+                    // Missing GPU driver(s) — smart inline installer over all 5 adrenotools repos:
+                    // every exact-version repo-variant as its own quick-install, then closest others,
+                    // then the full driver browser. Adreno-only (the apply engine gates emission).
+                    if (res.missingDrivers.isNotEmpty()) {
+                        Divider(color = DividerColor)
+                        Text("Needs a GPU driver", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+                        res.missingDrivers.forEach { md ->
+                            SmartDriverInstallRow(
+                                md = md,
+                                vm = vm,
+                                done = ("driver:" + md.wanted) in resolvedMissing,
+                                onBrowseAll = { driverSheetFor = md },
+                                onApplied = { driverId ->
+                                    val target = applyTarget
+                                    if (target != null) {
+                                        scope.launch {
+                                            val ok = withContext(Dispatchers.IO) {
+                                                CommunityConfigApply.applyResolvedDriver(target, driverId)
+                                            }
+                                            if (ok) {
+                                                if (("driver:" + md.wanted) !in resolvedMissing) {
+                                                    resolvedMissing.add("driver:" + md.wanted)
+                                                }
+                                                vm.refresh()
+                                                Toast.makeText(context, "Driver installed and applied to \"${target.name}\".", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(context, "Installed, but couldn't apply the driver.", Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                    }
+                    if (res.advisories.isNotEmpty()) {
+                        Divider(color = DividerColor)
+                        Text("Heads up", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+                        res.advisories.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { applyResult = null }) { Text("Done") } },
+        )
+    }
+
+    // Install a config's missing component via the app's normal single-type download sheet. When a
+    // build gets installed we re-resolve it against what's now on disk and, if it resolves, surgically
+    // write the version sub-field back to the target shortcut (same merge the apply engine uses).
+    installSheetFor?.let { mc ->
+        ContentDownloadSheet(
+            contentType = mc.type,
+            onDismiss = { installSheetFor = null },
+            onContentChanged = { applyAfterInstall(mc) },
+        )
+    }
+
+    // "Browse all drivers" fallback — the full adrenotools driver browser (5 source chips). When a
+    // driver installs, surgically write its id back to the target shortcut and mark the row done.
+    driverSheetFor?.let { md ->
+        AdrenoDriverDownloadSheet(
+            onDismiss = { driverSheetFor = null },
+            onDriverInstalled = { driverId ->
+                driverSheetFor = null
+                val target = applyTarget
+                if (target != null) {
+                    scope.launch {
+                        val ok = withContext(Dispatchers.IO) {
+                            CommunityConfigApply.applyResolvedDriver(target, driverId)
+                        }
+                        if (ok) {
+                            if (("driver:" + md.wanted) !in resolvedMissing) {
+                                resolvedMissing.add("driver:" + md.wanted)
+                            }
+                            vm.refresh()
+                            Toast.makeText(context, "Driver applied to \"${target.name}\".", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            },
+        )
+    }
+
     // Compose shortcut settings dialog
     settingsShortcut?.let { s ->
         ShortcutSettingsDialogScreen(
             shortcut = s,
             onDismiss = { settingsShortcut = null; vm.refresh() }
         )
+    }
+}
+
+// Small Steam / Title provenance badge for the community-config sheet header.
+@Composable
+private fun CommunityStoreBadge(isSteam: Boolean) {
+    val bg = if (isSteam) MaterialTheme.colorScheme.primary else SurfaceVariantColor
+    val fg = if (isSteam) MaterialTheme.colorScheme.onPrimary else OnSurfaceVariant
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(bg)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    ) {
+        Text(
+            text = if (isSteam) "STEAM" else "TITLE",
+            style = MaterialTheme.typography.labelSmall,
+            color = fg,
+        )
+    }
+}
+
+// One missing-component row on the "Config applied" screen — the SMART inline installer. Resolves the
+// config's wanted version against the downloadable catalog and offers the shortest path:
+//  - exact match  → "Install" → a small confirm → inline download+install → auto-apply → checkmark.
+//  - no exact      → "Install" reveals the ~3 closest versions (press = install, no confirm) plus a
+//                    "Browse all versions…" link that opens the full single-type download sheet.
+// Download + install reuse the same downloadToCache / installContent path as the sheet; the actual
+// version write-back (auto-apply) happens in the parent via [onProfileInstalled].
+@Composable
+private fun SmartComponentInstallRow(
+    mc: CommunityConfigApply.MissingComponent,
+    done: Boolean,
+    candidates: List<ContentProfile>,
+    catalogLoading: Boolean,
+    cm: ContentsManager,
+    onBrowseAll: () -> Unit,
+    onProfileInstalled: () -> Unit,
+) {
+    val context = LocalContext.current
+    val activity = context.findActivity()
+    val scope = rememberCoroutineScope()
+    val installedBlue = Color(0xFF4FC3F7) // intentional: matches the sheet's installed/in-use status blue
+
+    val shortlist = remember(candidates, mc.wanted) {
+        CommunityConfigApply.rankVersions(mc.wanted, candidates)
+    }
+
+    var expanded by remember { mutableStateOf(false) }                       // shortlist revealed (no-exact case)
+    var confirmProfile by remember { mutableStateOf<ContentProfile?>(null) } // exact-match confirm
+    var busy by remember { mutableStateOf(false) }
+    var installing by remember { mutableStateOf(false) }                     // false = downloading phase
+    var progress by remember { mutableStateOf(0f) }
+
+    fun install(profile: ContentProfile) {
+        confirmProfile = null
+        expanded = false
+        busy = true
+        installing = false
+        progress = 0f
+        scope.launch {
+            val uri = withContext(Dispatchers.IO) {
+                downloadToCache(context, profile) { frac -> activity?.runOnUiThread { progress = frac } }
+            }
+            if (uri == null) {
+                busy = false
+                Toast.makeText(context, "Download failed.", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            installing = true
+            progress = 0f
+            // installContent already marshals onProgress / onDone back to the UI thread.
+            installContent(context, cm, uri, onProgress = { f, _ -> progress = maxOf(progress, f) }) { ok ->
+                busy = false
+                if (ok) onProfileInstalled()
+                else Toast.makeText(context, "Install failed.", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "• ${mc.label}",
+                style = MaterialTheme.typography.bodySmall,
+                color = OnSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            when {
+                done -> Icon(
+                    Icons.Filled.CheckCircle, contentDescription = "Installed",
+                    tint = installedBlue, modifier = Modifier.size(20.dp),
+                )
+                busy || catalogLoading -> CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                else -> {
+                    val exact = shortlist.exact
+                    TextButton(onClick = {
+                        when {
+                            exact != null -> confirmProfile = exact
+                            shortlist.closest.isEmpty() -> onBrowseAll()
+                            else -> expanded = !expanded
+                        }
+                    }) { Text("Install", color = MaterialTheme.colorScheme.primary) }
+                }
+            }
+        }
+
+        // Progress line under the label while downloading / installing.
+        if (busy) {
+            val frac = progress.coerceIn(0f, 1f)
+            Text(
+                if (installing) "Installing…" else "Downloading ${(frac * 100).toInt()}%…",
+                style = MaterialTheme.typography.labelSmall,
+                color = OnSurfaceVariant,
+                modifier = Modifier.padding(start = 10.dp, top = 2.dp),
+            )
+            LinearProgressIndicator(
+                progress = frac,
+                modifier = Modifier.fillMaxWidth().height(3.dp).padding(top = 2.dp),
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        // Shortlist (no exact match) — the ~3 closest versions + "Browse all versions".
+        if (!busy && !done && expanded && shortlist.exact == null) {
+            Column(
+                modifier = Modifier.padding(start = 10.dp, top = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                shortlist.closest.forEach { p ->
+                    Text(
+                        "Install ${p.verName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { install(p) }
+                            .padding(vertical = 6.dp),
+                    )
+                }
+                Text(
+                    "Browse all versions…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { expanded = false; onBrowseAll() }
+                        .padding(vertical = 6.dp),
+                )
+            }
+        }
+    }
+
+    // Exact-match confirm dialog (stacks over the result dialog).
+    confirmProfile?.let { p ->
+        AlertDialog(
+            onDismissRequest = { confirmProfile = null },
+            title = { Text("Install ${p.verName}?") },
+            text = { Text("Download and install ${mc.type} ${p.verName}, then apply it to this shortcut?") },
+            confirmButton = { TextButton(onClick = { install(p) }) { Text("Install") } },
+            dismissButton = { TextButton(onClick = { confirmProfile = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+// One missing-GPU-driver row on the "Config applied" screen — the SMART inline adrenotools installer.
+// Mirrors [SmartComponentInstallRow] but the catalog is the 5 remote Turnip repos (fetched on expand)
+// and the pick axis is repo-source at a given mesa version:
+//  - "Install" fetches+ranks, then reveals EVERY exact-version repo-variant as its own quick-install
+//    (labelled "<source> · <displayName>" so identical versions are distinguishable), the ~3 closest
+//    OTHER versions, and a "Browse all drivers…" link to the full driver browser.
+//  - each quick-install → a small confirm → inline download+install → auto-apply → checkmark.
+// Only reached on Adreno GPUs (the apply engine only emits MissingDriver there).
+@Composable
+private fun SmartDriverInstallRow(
+    md: CommunityConfigApply.MissingDriver,
+    vm: ShortcutsViewModel,
+    done: Boolean,
+    onBrowseAll: () -> Unit,
+    onApplied: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val installedBlue = Color(0xFF4FC3F7) // matches the component row's installed/in-use status blue
+    val repo = remember { RemoteDriverRepository(context) }
+
+    val label = remember(md) {
+        buildString {
+            append("config wants ")
+            append(md.wanted)
+            md.current?.let { append("; you have ").append(it) }
+        }
+    }
+
+    var loading by remember { mutableStateOf(false) }                         // fetching + ranking repos
+    var shortlist by remember { mutableStateOf<CommunityConfigApply.DriverShortlist?>(null) }
+    var expanded by remember { mutableStateOf(false) }                        // variants revealed
+    var confirmEntry by remember { mutableStateOf<RemoteDriverEntry?>(null) } // per-variant confirm
+    var busy by remember { mutableStateOf(false) }                           // download/install running
+    var installing by remember { mutableStateOf(false) }                     // false = downloading phase
+    var progress by remember { mutableStateOf(0) }                           // 0..100
+
+    // Decide what to reveal once the shortlist is known: no options at all → open the full browser.
+    fun reveal(sl: CommunityConfigApply.DriverShortlist) {
+        if (sl.exactMatches.isEmpty() && sl.closest.isEmpty()) onBrowseAll() else expanded = true
+    }
+
+    fun onInstallClick() {
+        val sl = shortlist
+        if (sl != null) { reveal(sl); return }
+        if (loading) return
+        loading = true
+        vm.fetchDriverShortlist(md.wanted) { fetched ->
+            shortlist = fetched
+            loading = false
+            reveal(fetched)
+        }
+    }
+
+    fun install(entry: RemoteDriverEntry) {
+        confirmEntry = null
+        expanded = false
+        busy = true
+        installing = false
+        progress = 0
+        scope.launch {
+            repo.downloadEntry(entry) { pct -> progress = pct }.fold(
+                onSuccess = { file ->
+                    installing = true
+                    val driverId = withContext(Dispatchers.IO) {
+                        AdrenotoolsManager(context).installDriver(Uri.fromFile(file))
+                    }
+                    file.delete()
+                    busy = false
+                    if (driverId.isNotEmpty()) onApplied(driverId)
+                    else Toast.makeText(context, "Install failed — invalid driver package", Toast.LENGTH_LONG).show()
+                },
+                onFailure = { t ->
+                    busy = false
+                    Toast.makeText(context, "Download failed: ${t.message ?: "unknown error"}", Toast.LENGTH_LONG).show()
+                },
+            )
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "• $label",
+                style = MaterialTheme.typography.bodySmall,
+                color = OnSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            when {
+                done -> Icon(
+                    Icons.Filled.CheckCircle, contentDescription = "Installed",
+                    tint = installedBlue, modifier = Modifier.size(20.dp),
+                )
+                busy || loading -> CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                else -> TextButton(onClick = { onInstallClick() }) {
+                    Text("Install", color = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+
+        // Progress line under the label while downloading / installing.
+        if (busy) {
+            val frac = (progress / 100f).coerceIn(0f, 1f)
+            Text(
+                if (installing) "Installing…" else "Downloading $progress%…",
+                style = MaterialTheme.typography.labelSmall,
+                color = OnSurfaceVariant,
+                modifier = Modifier.padding(start = 10.dp, top = 2.dp),
+            )
+            LinearProgressIndicator(
+                progress = frac,
+                modifier = Modifier.fillMaxWidth().height(3.dp).padding(top = 2.dp),
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        // Revealed options: exact-version repo-variants first (each its own quick-install), then the
+        // closest OTHER versions, then the full browser.
+        val sl = shortlist
+        if (!busy && !done && expanded && sl != null) {
+            Column(
+                modifier = Modifier.padding(start = 10.dp, top = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                sl.exactMatches.forEach { e ->
+                    Text(
+                        "Install ${e.source} · ${e.displayName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { confirmEntry = e }
+                            .padding(vertical = 6.dp),
+                    )
+                }
+                sl.closest.forEach { e ->
+                    Text(
+                        "Install ${e.source} · ${e.displayName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { confirmEntry = e }
+                            .padding(vertical = 6.dp),
+                    )
+                }
+                Text(
+                    "Browse all drivers…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { expanded = false; onBrowseAll() }
+                        .padding(vertical = 6.dp),
+                )
+            }
+        }
+    }
+
+    // Per-variant confirm dialog (stacks over the result dialog).
+    confirmEntry?.let { e ->
+        AlertDialog(
+            onDismissRequest = { confirmEntry = null },
+            title = { Text("Quick install ${e.displayName}?") },
+            text = { Text("Download and install this Turnip driver from ${e.source}, then apply it to this shortcut?") },
+            confirmButton = { TextButton(onClick = { install(e) }) { Text("Install") } },
+            dismissButton = { TextButton(onClick = { confirmEntry = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+private enum class CatalogStoreFilter { ALL, STEAM, TITLE }
+private enum class CatalogSort { CONFIGS, NAME, DEVICES }
+
+// Full-catalog browser (Part A) — a catalog-first entry from the header. Lists every game in the
+// community index with search / device + store filters / sort; a tapped game opens its per-device
+// config list (user's-hardware first), and a device row starts the Phase 2 apply flow.
+@Composable
+private fun CommunityCatalogBrowser(
+    vm: ShortcutsViewModel,
+    onDismiss: () -> Unit,
+    onPick: (CommunityPick) -> Unit,
+) {
+    var catalog by remember { mutableStateOf<CommunityCatalog?>(null) }
+    var loading by remember { mutableStateOf(true) }
+    // Filters/search/selection survive rotation (rememberSaveable) so the user keeps their place;
+    // the drilled-in game is keyed by its identity string (CanonicalGame isn't itself saveable).
+    var query by rememberSaveable { mutableStateOf("") }
+    var matchesMyDevice by rememberSaveable { mutableStateOf(false) }
+    var storeFilter by rememberSaveable { mutableStateOf(CatalogStoreFilter.ALL) }
+    var sort by rememberSaveable { mutableStateOf(CatalogSort.CONFIGS) }
+    var selectedIdentity by rememberSaveable { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) { vm.getCommunityCatalog { catalog = it; loading = false } }
+
+    val userSoc = catalog?.userSoc
+    val userGpu = catalog?.userGpu
+    val games = catalog?.games ?: emptyList()
+    val selectedGame = selectedIdentity?.let { id -> games.firstOrNull { it.identity == id } }
+
+    val visible: List<CanonicalGame> = remember(games, query, matchesMyDevice, storeFilter, sort, userSoc, userGpu) {
+        val base = if (query.trim().length >= 2) GameMatcher.search(query, games, limit = 200) else games
+        val filtered = base.asSequence()
+            .filter { g ->
+                when (storeFilter) {
+                    CatalogStoreFilter.ALL -> true
+                    CatalogStoreFilter.STEAM -> g.isSteam
+                    CatalogStoreFilter.TITLE -> !g.isSteam
+                }
+            }
+            .filter { g ->
+                !matchesMyDevice || g.devices.any { GameMatcher.deviceMatchesUser(it, userSoc, userGpu) }
+            }
+            .toList()
+        // Preserve search relevance while a query is active; otherwise honour the chosen sort.
+        if (query.trim().length >= 2) filtered
+        else when (sort) {
+            CatalogSort.CONFIGS -> filtered.sortedByDescending { it.configCount }
+            CatalogSort.NAME -> filtered.sortedBy { it.name.lowercase() }
+            CatalogSort.DEVICES -> filtered.sortedByDescending { it.devices.size }
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.92f),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+        ) {
+            // Game-list controls (device line + search + filter/sort chips + count). Extracted as a
+            // local composable so portrait (stacked) and landscape (left column) share one definition.
+            @Composable
+            fun ListControls(modifier: Modifier) {
+                Column(
+                    modifier = modifier,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    catalog?.hardwareLabel?.let { hw ->
+                        Text(
+                            "Your device: $hw",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnSurfaceVariant,
+                        )
+                    }
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = { Text("Search all games") },
+                        leadingIcon = { Icon(Icons.Filled.Search, null) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    // Store filter + "matches my device".
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        FilterChip(selected = storeFilter == CatalogStoreFilter.ALL, onClick = { storeFilter = CatalogStoreFilter.ALL }, label = { Text("All") })
+                        FilterChip(selected = storeFilter == CatalogStoreFilter.STEAM, onClick = { storeFilter = CatalogStoreFilter.STEAM }, label = { Text("Steam") })
+                        FilterChip(selected = storeFilter == CatalogStoreFilter.TITLE, onClick = { storeFilter = CatalogStoreFilter.TITLE }, label = { Text("Title") })
+                    }
+                    FilterChip(
+                        selected = matchesMyDevice,
+                        onClick = { matchesMyDevice = !matchesMyDevice },
+                        label = { Text("Matches my device") },
+                        enabled = userSoc != null || userGpu != null,
+                    )
+                    // Sort.
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Sort:", style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
+                        FilterChip(selected = sort == CatalogSort.CONFIGS, onClick = { sort = CatalogSort.CONFIGS }, label = { Text("Configs") })
+                        FilterChip(selected = sort == CatalogSort.NAME, onClick = { sort = CatalogSort.NAME }, label = { Text("Name") })
+                        FilterChip(selected = sort == CatalogSort.DEVICES, onClick = { sort = CatalogSort.DEVICES }, label = { Text("Devices") })
+                    }
+                    Text(
+                        "${visible.size} game${if (visible.size == 1) "" else "s"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = OnSurfaceVariant,
+                    )
+                }
+            }
+
+            // The scrollable game list (or its empty state). `modifier` sizes the LazyColumn.
+            @Composable
+            fun GameList(modifier: Modifier) {
+                if (visible.isEmpty()) {
+                    Text(
+                        "No games match your filters.",
+                        color = OnSurfaceVariant,
+                        modifier = Modifier.padding(24.dp),
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = modifier,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(visible, key = { it.identity }) { g ->
+                            CommunityGameRow(game = g, onClick = { selectedIdentity = g.identity })
+                        }
+                    }
+                }
+            }
+
+            Column {
+                // Title bar (with a back affordance when drilled into a game).
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (selectedGame != null) {
+                        IconButton(onClick = { selectedIdentity = null }) {
+                            Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    }
+                    Text(
+                        text = selectedGame?.name ?: "Community configs",
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).padding(start = if (selectedGame == null) 4.dp else 0.dp),
+                    )
+                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
+                }
+                Divider(color = DividerColor)
+
+                // Landscape (wide): controls/header become a left column so the scrollable list keeps
+                // the full height. Portrait (narrow): the original single-column top-to-bottom stack.
+                BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    val wide = maxWidth >= 600.dp
+                    when {
+                        loading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                        selectedGame != null -> CommunityDevicePanel(
+                            vm = vm,
+                            game = selectedGame,
+                            userSoc = userSoc,
+                            userGpu = userGpu,
+                            hardwareLabel = catalog?.hardwareLabel,
+                            onPick = onPick,
+                            wide = wide,
+                        )
+                        games.isEmpty() -> Text(
+                            "No community configs available yet (offline, or the index hasn't been fetched).",
+                            color = OnSurfaceVariant,
+                            modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                            textAlign = TextAlign.Center,
+                        )
+                        wide -> Row(modifier = Modifier.fillMaxSize()) {
+                            ListControls(
+                                modifier = Modifier
+                                    .width(320.dp)
+                                    .fillMaxHeight()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                            )
+                            Box(modifier = Modifier.fillMaxHeight().width(1.dp).background(DividerColor))
+                            GameList(modifier = Modifier.weight(1f).fillMaxHeight())
+                        }
+                        else -> Column(modifier = Modifier.fillMaxSize()) {
+                            ListControls(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                            Divider(color = DividerColor)
+                            GameList(modifier = Modifier.fillMaxSize())
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Shared thin outlined card for the community browser's game + config rows. Matches the app's
+// FileManager/Containers card idiom (surfaceContainer fill, 1dp outline, rounded 10dp) but with a
+// tighter vertical rhythm so the rows read as a compact list. The whole card is the tap target.
+@Composable
+private fun CommunityCard(
+    onClick: () -> Unit,
+    content: @Composable RowScope.() -> Unit,
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            content = content,
+        )
+    }
+}
+
+// What the chooser / detail / apply flow acts on when a config card is tapped. A [File] is a specific
+// uploaded config from the worker (with votes/downloads, applied exactly); a [Device] is the offline
+// fallback — a canonical device row whose best-matching file is resolved at apply time (no vote counts).
+private sealed class CommunityPick {
+    abstract val game: CanonicalGame
+
+    data class File(
+        override val game: CanonicalGame,
+        val ref: CommunityConfigRef,
+        val entry: WorkerConfigEntry,
+    ) : CommunityPick()
+
+    data class Device(
+        override val game: CanonicalGame,
+        val device: CanonicalDevice,
+    ) : CommunityPick()
+}
+
+// Async state of the per-game worker fetch. [entries] is the merged, deduped, votes-desc list across
+// ALL the game's folders; each entry is paired with the folder (`/list` key) it came from so its
+// per-entry [CommunityConfigRef.workerGame] is correct. [loading] gates the spinner.
+private data class GameConfigsState(
+    val loading: Boolean,
+    val entries: List<Pair<String, WorkerConfigEntry>>,
+)
+
+// Fetch (once per [game]) the uploaded configs for a game from the worker and expose them as Compose
+// state. Shared by the per-shortcut sheet and the catalog browser's device panel.
+@Composable
+private fun rememberGameConfigs(vm: ShortcutsViewModel, game: CanonicalGame): GameConfigsState {
+    var loading by remember(game) { mutableStateOf(true) }
+    var entries by remember(game) { mutableStateOf<List<Pair<String, WorkerConfigEntry>>>(emptyList()) }
+    LaunchedEffect(game) {
+        loading = true
+        vm.fetchGameConfigs(game) { list ->
+            entries = list
+            loading = false
+        }
+    }
+    return GameConfigsState(loading, entries)
+}
+
+// One card per uploaded config: primary = the device it was captured on (soc/filename fallback),
+// sub-line = soc · date, and a `★ votes  ↓ downloads` stats row (same iconography as the detail page).
+// The primary line is emphasized in the theme's primary colour when this config matches your hardware.
+@Composable
+private fun CommunityConfigEntryCard(entry: WorkerConfigEntry, isMatch: Boolean, onClick: () -> Unit) {
+    CommunityCard(onClick = onClick) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = entry.device.ifBlank { entry.soc.ifBlank { entry.filename } },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isMatch) MaterialTheme.colorScheme.primary else OnSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val sub = listOf(entry.soc, entry.date).filter { it.isNotBlank() }.joinToString(" · ")
+            if (sub.isNotEmpty()) {
+                Text(sub, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("★ ${entry.votes}", style = MaterialTheme.typography.labelMedium, color = OnSurface)
+            Text("↓ ${entry.downloads}", style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
+        }
+    }
+}
+
+// One game card in the catalog browser: name, Steam/Title badge, config + device counts.
+@Composable
+private fun CommunityGameRow(game: CanonicalGame, onClick: () -> Unit) {
+    CommunityCard(onClick = onClick) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = game.name,
+                style = MaterialTheme.typography.bodyMedium,
+                color = OnSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val cfgWord = if (game.configCount == 1) "config" else "configs"
+            val devWord = if (game.devices.size == 1) "device" else "devices"
+            Text(
+                text = "${game.configCount} $cfgWord · ${game.devices.size} $devWord",
+                style = MaterialTheme.typography.labelSmall,
+                color = OnSurfaceVariant,
+            )
+        }
+        CommunityStoreBadge(isSteam = game.isSteam)
+    }
+}
+
+// Per-uploaded-config list for a browser-selected game: one card per config the worker returns (votes
+// desc), each whole-row-tappable → the Apply-to-game… | View-details chooser. A "Matches my device"
+// toggle filters to configs matching your hardware. Offline / bucket miss falls back to the per-device
+// index rows (apply-by-device, no vote counts). Header sits on top in portrait, in the left column in
+// landscape; the two-column landscape layout is preserved.
+@Composable
+private fun CommunityDevicePanel(
+    vm: ShortcutsViewModel,
+    game: CanonicalGame,
+    userSoc: String?,
+    userGpu: String?,
+    hardwareLabel: String?,
+    onPick: (CommunityPick) -> Unit,
+    wide: Boolean,
+) {
+    val cfg = rememberGameConfigs(vm, game)
+    val fallback = remember(game, userSoc, userGpu) { GameMatcher.rankDevices(game.devices, userSoc, userGpu) }
+    var matchesMyDevice by rememberSaveable(game.identity) { mutableStateOf(false) }
+    val hwEnabled = userSoc != null || userGpu != null
+
+    val shownEntries = remember(cfg.entries, matchesMyDevice, userSoc, userGpu) {
+        if (!matchesMyDevice) cfg.entries
+        else cfg.entries.filter { GameMatcher.hardwareMatchesUser(userSoc, userGpu, listOf(it.second.device, it.second.soc)) }
+    }
+
+    // Header (counts + store badge + your-device + the "Matches my device" toggle). Sits on top in
+    // portrait, in the left column in landscape.
+    @Composable
+    fun Header() {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val cfgWord = if (game.configCount == 1) "config" else "configs"
+            val devWord = if (game.devices.size == 1) "device" else "devices"
+            Text(
+                "${game.configCount} $cfgWord · ${game.devices.size} $devWord",
+                style = MaterialTheme.typography.bodySmall,
+                color = OnSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            CommunityStoreBadge(isSteam = game.isSteam)
+        }
+        hardwareLabel?.let {
+            Text("Your device: $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+        }
+        FilterChip(
+            selected = matchesMyDevice,
+            onClick = { matchesMyDevice = !matchesMyDevice },
+            label = { Text("Matches my device") },
+            enabled = hwEnabled,
+        )
+    }
+
+    // The config cards (whole-row tap → chooser). `modifier` provides the scroll container.
+    @Composable
+    fun ConfigList(modifier: Modifier) {
+        Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            when {
+                cfg.loading -> {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Text("Loading configs…", color = OnSurfaceVariant)
+                    }
+                }
+                cfg.entries.isNotEmpty() -> {
+                    if (shownEntries.isEmpty()) {
+                        Text("No uploaded configs match your device.", color = OnSurfaceVariant)
+                    } else {
+                        shownEntries.forEach { (folder, e) ->
+                            val isMatch = hwEnabled &&
+                                GameMatcher.hardwareMatchesUser(userSoc, userGpu, listOf(e.device, e.soc))
+                            CommunityConfigEntryCard(entry = e, isMatch = isMatch) {
+                                onPick(
+                                    CommunityPick.File(
+                                        game,
+                                        CommunityConfigRef(game, folder, e.filename, e.sha.ifBlank { null }),
+                                        e,
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+                fallback.isEmpty() -> Text("No configs listed.", color = OnSurfaceVariant)
+                else -> {
+                    // Offline fallback: per-device index rows (best-matching file resolved at apply).
+                    Text(
+                        "Showing device configs (vote counts unavailable offline).",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = OnSurfaceVariant,
+                    )
+                    val hw = hardwareLabel?.lowercase()
+                    val devs = if (!matchesMyDevice) fallback
+                        else fallback.filter { GameMatcher.deviceMatchesUser(it, userSoc, userGpu) }
+                    devs.forEach { d ->
+                        val isMatch = hw != null && (
+                            (d.soc.isNotBlank() && (hw.contains(d.soc.lowercase()) || d.soc.lowercase().contains(hw))) ||
+                            (d.gpu.isNotBlank() && (hw.contains(d.gpu.lowercase()) || d.gpu.lowercase().contains(hw)))
+                        )
+                        CommunityCard(onClick = { onPick(CommunityPick.Device(game, d)) }) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = d.model.ifBlank { "Unknown device" },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (isMatch) MaterialTheme.colorScheme.primary else OnSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                val sub = listOf(d.gpu, d.soc).filter { it.isNotBlank() }.joinToString(" · ")
+                                if (sub.isNotEmpty()) {
+                                    Text(sub, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (wide) {
+        // Landscape: header pinned in a left column, config list scrolls on the right at full height.
+        Row(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .width(320.dp)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) { Header() }
+            Box(modifier = Modifier.fillMaxHeight().width(1.dp).background(DividerColor))
+            ConfigList(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+                    .padding(12.dp),
+            )
+        }
+    } else {
+        // Portrait: the original single scrolling column (header, divider, then the config rows).
+        Column(
+            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Header()
+            Divider(color = DividerColor)
+            ConfigList(modifier = Modifier.fillMaxWidth())
+        }
+    }
+}
+
+// Human display name for a config's meta.app_source — the actual project that produced it. BannerHub
+// and BannerHub Lite are distinct apps writing "bannerhub" / "bannerhub_lite"; ours would be "bannerlator".
+private fun communitySourceLabel(appSource: String?): String = when (appSource?.lowercase()?.trim()) {
+    "bannerhub" -> "BannerHub"
+    "bannerhub_lite" -> "BannerHub Lite"
+    "bannerlator" -> "Bannerlator"
+    null, "" -> "BannerHub"
+    else -> appSource.split('_', ' ').filter { it.isNotBlank() }
+        .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+}
+
+// Turn a translated config into "what it sets" lines in OUR component terms (the same fields the apply
+// engine consumes). Only present fields are listed; Proton/wineVersion is advisory (container-only) so
+// it is surfaced separately, not here.
+private fun configSummaryLines(config: ShortcutConfig): List<Pair<String, String>> {
+    val out = ArrayList<Pair<String, String>>()
+    config.dxwrapperConfig["version"]?.takeIf { it.isNotBlank() }?.let { out.add("DXVK" to it) }
+    config.dxwrapperConfig["vkd3dVersion"]?.takeIf { it.isNotBlank() }?.let { out.add("VKD3D" to it) }
+    config.dxwrapperConfig["async"]?.let { out.add("DXVK async" to if (it == "1") "on" else "off") }
+    config.graphicsDriverConfig["version"]?.takeIf { it.isNotBlank() }?.let { out.add("Turnip driver" to it) }
+    config.scalars["dxwrapper"]?.takeIf { it.isNotBlank() }?.let { out.add("DX wrapper" to it) }
+    config.scalars["emulator"]?.let { emu ->
+        val fex = config.scalars["fexcoreVersion"]
+        out.add("x86 translator" to if (emu == "fexcore" && !fex.isNullOrBlank()) "FEXCore $fex" else emu)
+    }
+    config.scalars["audioDriver"]?.takeIf { it.isNotBlank() }?.let { out.add("Audio driver" to it) }
+    config.scalars["inputType"]?.let { out.add("XInput" to if (it == "1") "on" else "off") }
+    config.scalars["screenSize"]?.takeIf { it.isNotBlank() }?.let { out.add("Resolution" to it) }
+    config.scalars["renderer"]?.takeIf { it.isNotBlank() }?.let { out.add("Renderer" to it) }
+    config.scalars["execArgs"]?.takeIf { it.isNotBlank() }?.let { out.add("Launch args" to it) }
+    config.scalars["envVars"]?.takeIf { it.isNotBlank() }?.let { out.add("Env vars" to it) }
+    return out
+}
+
+// Read-only Community Config detail page. Renders only data we already fetch: provenance ([detail.meta]),
+// the config in our own component terms ([configSummaryLines]), and (when a target shortcut was in
+// context) the non-mutating pre-apply diff ([detail.preview]). Apply is delegated to the caller, which
+// hands it to the shared apply → applyResult → smart-install flow — this page never applies/installs itself.
+@Composable
+private fun CommunityConfigDetailDialog(
+    game: CanonicalGame,
+    device: CanonicalDevice,
+    detail: CommunityConfigDetail?,
+    loading: Boolean,
+    failed: Boolean,
+    vm: ShortcutsViewModel,
+    onApply: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    // Live social state, seeded from [detail] (re-seeds when the async load lands). Vote dedup is local
+    // per-sha in a `banner_config_votes` prefs file, mirroring BannerHub's `bh_config_votes`; the worker
+    // also enforces one vote / IP / 24h.
+    val votePrefs = remember { context.getSharedPreferences("banner_config_votes", Context.MODE_PRIVATE) }
+    var votes by remember(detail) { mutableStateOf(detail?.votes ?: 0) }
+    var comments by remember(detail) { mutableStateOf(detail?.comments ?: emptyList()) }
+    var voted by remember(detail) {
+        mutableStateOf(detail?.sha?.let { votePrefs.getBoolean(it, false) } ?: false)
+    }
+    var voting by remember(detail) { mutableStateOf(false) }
+    var commentText by remember(detail) { mutableStateOf("") }
+    var commenting by remember(detail) { mutableStateOf(false) }
+
+    // The live social block: ★ votes · ↓ downloads, uploader description, an Upvote button (local +
+    // worker dedup), the comment thread, and a compact add-comment field. Only rendered when a worker
+    // /list entry matched this file ([workerGame] != null) — otherwise there's no social data to show.
+    @Composable
+    fun Social(d: CommunityConfigDetail) {
+        Divider(color = DividerColor)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("★ $votes", style = MaterialTheme.typography.bodyMedium, color = OnSurface)
+            Text("↓ ${d.downloads}", style = MaterialTheme.typography.bodyMedium, color = OnSurfaceVariant)
+        }
+        if (d.description.isNotBlank()) {
+            Text(d.description, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+        }
+        d.sha?.let { sha ->
+            OutlinedButton(
+                onClick = {
+                    val g = d.workerGame ?: return@OutlinedButton
+                    if (voted || voting) return@OutlinedButton
+                    voting = true
+                    vm.voteConfig(sha, g, d.fileName) { newVotes ->
+                        voting = false
+                        if (newVotes != null) {
+                            votes = newVotes
+                            voted = true
+                            votePrefs.edit().putBoolean(sha, true).apply()
+                        } else {
+                            Toast.makeText(context, "Couldn't record your vote.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+                enabled = !voted && !voting,
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                if (voting) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                } else {
+                    Text(if (voted) "Voted ✓" else "Upvote")
+                }
+            }
+        }
+
+        Text("Comments", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+        if (comments.isEmpty()) {
+            Text("No comments yet.", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+        } else {
+            comments.forEach { c ->
+                Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                    val head = listOf(c.device, c.date).filter { it.isNotBlank() }.joinToString(" · ")
+                    if (head.isNotEmpty()) {
+                        Text(head, style = MaterialTheme.typography.labelSmall, color = OnSurfaceVariant)
+                    }
+                    Text(c.text, style = MaterialTheme.typography.bodySmall, color = OnSurface)
+                }
+            }
+        }
+        // Add a comment (worker caps text at 500 chars).
+        val workerGame = d.workerGame
+        if (workerGame != null) {
+            OutlinedTextField(
+                value = commentText,
+                onValueChange = { if (it.length <= 500) commentText = it },
+                label = { Text("Add a comment") },
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 3,
+            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(
+                    onClick = {
+                        val text = commentText.trim()
+                        if (text.isEmpty() || commenting) return@TextButton
+                        commenting = true
+                        val dev = Build.MANUFACTURER + "_" + Build.MODEL
+                        vm.addConfigComment(workerGame, d.fileName, text, dev) { refreshed ->
+                            commenting = false
+                            if (refreshed != null) {
+                                comments = refreshed
+                                commentText = ""
+                            } else {
+                                Toast.makeText(context, "Couldn't post your comment.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    enabled = commentText.isNotBlank() && !commenting,
+                ) { Text(if (commenting) "Sending…" else "Send") }
+            }
+        }
+    }
+
+    // Provenance — game · device · soc · uploaded date · BannerHub source badge. Prefers the config's
+    // own meta, falling back to the catalog device row when a field is blank.
+    @Composable
+    fun Provenance(modifier: Modifier) {
+        Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                game.name,
+                style = MaterialTheme.typography.titleMedium,
+                color = OnSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            val meta = detail?.meta
+            val dev = meta?.device ?: device.model.ifBlank { null }
+            val soc = meta?.soc ?: device.soc.ifBlank { null }
+            val hw = listOfNotNull(dev, device.gpu.ifBlank { null }, soc).distinct().joinToString(" · ")
+            if (hw.isNotEmpty()) {
+                Text(hw, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+            }
+            meta?.uploadedDate?.let {
+                Text("Uploaded $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CommunityStoreBadge(isSteam = game.isSteam)
+                if (meta != null) {
+                    // Name the actual source project (meta.app_source distinguishes BannerHub vs
+                    // BannerHub Lite vs a future Bannerlator upload), with the version appended if present.
+                    val label = "From ${communitySourceLabel(meta.appSource)}" + (meta.bhVersion?.let { " $it" } ?: "")
+                    Surface(
+                        color = SurfaceVariantColor,
+                        shape = MaterialTheme.shapes.small,
+                    ) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = OnSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // "What this config sets" + (when previewed) the pre-apply diff against the in-context shortcut.
+    @Composable
+    fun Body(modifier: Modifier) {
+        Column(
+            modifier = modifier,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            when {
+                loading -> {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Text("Loading config…", color = OnSurfaceVariant)
+                    }
+                }
+                failed || detail == null -> {
+                    Text(
+                        "Couldn't fetch this config (offline, or no matching file in the repo).",
+                        color = OnSurfaceVariant,
+                    )
+                }
+                else -> {
+                    Text("What this config sets", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+                    val lines = configSummaryLines(detail.config)
+                    if (lines.isEmpty()) {
+                        Text("Nothing this app can set.", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+                    } else {
+                        lines.forEach { (label, value) ->
+                            Text(
+                                "• $label: $value",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = OnSurfaceVariant,
+                            )
+                        }
+                    }
+                    detail.config.advisories["wineVersion"]?.let { proton ->
+                        Text(
+                            "• Proton (container-only): $proton",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnSurfaceVariant,
+                        )
+                    }
+
+                    // Pre-apply diff — only when a target shortcut was in context.
+                    detail.preview?.let { pre ->
+                        Divider(color = DividerColor)
+                        Text("Changes to \"${game.name}\"", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+                        Text(pre.message, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+                        if (pre.changed.isNotEmpty()) {
+                            Text("Would change", style = MaterialTheme.typography.labelMedium, color = OnSurface)
+                            pre.changed.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant) }
+                        }
+                        if (pre.missingComponents.isNotEmpty()) {
+                            Text("Needs a component", style = MaterialTheme.typography.labelMedium, color = OnSurface)
+                            pre.missingComponents.forEach { Text("• ${it.label}", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant) }
+                        }
+                        if (pre.missingDrivers.isNotEmpty()) {
+                            Text("Needs a GPU driver", style = MaterialTheme.typography.labelMedium, color = OnSurface)
+                            pre.missingDrivers.forEach {
+                                val had = it.current?.let { c -> " (you have $c)" } ?: ""
+                                Text("• Turnip ${it.wanted}$had", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+                            }
+                        }
+                        if (pre.advisories.isNotEmpty()) {
+                            Text("Heads up", style = MaterialTheme.typography.labelMedium, color = OnSurface)
+                            pre.advisories.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant) }
+                        }
+                    }
+
+                    // Live social layer (votes / downloads / description / comments) — only when a
+                    // worker /list entry matched this file; otherwise there's nothing to show.
+                    if (detail.workerGame != null) Social(detail)
+                }
+            }
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(0.95f).fillMaxHeight(0.92f),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp,
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Config details",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
+                }
+                Divider(color = DividerColor)
+
+                // Landscape (wide): provenance pinned left, "what it sets" + diff scroll on the right.
+                // Portrait (narrow): a single top-to-bottom scroll of both.
+                BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    if (maxWidth >= 600.dp) {
+                        Row(modifier = Modifier.fillMaxSize()) {
+                            Provenance(
+                                modifier = Modifier
+                                    .width(320.dp)
+                                    .fillMaxHeight()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(12.dp),
+                            )
+                            Box(modifier = Modifier.fillMaxHeight().width(1.dp).background(DividerColor))
+                            Body(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(12.dp),
+                            )
+                        }
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Provenance(modifier = Modifier.fillMaxWidth())
+                            Divider(color = DividerColor)
+                            Body(modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                }
+                Divider(color = DividerColor)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    TextButton(onClick = onDismiss) { Text("Close") }
+                    TextButton(onClick = onApply, enabled = detail != null) { Text("Apply") }
+                }
+            }
+        }
     }
 }
 
@@ -633,6 +2384,7 @@ private fun ShortcutItemLayoutL(
     onExport: () -> Unit,
     onProperties: () -> Unit,
     onScrapeCover: () -> Unit,
+    onCommunityConfigs: () -> Unit,
 ) {
     val container = shortcut.container
     val res = LocalContext.current.resources
@@ -736,6 +2488,7 @@ private fun ShortcutItemLayoutL(
             onExport = onExport,
             onProperties = onProperties,
             onScrapeCover = onScrapeCover,
+            onCommunityConfigs = onCommunityConfigs,
         )
       }
     }
@@ -751,6 +2504,7 @@ private fun ShortcutOverflowButton(
     onExport: () -> Unit,
     onProperties: () -> Unit,
     onScrapeCover: () -> Unit,
+    onCommunityConfigs: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     Box {
@@ -789,6 +2543,11 @@ private fun ShortcutOverflowButton(
                 onClick = { menuExpanded = false; onScrapeCover() },
             )
             DropdownMenuItem(
+                text = { Text("Community configs") },
+                leadingIcon = { Icon(Icons.Filled.Public, null, tint = MaterialTheme.colorScheme.primary) },
+                onClick = { menuExpanded = false; onCommunityConfigs() },
+            )
+            DropdownMenuItem(
                 text = { Text("Properties") },
                 leadingIcon = { Icon(Icons.Filled.Info, null) },
                 onClick = { menuExpanded = false; onProperties() },
@@ -809,6 +2568,7 @@ private fun ShortcutGridItem(
     onExport: () -> Unit,
     onProperties: () -> Unit,
     onScrapeCover: () -> Unit,
+    onCommunityConfigs: () -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -887,6 +2647,7 @@ private fun ShortcutGridItem(
             DropdownMenuItem(text = { Text("Add to home screen") }, leadingIcon = { Icon(Icons.Filled.AddToHomeScreen, null) }, onClick = { menuExpanded = false; onAddToHome() })
             DropdownMenuItem(text = { Text("Export") }, leadingIcon = { Icon(Icons.Filled.Upload, null) }, onClick = { menuExpanded = false; onExport() })
             DropdownMenuItem(text = { Text("Scrape cover") }, leadingIcon = { Icon(Icons.Filled.Search, null, tint = MaterialTheme.colorScheme.primary) }, onClick = { menuExpanded = false; onScrapeCover() })
+            DropdownMenuItem(text = { Text("Community configs") }, leadingIcon = { Icon(Icons.Filled.Public, null, tint = MaterialTheme.colorScheme.primary) }, onClick = { menuExpanded = false; onCommunityConfigs() })
             DropdownMenuItem(text = { Text("Properties") }, leadingIcon = { Icon(Icons.Filled.Info, null) }, onClick = { menuExpanded = false; onProperties() })
         }
     }
