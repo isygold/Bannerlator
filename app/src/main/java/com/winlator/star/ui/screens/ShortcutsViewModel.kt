@@ -25,9 +25,14 @@ import com.winlator.star.container.Container
 import com.winlator.star.container.ContainerManager
 import com.winlator.star.container.Shortcut
 import com.winlator.star.core.FileUtils
+import com.winlator.star.core.GPUInformation
 import com.winlator.star.core.WinePath
 import com.winlator.star.store.StarLaunchBridge
+import com.winlator.star.ui.screens.adrenodownload.DriverSources
+import com.winlator.star.ui.screens.adrenodownload.RemoteDriverRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -195,10 +200,34 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
                     config = config,
                     installed = installed,
                     containerWineVersion = shortcut.container?.getWineVersion(),
+                    isAdreno = GPUInformation.isAdrenoGPU(getApplication()),
                 )
             }
             if (result.ok && result.changed.isNotEmpty()) refresh()
             onResult(result)
+        }
+    }
+
+    /**
+     * Fetch every remote Turnip/adrenotools driver source in parallel, flatten to one list, and rank
+     * it against [wanted] (exact repo-variants + closest few by mesa version). All IO off the main
+     * thread; a source that fails to fetch is skipped, not fatal. Fed by the inline driver installer
+     * on the "Config applied" screen.
+     */
+    fun fetchDriverShortlist(
+        wanted: String,
+        onResult: (CommunityConfigApply.DriverShortlist) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val shortlist = withContext(Dispatchers.IO) {
+                val repo = RemoteDriverRepository(getApplication())
+                val entries = DriverSources.ALL
+                    .map { src -> async { repo.fetchEntries(src).getOrDefault(emptyList()) } }
+                    .awaitAll()
+                    .flatten()
+                CommunityConfigApply.rankDrivers(wanted, entries)
+            }
+            onResult(shortlist)
         }
     }
 

@@ -141,10 +141,14 @@ import com.winlator.star.container.Container
 import com.winlator.star.container.Shortcut
 import com.winlator.star.reshade.ReshadeManager
 import com.winlator.star.contentdialog.GraphicsDriverConfigDialog
+import com.winlator.star.contents.AdrenotoolsManager
 import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.Downloader
 import com.winlator.star.ui.findActivity
+import com.winlator.star.ui.screens.adrenodownload.AdrenoDriverDownloadSheet
+import com.winlator.star.ui.screens.adrenodownload.RemoteDriverEntry
+import com.winlator.star.ui.screens.adrenodownload.RemoteDriverRepository
 import com.winlator.star.core.DefaultVersion
 import com.winlator.star.core.FileUtils
 import com.winlator.star.core.KeyValueSet
@@ -220,8 +224,14 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var applyTarget by remember { mutableStateOf<Shortcut?>(null) }
     // Missing component the user tapped "Install" on → opens its single-type download sheet.
     var installSheetFor by remember { mutableStateOf<CommunityConfigApply.MissingComponent?>(null) }
-    // Labels of missing components that resolved after an install (→ checkmark instead of a button).
+    // Missing GPU driver the user tapped "Browse all drivers" on → opens the adrenotools driver browser.
+    var driverSheetFor by remember { mutableStateOf<CommunityConfigApply.MissingDriver?>(null) }
+    // Labels of missing components/drivers that resolved after an install (→ checkmark instead of a
+    // button). Drivers are namespaced "driver:<wanted>" so they can't collide with component labels.
     val resolvedMissing = remember(applyResult) { mutableStateListOf<String>() }
+    // Any install sheet (component OR driver) open → hide the community dialog layers so the
+    // ModalBottomSheet isn't rendered behind an AlertDialog's window; they reappear when it closes.
+    val communityDialogsGated = installSheetFor != null || driverSheetFor != null
     val scope = rememberCoroutineScope()
 
     // Shared apply runner — used by both the catalog browser and the per-shortcut sheet.
@@ -707,7 +717,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     }
 
     // Community configs dialog (Phase 1 — match + suggest, read-only)
-    if (installSheetFor == null) communityTarget?.let { s ->
+    if (!communityDialogsGated) communityTarget?.let { s ->
         val dismiss = { communityTarget = null; communityResult = null }
         AlertDialog(
             onDismissRequest = dismiss,
@@ -859,7 +869,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     }
 
     // Catalog browser (Part A) — full-catalog entry from the header button.
-    if (showCommunityBrowser && installSheetFor == null) {
+    if (showCommunityBrowser && !communityDialogsGated) {
         CommunityCatalogBrowser(
             vm = vm,
             onDismiss = { showCommunityBrowser = false },
@@ -868,7 +878,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     }
 
     // Apply-target picker — choose which of your shortcuts to apply a browser-selected config to.
-    if (installSheetFor == null) applyPicker?.let { (game, device) ->
+    if (!communityDialogsGated) applyPicker?.let { (game, device) ->
         val shortcutList = vm.currentShortcuts()
         AlertDialog(
             onDismissRequest = { applyPicker = null },
@@ -938,7 +948,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // Result summary — what changed + install / Proton advisories. Hidden while a component-install
     // sheet is open (a ModalBottomSheet renders behind an AlertDialog's window); it reappears — with
     // any new checkmark — once the sheet closes, since applyResult / resolvedMissing persist.
-    if (installSheetFor == null) applyResult?.let { res ->
+    if (!communityDialogsGated) applyResult?.let { res ->
         // Downloadable catalog for the inline installer — one fetch per result, per missing type.
         // null value = still loading (row shows a spinner instead of a button).
         val installCm = remember(res) { ContentsManager(context) }
@@ -987,6 +997,40 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                             )
                         }
                     }
+                    // Missing GPU driver(s) — smart inline installer over all 5 adrenotools repos:
+                    // every exact-version repo-variant as its own quick-install, then closest others,
+                    // then the full driver browser. Adreno-only (the apply engine gates emission).
+                    if (res.missingDrivers.isNotEmpty()) {
+                        Divider(color = DividerColor)
+                        Text("Needs a GPU driver", style = MaterialTheme.typography.labelLarge, color = OnSurface)
+                        res.missingDrivers.forEach { md ->
+                            SmartDriverInstallRow(
+                                md = md,
+                                vm = vm,
+                                done = ("driver:" + md.wanted) in resolvedMissing,
+                                onBrowseAll = { driverSheetFor = md },
+                                onApplied = { driverId ->
+                                    val target = applyTarget
+                                    if (target != null) {
+                                        scope.launch {
+                                            val ok = withContext(Dispatchers.IO) {
+                                                CommunityConfigApply.applyResolvedDriver(target, driverId)
+                                            }
+                                            if (ok) {
+                                                if (("driver:" + md.wanted) !in resolvedMissing) {
+                                                    resolvedMissing.add("driver:" + md.wanted)
+                                                }
+                                                vm.refresh()
+                                                Toast.makeText(context, "Driver installed and applied to \"${target.name}\".", Toast.LENGTH_SHORT).show()
+                                            } else {
+                                                Toast.makeText(context, "Installed, but couldn't apply the driver.", Toast.LENGTH_LONG).show()
+                                            }
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                    }
                     if (res.advisories.isNotEmpty()) {
                         Divider(color = DividerColor)
                         Text("Heads up", style = MaterialTheme.typography.labelLarge, color = OnSurface)
@@ -1006,6 +1050,32 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             contentType = mc.type,
             onDismiss = { installSheetFor = null },
             onContentChanged = { applyAfterInstall(mc) },
+        )
+    }
+
+    // "Browse all drivers" fallback — the full adrenotools driver browser (5 source chips). When a
+    // driver installs, surgically write its id back to the target shortcut and mark the row done.
+    driverSheetFor?.let { md ->
+        AdrenoDriverDownloadSheet(
+            onDismiss = { driverSheetFor = null },
+            onDriverInstalled = { driverId ->
+                driverSheetFor = null
+                val target = applyTarget
+                if (target != null) {
+                    scope.launch {
+                        val ok = withContext(Dispatchers.IO) {
+                            CommunityConfigApply.applyResolvedDriver(target, driverId)
+                        }
+                        if (ok) {
+                            if (("driver:" + md.wanted) !in resolvedMissing) {
+                                resolvedMissing.add("driver:" + md.wanted)
+                            }
+                            vm.refresh()
+                            Toast.makeText(context, "Driver applied to \"${target.name}\".", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            },
         )
     }
 
@@ -1180,6 +1250,181 @@ private fun SmartComponentInstallRow(
             text = { Text("Download and install ${mc.type} ${p.verName}, then apply it to this shortcut?") },
             confirmButton = { TextButton(onClick = { install(p) }) { Text("Install") } },
             dismissButton = { TextButton(onClick = { confirmProfile = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+// One missing-GPU-driver row on the "Config applied" screen — the SMART inline adrenotools installer.
+// Mirrors [SmartComponentInstallRow] but the catalog is the 5 remote Turnip repos (fetched on expand)
+// and the pick axis is repo-source at a given mesa version:
+//  - "Install" fetches+ranks, then reveals EVERY exact-version repo-variant as its own quick-install
+//    (labelled "<source> · <displayName>" so identical versions are distinguishable), the ~3 closest
+//    OTHER versions, and a "Browse all drivers…" link to the full driver browser.
+//  - each quick-install → a small confirm → inline download+install → auto-apply → checkmark.
+// Only reached on Adreno GPUs (the apply engine only emits MissingDriver there).
+@Composable
+private fun SmartDriverInstallRow(
+    md: CommunityConfigApply.MissingDriver,
+    vm: ShortcutsViewModel,
+    done: Boolean,
+    onBrowseAll: () -> Unit,
+    onApplied: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val installedBlue = Color(0xFF4FC3F7) // matches the component row's installed/in-use status blue
+    val repo = remember { RemoteDriverRepository(context) }
+
+    val label = remember(md) {
+        buildString {
+            append("config wants ")
+            append(md.wanted)
+            md.current?.let { append("; you have ").append(it) }
+        }
+    }
+
+    var loading by remember { mutableStateOf(false) }                         // fetching + ranking repos
+    var shortlist by remember { mutableStateOf<CommunityConfigApply.DriverShortlist?>(null) }
+    var expanded by remember { mutableStateOf(false) }                        // variants revealed
+    var confirmEntry by remember { mutableStateOf<RemoteDriverEntry?>(null) } // per-variant confirm
+    var busy by remember { mutableStateOf(false) }                           // download/install running
+    var installing by remember { mutableStateOf(false) }                     // false = downloading phase
+    var progress by remember { mutableStateOf(0) }                           // 0..100
+
+    // Decide what to reveal once the shortlist is known: no options at all → open the full browser.
+    fun reveal(sl: CommunityConfigApply.DriverShortlist) {
+        if (sl.exactMatches.isEmpty() && sl.closest.isEmpty()) onBrowseAll() else expanded = true
+    }
+
+    fun onInstallClick() {
+        val sl = shortlist
+        if (sl != null) { reveal(sl); return }
+        if (loading) return
+        loading = true
+        vm.fetchDriverShortlist(md.wanted) { fetched ->
+            shortlist = fetched
+            loading = false
+            reveal(fetched)
+        }
+    }
+
+    fun install(entry: RemoteDriverEntry) {
+        confirmEntry = null
+        expanded = false
+        busy = true
+        installing = false
+        progress = 0
+        scope.launch {
+            repo.downloadEntry(entry) { pct -> progress = pct }.fold(
+                onSuccess = { file ->
+                    installing = true
+                    val driverId = withContext(Dispatchers.IO) {
+                        AdrenotoolsManager(context).installDriver(Uri.fromFile(file))
+                    }
+                    file.delete()
+                    busy = false
+                    if (driverId.isNotEmpty()) onApplied(driverId)
+                    else Toast.makeText(context, "Install failed — invalid driver package", Toast.LENGTH_LONG).show()
+                },
+                onFailure = { t ->
+                    busy = false
+                    Toast.makeText(context, "Download failed: ${t.message ?: "unknown error"}", Toast.LENGTH_LONG).show()
+                },
+            )
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                "• $label",
+                style = MaterialTheme.typography.bodySmall,
+                color = OnSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            when {
+                done -> Icon(
+                    Icons.Filled.CheckCircle, contentDescription = "Installed",
+                    tint = installedBlue, modifier = Modifier.size(20.dp),
+                )
+                busy || loading -> CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                else -> TextButton(onClick = { onInstallClick() }) {
+                    Text("Install", color = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+
+        // Progress line under the label while downloading / installing.
+        if (busy) {
+            val frac = (progress / 100f).coerceIn(0f, 1f)
+            Text(
+                if (installing) "Installing…" else "Downloading $progress%…",
+                style = MaterialTheme.typography.labelSmall,
+                color = OnSurfaceVariant,
+                modifier = Modifier.padding(start = 10.dp, top = 2.dp),
+            )
+            LinearProgressIndicator(
+                progress = frac,
+                modifier = Modifier.fillMaxWidth().height(3.dp).padding(top = 2.dp),
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+
+        // Revealed options: exact-version repo-variants first (each its own quick-install), then the
+        // closest OTHER versions, then the full browser.
+        val sl = shortlist
+        if (!busy && !done && expanded && sl != null) {
+            Column(
+                modifier = Modifier.padding(start = 10.dp, top = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                sl.exactMatches.forEach { e ->
+                    Text(
+                        "Install ${e.source} · ${e.displayName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { confirmEntry = e }
+                            .padding(vertical = 6.dp),
+                    )
+                }
+                sl.closest.forEach { e ->
+                    Text(
+                        "Install ${e.source} · ${e.displayName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { confirmEntry = e }
+                            .padding(vertical = 6.dp),
+                    )
+                }
+                Text(
+                    "Browse all drivers…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { expanded = false; onBrowseAll() }
+                        .padding(vertical = 6.dp),
+                )
+            }
+        }
+    }
+
+    // Per-variant confirm dialog (stacks over the result dialog).
+    confirmEntry?.let { e ->
+        AlertDialog(
+            onDismissRequest = { confirmEntry = null },
+            title = { Text("Quick install ${e.displayName}?") },
+            text = { Text("Download and install this Turnip driver from ${e.source}, then apply it to this shortcut?") },
+            confirmButton = { TextButton(onClick = { install(e) }) { Text("Install") } },
+            dismissButton = { TextButton(onClick = { confirmEntry = null }) { Text("Cancel") } },
         )
     }
 }

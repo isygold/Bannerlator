@@ -3,6 +3,7 @@ package com.winlator.star.communityconfigs
 import android.util.Log
 import com.winlator.star.container.Shortcut
 import com.winlator.star.contents.ContentProfile
+import com.winlator.star.ui.screens.adrenodownload.RemoteDriverEntry
 
 /**
  * PHASE 2 apply engine — translate a community config → SURGICALLY merge it into a game's shortcut
@@ -57,6 +58,22 @@ object CommunityConfigApply {
     )
 
     /**
+     * A Turnip/adrenotools GPU driver the config wants but that isn't installed. Unlike
+     * [MissingComponent] this has no [ContentProfile.ContentType] (there is no adrenotools content
+     * type) — it is installed via the adrenotools driver-download subsystem (5 remote repos), not the
+     * single-type content sheet. Only emitted on Adreno GPUs (an adrenotools driver is meaningless on
+     * Mali/other); on non-Adreno the requested driver stays a plain advisory line.
+     *
+     * @param wanted  the driver the config requested, e.g. "Mesa Turnip v25.0.0" (matched against the
+     *                remote driver catalog by mesa version; the installed driver id is what gets written).
+     * @param current the shortcut's current graphicsDriverConfig version sub-field, or null when none.
+     */
+    data class MissingDriver(
+        val wanted: String,
+        val current: String?,
+    )
+
+    /**
      * The reviewable, human-readable outcome of an apply — what actually changed, what needs an
      * install (structured [missingComponents], each installable via the download sheet), and
      * advisory-only notes ([advisories]: Proton / Turnip, plain text, no button). [ok] is false only
@@ -69,6 +86,7 @@ object CommunityConfigApply {
         val changed: List<String> = emptyList(),
         val missingComponents: List<MissingComponent> = emptyList(),
         val advisories: List<String> = emptyList(),
+        val missingDrivers: List<MissingDriver> = emptyList(),
     )
 
     /**
@@ -77,16 +95,20 @@ object CommunityConfigApply {
      * call off the main thread (blocking file write via {@code saveData()}).
      *
      * @param containerWineVersion the container's Proton/Wine version, for the container-only advisory.
+     * @param isAdreno             whether the running GPU is Adreno; only then is an unresolved Turnip
+     *                             driver offered as an installable [MissingDriver] (else plain advisory).
      */
     fun apply(
         shortcut: Shortcut,
         config: ShortcutConfig,
         installed: InstalledComponents,
         containerWineVersion: String?,
+        isAdreno: Boolean,
     ): ConfigApplyResult {
         val changed = ArrayList<String>()
         val advisories = ArrayList<String>()
         val missing = ArrayList<MissingComponent>()
+        val missingDrivers = ArrayList<MissingDriver>()
 
         // FEXCore is coupled to the emulator scalar: only switch to fexcore if a compatible build is
         // installed, otherwise we'd point the shortcut at a translator that isn't there.
@@ -149,14 +171,31 @@ object CommunityConfigApply {
         }
 
         // graphicsDriverConfig — semicolon k=v list; merge ONLY the driver version, preserve the rest.
+        // Turnip/adrenotools has no single-type content sheet: an unresolved driver becomes a structured
+        // [MissingDriver] (installable via the adrenotools driver browser) ONLY on Adreno; on other GPUs
+        // an adrenotools driver is meaningless, so it stays a plain advisory.
         val gdcCurrent = currentOrDefault(shortcut, "graphicsDriverConfig", shortcut.container?.getGraphicsDriverConfig())
         config.graphicsDriverConfig["version"]?.let { wanted ->
-            val resolved = resolveInto("Turnip", "adrenotools", wanted, subValue(gdcCurrent, ";", "version"), installed, advisories)
-            if (resolved != null) {
-                val merged = mergeList(gdcCurrent, linkedMapOf("version" to resolved), ";")
-                if (merged != gdcCurrent) {
-                    shortcut.putExtra("graphicsDriverConfig", merged)
-                    changed.add("graphicsDriverConfig.version → $resolved")
+            val current = subValue(gdcCurrent, ";", "version")
+            when (val r = installed.resolve("adrenotools", wanted, current)) {
+                is InstalledComponents.Resolution.Match -> {
+                    val token = r.token // null = already aligned; nothing to write.
+                    if (token != null) {
+                        val merged = mergeList(gdcCurrent, linkedMapOf("version" to token), ";")
+                        if (merged != gdcCurrent) {
+                            shortcut.putExtra("graphicsDriverConfig", merged)
+                            changed.add("graphicsDriverConfig.version → $token")
+                        }
+                    }
+                }
+                InstalledComponents.Resolution.Missing -> {
+                    val have = current?.takeIf { it.isNotBlank() }
+                    if (isAdreno) {
+                        missingDrivers.add(MissingDriver(wanted, have))
+                    } else {
+                        val had = have?.let { " you have $it —" } ?: ""
+                        advisories.add("config wants Turnip $wanted;$had install it to honor.")
+                    }
                 }
             }
         }
@@ -174,19 +213,19 @@ object CommunityConfigApply {
                 Log.w(TAG, "Failed to persist shortcut after apply", e)
                 return ConfigApplyResult(
                     false, "Failed to save shortcut: ${e.message ?: e.javaClass.simpleName}",
-                    changed, missing, advisories,
+                    changed, missing, advisories, missingDrivers,
                 )
             }
         }
 
         val message = when {
-            changed.isEmpty() && advisories.isEmpty() && missing.isEmpty() ->
+            changed.isEmpty() && advisories.isEmpty() && missing.isEmpty() && missingDrivers.isEmpty() ->
                 "Already aligned — your shortcut matches this config; nothing to change."
             changed.isEmpty() ->
                 "Nothing changed — this config needs components you don't have installed yet."
             else -> "Applied ${changed.size} change${if (changed.size == 1) "" else "s"} to \"${shortcut.name}\"."
         }
-        return ConfigApplyResult(true, message, changed, missing, advisories)
+        return ConfigApplyResult(true, message, changed, missing, advisories, missingDrivers)
     }
 
     /**
@@ -229,6 +268,66 @@ object CommunityConfigApply {
             }
         }
         return true
+    }
+
+    /**
+     * Post-install fixup for a [MissingDriver]: SURGICALLY write the just-installed adrenotools
+     * [driverId] into the shortcut's {@code graphicsDriverConfig} version sub-field (preserving every
+     * other sub-field) and persist. Mirrors [applyResolvedComponent] but for the Turnip/adrenotools
+     * driver — the installed driver id IS the version token. Returns true on a successful save. Safe
+     * off the main thread (blocking saveData()).
+     */
+    fun applyResolvedDriver(shortcut: Shortcut, driverId: String): Boolean {
+        if (driverId.isBlank()) return false
+        val cur = currentOrDefault(shortcut, "graphicsDriverConfig", shortcut.container?.getGraphicsDriverConfig())
+        shortcut.putExtra("graphicsDriverConfig", mergeList(cur, linkedMapOf("version" to driverId), ";"))
+        return try {
+            shortcut.saveData()
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to persist shortcut after driver install", e)
+            false
+        }
+    }
+
+    /**
+     * The smart shortlist for a [MissingDriver] over the flattened remote driver catalog (all 5 repos):
+     *  - [exactMatches] is EVERY entry whose parsed version equals the wanted X.Y.Z, ordered by source
+     *    name — different repos' builds of the same mesa version behave differently on-device, so each
+     *    is offered as its own quick-install option (they are NOT collapsed to one).
+     *  - [closest] is up to [limit] nearest OTHER versions by mesa-version distance.
+     * Entries are deduped by identical downloadUrl only (a repo listing the same file twice), never by
+     * version. When the wanted string has no parseable version, both lists are empty (Browse-all only).
+     */
+    data class DriverShortlist(
+        val exactMatches: List<RemoteDriverEntry>,
+        val closest: List<RemoteDriverEntry>,
+    )
+
+    /** Rank remote driver [entries] against the wanted Turnip version (e.g. "Mesa Turnip v25.0.0"). */
+    fun rankDrivers(
+        wanted: String,
+        entries: List<RemoteDriverEntry>,
+        limit: Int = 3,
+    ): DriverShortlist {
+        val wantKey = versionKey(wanted) ?: return DriverShortlist(emptyList(), emptyList())
+        // Dedup identical files (same repo listing a build twice); same version across repos stays distinct.
+        val deduped = entries.distinctBy { it.downloadUrl }
+        val keyed = deduped.mapNotNull { e -> versionKey(e.displayName)?.let { e to it } }
+        val exactMatches = keyed
+            .filter { it.second.contentEquals(wantKey) }
+            .map { it.first }
+            .sortedBy { it.source }
+        val exactUrls = exactMatches.map { it.downloadUrl }.toSet()
+        val closest = keyed.asSequence()
+            .filter { it.first.downloadUrl !in exactUrls }
+            .map { it.first to versionDistance(wantKey, it.second) }
+            .filter { it.second != Long.MAX_VALUE }
+            .sortedWith(compareBy({ it.second }, { it.first.displayName }, { it.first.source }))
+            .map { it.first }
+            .take(limit)
+            .toList()
+        return DriverShortlist(exactMatches, closest)
     }
 
     /**
@@ -335,8 +434,8 @@ object CommunityConfigApply {
         InstalledComponents.Resolution.Missing -> {
             val have = current?.takeIf { it.isNotBlank() }?.let { " you have $it —" } ?: ""
             val text = "config wants $label $wanted;$have install it to honor."
-            // Sheet-installable types get a structured entry (→ Install button); everything else
-            // (Turnip / adrenotools) stays a plain advisory line.
+            // Sheet-installable types get a structured entry (→ Install button); anything without a
+            // missingType falls through to a plain advisory line. (Turnip has its own MissingDriver path.)
             if (missing != null && missingType != null) {
                 missing.add(MissingComponent(missingType, text, wanted, current))
             } else {
