@@ -1051,7 +1051,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                             CommunityConfigEntryCard(entry = e, isMatch = isMatch) {
                                                 configAction = CommunityPick.File(
                                                     game,
-                                                    CommunityConfigRef(game, folder, e.filename, e.sha.ifBlank { null }),
+                                                    CommunityConfigRef(game, folder, e.filename, e.sha.ifBlank { null }, ns = if (e.appSource == "bannerlator") "bannerlator" else ""),
                                                     e,
                                                 ) to s
                                             }
@@ -2261,7 +2261,7 @@ private fun CommunityDevicePanel(
                                 onPick(
                                     CommunityPick.File(
                                         game,
-                                        CommunityConfigRef(game, folder, e.filename, e.sha.ifBlank { null }),
+                                        CommunityConfigRef(game, folder, e.filename, e.sha.ifBlank { null }, ns = if (e.appSource == "bannerlator") "bannerlator" else ""),
                                         e,
                                     )
                                 )

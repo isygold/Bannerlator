@@ -320,7 +320,7 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
-                val fetched = CommunityConfigFetcher.fetchForFile(ref.workerGame, ref.filename)
+                val fetched = CommunityConfigFetcher.fetchForFile(ref.workerGame, ref.filename, ref.ns)
                     ?: return@withContext CommunityConfigApply.ConfigApplyResult(
                         ok = false,
                         message = "Couldn't fetch that config (offline, or it's no longer in the repo).",
@@ -476,7 +476,7 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         viewModelScope.launch {
             val detail = withContext(Dispatchers.IO) {
-                val fetched = CommunityConfigFetcher.fetchForFile(ref.workerGame, ref.filename)
+                val fetched = CommunityConfigFetcher.fetchForFile(ref.workerGame, ref.filename, ref.ns)
                     ?: return@withContext null
                 val config = ConfigTranslator.translate(fetched.json)
                 val meta = ConfigMeta.parse(fetched.json.optJSONObject("meta"), fetched.fileName)
@@ -494,7 +494,7 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
                 var sha = ref.sha
                 var votes = 0
                 var downloads = 0
-                CommunityConfigWorker.list(ref.workerGame).firstOrNull { it.filename == ref.filename }?.let { e ->
+                CommunityConfigWorker.list(ref.workerGame, ref.ns).firstOrNull { it.filename == ref.filename }?.let { e ->
                     if (sha.isNullOrBlank()) sha = e.sha.ifBlank { null }
                     votes = e.votes
                     downloads = e.downloads

@@ -50,10 +50,11 @@ object CommunityConfigFetcher {
      * Download ONE exact config file by name (the per-uploaded-config path). Goes through the worker's
      * `GET /download?game=&file=` — which returns the raw config JSON (and bumps the sampled download
      * count) — so it lands on the same file the `/list` entry named, with no GitHub-contents walking.
+     * [ns] selects the repo the file lives in ("" = BannerHub, "bannerlator" = our own repo).
      * Returns null when the fetch fails or the body isn't valid JSON (offline / removed).
      */
-    fun fetchForFile(workerGame: String, filename: String): Fetched? {
-        val body = CommunityConfigWorker.download(workerGame, filename) ?: return null
+    fun fetchForFile(workerGame: String, filename: String, ns: String = ""): Fetched? {
+        val body = CommunityConfigWorker.download(workerGame, filename, ns = ns) ?: return null
         val json = try {
             JSONObject(body)
         } catch (e: Exception) {

@@ -89,10 +89,13 @@ object CommunityConfigWorker {
     /**
      * GET `/download?game=&file=&sha=` — the raw config JSON (also bumps the sampled download count).
      * Optional: the detail page fetches raw via [CommunityConfigFetcher]; kept for completeness / reuse.
+     * When [ns] is non-blank it is appended as `&ns=` to read the NAMESPACED repo (e.g. `bannerlator`);
+     * a blank [ns] keeps the default BannerHub download unchanged.
      */
-    fun download(game: String, file: String, sha: String? = null): String? {
+    fun download(game: String, file: String, sha: String? = null, ns: String = ""): String? {
         val shaQ = if (sha.isNullOrBlank()) "" else "&sha=${enc(sha)}"
-        return get("$BASE/download?game=${enc(game)}&file=${enc(file)}$shaQ")
+        val nsQ = if (ns.isBlank()) "" else "&ns=${enc(ns)}"
+        return get("$BASE/download?game=${enc(game)}&file=${enc(file)}$shaQ$nsQ")
     }
 
     /** GET `/comments?game=&file=` — the comment thread for a config (may be empty). */
