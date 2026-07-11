@@ -19,12 +19,13 @@
 </p>
 
 <p align="center">
+  <a href="#-contents">Contents</a> •
   <a href="#-ask-me-anything">Ask AI</a> •
   <a href="https://github.com/The412Banner/Bannerlator/releases/latest">Download</a> •
   <a href="https://discord.gg/n8S4G2WZQ4">Discord</a> •
   <a href="https://t.me/The412BannerGaming">Telegram</a> •
-  <a href="#building">Builds</a> •
-  <a href="#credits">Credits</a>
+  <a href="#️-building">Builds</a> •
+  <a href="#-credits">Credits</a>
 </p>
 
 ---
@@ -54,6 +55,36 @@
 | **Version** | Bannerlator **V 2.5.2** — built from Star **marcescence** (`versionName 2.5.2`, `versionCode 42`) |
 | **Android SDK** | `compileSdk 34` · `targetSdk 28` · `minSdk 26` (Android 8.0+) |
 | **Lineage** | Winlator → cmod → Bionic Nightly → Star Bionic → **marcescence** → **Bannerlator** |
+
+---
+
+## 📖 Contents
+
+- [📌 Project Notice](#-project-notice)
+- [ℹ️ Information](#ℹ️-information)
+- [🆕 What's New in 2.5.2](#-whats-new-in-252)
+- [✨ Full Features](#-full-features)
+  - [🍷 Windows compatibility](#-windows-compatibility)
+  - [🎨 Graphics & translation layers](#-graphics--translation-layers)
+  - [🖥️ Renderers](#️-renderers)
+  - [🎞️ Frame generation & pacing](#️-frame-generation--pacing)
+  - [📦 Containers](#-containers)
+  - [🕹️ Games, shortcuts & input](#️-games-shortcuts--input)
+  - [🌐 Community Configs](#-community-configs)
+  - [🛒 Built-in stores & cross-store Download Manager](#-built-in-stores--cross-store-download-manager)
+  - [🔒 Security Hardening & your store accounts](#-security-hardening--your-store-accounts)
+  - [🧰 Bundled Start-menu utilities](#-bundled-start-menu-utilities)
+  - [🎛️ Interface & in-game overlay](#️-interface--in-game-overlay)
+  - [📥 Builds & distribution](#-builds--distribution)
+- [🎨 Adding your own ReShade effects](#-adding-your-own-reshade-effects)
+- [🎮 Frontends Workaround](#-frontends-workaround)
+- [🛠️ Building](#️-building)
+- [🤖 Ask Me Anything](#-ask-me-anything)
+- [🙏 Credits](#-credits)
+  - [Upstream stack](#upstream-stack)
+  - [Community reports & requests](#community-reports--requests)
+- [⚖️ Disclaimer](#️-disclaimer)
+- [📄 License](#-license)
 
 ---
 
