@@ -1,5 +1,21 @@
 # Star-Compose — Progress Log
 
+## 2026-07-11 — 👤 ACCOUNT SYSTEM (all 4 phases) — ✅ MERGED TO MAIN (`dfd24263`), NOT tagged
+
+> Optional username+password account (isolated OUR worker/KV/R2) → cross-device recovery + identity + hosted avatar; accounts OPTIONAL (anon flows unchanged). Merged fast-forward (main tip `dfd24263`, +5 commits from `feat/account-system`). Worker `bannerhub-api/bannerhub-configs-worker.js` create/login/reset/avatar (+`/upload` session→registry) DEPLOYED + live-self-test all-pass (PBKDF2 100k ⚠️CF cap + HMAC AUTH_SECRET sessions + recovery-key, R2 bucket `bannerlator-avatars`); commits `91bc9f8`/`2d3bca5`/`2a0f860`. App: My-account sheet (globe 👤 + drawer synced via AccountUiBus; 🌐 globe stays globe, 👤+☰=avatar with versioned cache-bust URL), meta.uploader stamp, login-restore of My uploads (with delete/edit token). APKs `account-phase{2,3,4}-*`, final `bannerlator-account-phase4-dfd2426`. **▶️ NEXT: user device-tests account + community-sharing builds → cut `2.6-pre2`.** Full detail [[project_bannerlator_bannerhub_config_crossuse]] "👤 ACCOUNT SYSTEM".
+
+## 2026-07-11 — 🔀 PR #84 (isygold) VEGAS config-dialog — REVIEW RESOLVED, READY TO MERGE, ⏸️ DEFERRED
+
+> **`The412Banner/Bannerlator` #84 by isygold — "remove duplicate VEGAS DX wrapper entry + add delete/local-install/progress-bar to VEGAS config dialog". Base `main`, head `2c1ab8a`, +139/-21, 4 files, mergeable=CLEAN. Both of our review points are now RESOLVED and it re-verifies compile-clean against today's main. ⏸️ MERGE DEFERRED by user — pick back up AFTER the account-system feature + current community-game-configs work.**
+>
+> **Review loop closed.** Owner review posted (2026-07-11 14:45) raised: (#1 BLOCK) the DXVK_CONFIG_FILE guard also dropped `DXVK_FRAME_RATE` DXVK-wide, and (#3) `findActivity()!!` hard-assert. isygold replied 21:54 + fixed both in tip **`2c1ab8a`** ("separate DXVK_FRAME_RATE from config file guard + soft findActivity null check"). Diff confirms: `DXVK_FRAME_RATE` now `put` OUTSIDE the `!hasConfigFile` guard (only the inline `DXVK_CONFIG` vegas-defaults string is skipped for a custom `.conf` — deliberate, user's file owns those keys); `val activity = context.findActivity() ?: return`.
+>
+> **Re-verified compile-clean vs today's `origin/main`** (main moved since the Jul-8 PR; git-CLEAN only proves textual): all referenced symbols exist w/ matching sigs — `InstallFailedReason` = exactly the **8 values** the exhaustive `when` maps (no `else` → compiles); `Downloader.ProgressListener{onProgress(float)}`+3-arg `downloadFile`; `ContentsManager.getProfiles/removeContent/syncContents`; `DXVKConfigDialog.loadVegasVersionList/loadDxvkVersionList/parseConfig/setEnvVars`; `InAppFilePicker.WCP/buildIntent/pickedUri`; `ContentProfile.verName`+`CONTENT_TYPE_VEGAS`. New Kt adds no imports — all pre-exist in `ContainerDetailScreen.kt`; `LinearProgressIndicator` resolves via `material3.*` wildcard. **⚠️ NOT CI-compiled** (fork PR = no checks); static verification only — real compile fires on merge or via an in-repo staging branch.
+>
+> **Non-blocking minors left as-is** (fast-follow optional): install-launcher lacks the delete path's try/finally; install doesn't advance `selectedDxvk`; double `syncContents`; deprecated M3 `LinearProgressIndicator(progress=Float)`; orphaned literal-`VEGAS` containers show blank picker till re-saved (runtime unchanged).
+>
+> **▶️ WHEN RESUMED:** merge #84 → main (app-side only, folds into 2.6-preN) OR push head to an in-repo branch for a green CI build first, then merge; optionally sweep the 5 minors. Full detail: memory [[project_pr84_vegas_review]].
+
 ## 2026-07-11 — 🌐 ONLINE SHARING FEATURE-COMPLETE — ✅ MERGED TO MAIN (`6843009d`), NOT tagged
 
 > **The whole "give back" half of community configs is built AND merged. ✅ MERGED TO MAIN (fast-forward, main tip `6843009d`, +8 commits from `feat/config-upload`). NOT tagged (still 2.6-preN). Main artifacts build dispatched: run `29166165248` (`release_number=1.0-test`). Latest APK `/sdcard/Download/bannerlator-my-uploads-v2-19e82c3-standard.apk`. User installed it, will device-test the newest UI (My-uploads v2 + 4b catalog visibility) after work. Full plan/arch: memory [[project_bannerlator_bannerhub_config_crossuse]].**
