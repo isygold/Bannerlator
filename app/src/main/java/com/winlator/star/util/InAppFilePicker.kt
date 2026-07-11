@@ -26,6 +26,7 @@ object InAppFilePicker {
     val SAVE = arrayOf("zip", "tzst", "zst", "xz", "tar")           // exported save archives
     val SF2 = arrayOf("sf2")                                        // MIDI sound fonts
     val SHORTCUT = arrayOf("exe", "desktop", "lnk")                 // shortcut import sources
+    val JSON = arrayOf("json")                                      // community config files (import)
 
     /**
      * @param extensions allowed lowercase extensions without the dot (e.g. arrayOf("wcp","zst")).
