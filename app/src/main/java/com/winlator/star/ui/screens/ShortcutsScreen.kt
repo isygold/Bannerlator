@@ -1826,6 +1826,9 @@ private fun CommunityCatalogBrowser(
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
+            // Outline the whole popup so the panel reads as a distinct bordered box (like the cards)
+            // instead of bleeding edge-to-edge into the background behind the dialog.
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         ) {
             // Game-list controls (device line + search + filter/sort chips + count). Extracted as a
             // local composable so portrait (stacked) and landscape (left column) share one definition.
@@ -2515,6 +2518,9 @@ private fun CommunityConfigDetailDialog(
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
+            // Outline the whole popup so the panel reads as a distinct bordered box (like the cards)
+            // instead of bleeding edge-to-edge into the background behind the dialog.
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         ) {
             Column {
                 Row(
