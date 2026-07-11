@@ -854,6 +854,10 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         val dismiss = { communityTarget = null; communityResult = null }
         AlertDialog(
             onDismissRequest = dismiss,
+            // Drop the dialog surface a notch below the cards' surfaceContainer fill so the config
+            // cards + their 1dp outline separate from the background the same way the game/container
+            // cards do on the main screen (default surfaceContainerHigh washed the outline out).
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             title = { Text("Community configs") },
             text = {
                 val result = communityResult
