@@ -852,12 +852,17 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // Community configs dialog (Phase 1 — match + suggest, read-only)
     if (!communityDialogsGated) communityTarget?.let { s ->
         val dismiss = { communityTarget = null; communityResult = null }
+        val communityDialogShape = RoundedCornerShape(28.dp)
         AlertDialog(
             onDismissRequest = dismiss,
             // Drop the dialog surface a notch below the cards' surfaceContainer fill so the config
             // cards + their 1dp outline separate from the background the same way the game/container
             // cards do on the main screen (default surfaceContainerHigh washed the outline out).
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = communityDialogShape,
+            // Outline the whole dialog box (AlertDialog has no border param) so it reads as a bordered
+            // panel like the catalog browser, matched to the dialog's rounded shape.
+            modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outline, communityDialogShape),
             title = { Text("Community configs") },
             text = {
                 val result = communityResult
