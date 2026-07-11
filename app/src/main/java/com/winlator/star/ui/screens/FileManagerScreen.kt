@@ -662,6 +662,7 @@ fun FileManagerScreen(
                 DropdownMenu(
                     expanded = showDriveMenu,
                     onDismissRequest = { showDriveMenu = false },
+                    modifier = Modifier.outlinedMenuCard(),
                 ) {
                     DropdownMenuItem(
                         text = { Text("Drive C:") },
@@ -678,6 +679,7 @@ fun FileManagerScreen(
                             }
                         },
                     )
+                    MenuItemDivider()
                     DropdownMenuItem(
                         text = { Text("Drive Z:") },
                         leadingIcon = {
@@ -689,6 +691,7 @@ fun FileManagerScreen(
                         },
                     )
                     drives.forEach { (label, dir) ->
+                        MenuItemDivider()
                         DropdownMenuItem(
                             text = { Text(label) },
                             leadingIcon = {

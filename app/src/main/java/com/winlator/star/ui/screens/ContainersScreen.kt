@@ -617,32 +617,38 @@ private fun ContainerItem(
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false },
+                    modifier = Modifier.outlinedMenuCard(),
                 ) {
                     DropdownMenuItem(
                         text = { Text("Edit") },
                         leadingIcon = { Icon(Icons.Filled.Edit, null) },
                         onClick = { menuExpanded = false; onEdit() },
                     )
+                    MenuItemDivider()
                     DropdownMenuItem(
                         text = { Text("Duplicate") },
                         leadingIcon = { Icon(Icons.Filled.ContentCopy, null) },
                         onClick = { menuExpanded = false; onDuplicate() },
                     )
+                    MenuItemDivider()
                     DropdownMenuItem(
                         text = { Text("Remove") },
                         leadingIcon = { Icon(Icons.Filled.Delete, null) },
                         onClick = { menuExpanded = false; onRemove() },
                     )
+                    MenuItemDivider()
                     DropdownMenuItem(
                         text = { Text("Export") },
                         leadingIcon = { Icon(Icons.Filled.FileUpload, null) },
                         onClick = { menuExpanded = false; onExport() },
                     )
+                    MenuItemDivider()
                     DropdownMenuItem(
                         text = { Text("Backup / Restore save") },
                         leadingIcon = { Icon(Icons.Filled.SettingsBackupRestore, null) },
                         onClick = { menuExpanded = false; onBackupRestore() },
                     )
+                    MenuItemDivider()
                     DropdownMenuItem(
                         text = { Text("Info") },
                         leadingIcon = { Icon(Icons.Filled.Info, null) },

@@ -8,7 +8,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -212,22 +211,18 @@ fun ContentDownloadSheet(
                             Icon(Icons.Filled.FolderOpen, contentDescription = "Install from file",
                                 tint = MaterialTheme.colorScheme.primary)
                         }
-                        // Outlined-card look to match the content rows / FileManager idiom (this
-                        // Material3 build has no DropdownMenu shape/border params, so style the content).
-                        val menuShape = RoundedCornerShape(10.dp)
+                        // Outlined-card look to match the content rows / FileManager idiom (shared
+                        // helper — this Material3 build has no DropdownMenu shape/border params).
                         DropdownMenu(
                             expanded = showPickMenu,
                             onDismissRequest = { showPickMenu = false },
-                            modifier = Modifier
-                                .clip(menuShape)
-                                .background(MaterialTheme.colorScheme.surfaceContainer)
-                                .border(1.dp, MaterialTheme.colorScheme.outline, menuShape),
+                            modifier = Modifier.outlinedMenuCard(),
                         ) {
                             DropdownMenuItem(text = { Text("Browse files") }, onClick = {
                                 showPickMenu = false
                                 filePicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.WCP, "Select content file"))
                             })
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                            MenuItemDivider()
                             DropdownMenuItem(text = { Text("Pick via system…") }, onClick = {
                                 showPickMenu = false
                                 filePicker.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
