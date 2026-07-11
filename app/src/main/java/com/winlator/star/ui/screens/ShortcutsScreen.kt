@@ -1379,6 +1379,11 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 showMyAccount = false
                 openMyUploads()
             },
+            onLoggedIn = {
+                // Phase 4 (cross-device recovery): if the My-uploads sheet is already open behind the
+                // account dialog, reload it so the just-restored entries appear immediately.
+                if (showMyUploads) vm.loadMyUploads { myUploads = it }
+            },
         )
     }
 
@@ -1827,6 +1832,7 @@ private fun MyAccountDialog(
     vm: ShortcutsViewModel,
     onDismiss: () -> Unit,
     onOpenMyUploads: () -> Unit,
+    onLoggedIn: () -> Unit,
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -2154,6 +2160,9 @@ private fun MyAccountDialog(
                                                 account = AccountManager.current(context)
                                                 AccountUiBus.refresh(context)
                                                 password = ""
+                                                // Phase 4: the login already folded the account's uploads into
+                                                // the local store — refresh My uploads if that sheet is open.
+                                                onLoggedIn()
                                                 Toast.makeText(context, "Signed in.", Toast.LENGTH_SHORT).show()
                                             }
                                             is AccountManager.AccountResult.Error ->

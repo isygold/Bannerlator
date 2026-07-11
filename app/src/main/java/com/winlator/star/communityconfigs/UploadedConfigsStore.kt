@@ -54,6 +54,27 @@ object UploadedConfigsStore {
         persist(context, current)
     }
 
+    /**
+     * PHASE 4 (optional accounts) — CROSS-DEVICE RECOVERY. Fold [records] (rebuilt from an account's
+     * server-side upload registry at login) into the local store, deduped by [UploadedConfig.sha]. Any
+     * record whose sha is already present is skipped — the existing LOCAL record is kept as-is (it may
+     * carry richer provenance than the login-derived one). New shas are appended. Write-through to BOTH
+     * the SP cache and the durable manifest. Best-effort and never throws; call off the main thread.
+     */
+    fun merge(context: Context, records: List<UploadedConfig>) {
+        if (records.isEmpty()) return
+        val current = all(context).toMutableList()
+        val known = current.mapTo(HashSet()) { it.sha }
+        var changed = false
+        for (r in records) {
+            if (r.sha.isBlank() || r.sha in known) continue
+            current.add(r)
+            known.add(r.sha)
+            changed = true
+        }
+        if (changed) persist(context, current)
+    }
+
     /** Remove the record with [sha] from both the SP cache and the manifest. */
     fun remove(context: Context, sha: String) {
         val current = all(context).filterNot { it.sha == sha }

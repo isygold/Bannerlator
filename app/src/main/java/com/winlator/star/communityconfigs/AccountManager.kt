@@ -53,13 +53,28 @@ object AccountManager {
         val recoveryKey: String,
     )
 
-    /** Payload of a successful {@code /account/login} — includes the profile + the user's upload shas. */
+    /** Payload of a successful {@code /account/login} — includes the profile + the user's upload registry. */
     data class LoginData(
         val userId: String,
         val username: String,
         val session: String,
         val avatarUrl: String?,
-        val uploads: List<String>,
+        val uploads: List<AccountUpload>,
+    )
+
+    /**
+     * One entry in the account's server-side upload registry (returned by {@code /account/login}). Carries
+     * everything the client needs to restore a "My uploads" row on a fresh device: [sha] the worker key,
+     * [game]/[filename] the identity, [token] the {@code upload_token} that minted it (so delete / edit-
+     * description work again after recovery), and [ts] the UNIX-SECONDS upload time (0 when the worker
+     * omitted it). Display-only provenance (soc/device) is parsed from [filename] by the caller.
+     */
+    data class AccountUpload(
+        val sha: String,
+        val game: String,
+        val filename: String,
+        val token: String,
+        val ts: Long,
     )
 
     /** Payload of a successful {@code /account/reset} — the fresh [session] the new password minted. */
@@ -112,9 +127,28 @@ object AccountManager {
         val resp = post("$BASE/account/login", body)
         val json = parseOk(resp) ?: return errorFrom(resp)
         val avatar = json.optString("avatarUrl", "").trim().ifBlank { null }
-        val uploads = ArrayList<String>()
+        val uploads = ArrayList<AccountUpload>()
         json.optJSONArray("uploads")?.let { arr ->
-            for (i in 0 until arr.length()) arr.optString(i, "").trim().takeIf { it.isNotEmpty() }?.let(uploads::add)
+            for (i in 0 until arr.length()) {
+                // Entries are objects {sha,game,filename,token,ts}; tolerate a bare-sha string form too.
+                val obj = arr.optJSONObject(i)
+                if (obj != null) {
+                    val sha = obj.optString("sha", "").trim()
+                    if (sha.isEmpty()) continue
+                    uploads.add(
+                        AccountUpload(
+                            sha = sha,
+                            game = obj.optString("game", "").trim(),
+                            filename = obj.optString("filename", "").trim(),
+                            token = obj.optString("token", "").trim(),
+                            ts = obj.optLong("ts", 0L),
+                        )
+                    )
+                } else {
+                    val sha = arr.optString(i, "").trim()
+                    if (sha.isNotEmpty()) uploads.add(AccountUpload(sha, "", "", "", 0L))
+                }
+            }
         }
         val data = LoginData(
             userId = json.optString("user_id", "").trim(),

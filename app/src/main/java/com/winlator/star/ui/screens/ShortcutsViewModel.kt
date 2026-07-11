@@ -483,7 +483,11 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * PHASE 2 (optional accounts) — LOGIN. Sign in off the main thread; on success the session is already
-     * persisted locally by [AccountManager.login]. Delivered on the main thread.
+     * persisted locally by [AccountManager.login]. PHASE 4 (cross-device recovery): on success we also fold
+     * the account's server-side upload registry into [UploadedConfigsStore] (see [restoreUploads]) so "My
+     * uploads" — and, because each entry carries its {@code token}, the delete / edit-description actions —
+     * work on a freshly-installed device. A restore failure only logs; it never blocks the login. Delivered
+     * on the main thread.
      */
     fun loginAccount(
         username: String,
@@ -492,9 +496,66 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
-                AccountManager.login(getApplication(), username, password)
+                val res = AccountManager.login(getApplication(), username, password)
+                if (res is AccountManager.AccountResult.Success) restoreUploads(res.data.uploads)
+                res
             }
             onResult(result)
+        }
+    }
+
+    /**
+     * PHASE 4 (optional accounts) — CROSS-DEVICE RECOVERY. Rebuild [UploadedConfig] rows from an account's
+     * server-side [uploads] registry and [UploadedConfigsStore.merge] them into the local store (dedup by
+     * sha; existing local records win). {@code token} is carried straight through so Delete / Edit work on
+     * the restored rows; {@code date} comes from the entry's {@code ts}; {@code soc}/{@code device} are a
+     * best-effort tail-parse of the filename ({@code <game>-<mfr>-<model>-<soc>-<ts>.json}) and left blank
+     * when ambiguous — they're display-only. Best-effort: any failure logs and is swallowed so it can never
+     * break login. Runs on the caller's IO context.
+     */
+    private fun restoreUploads(uploads: List<AccountManager.AccountUpload>) {
+        try {
+            if (uploads.isEmpty()) return
+            val records = uploads.mapNotNull { u ->
+                if (u.sha.isBlank()) return@mapNotNull null
+                val (soc, device) = provenanceFromFilename(u.filename)
+                UploadedConfig(
+                    game = u.game,
+                    filename = u.filename,
+                    sha = u.sha,
+                    token = u.token,
+                    soc = soc,
+                    device = device,
+                    // Registry ts is UNIX seconds; the store keeps millis (0 when the worker omitted it).
+                    date = if (u.ts > 0L) u.ts * 1000L else 0L,
+                )
+            }
+            UploadedConfigsStore.merge(getApplication(), records)
+        } catch (e: Exception) {
+            Log.w("CommunityConfigs", "Upload registry restore failed", e)
+        }
+    }
+
+    /**
+     * Best-effort split of a community-config file name — {@code <game>-<mfr>-<model>-<soc>-<unixSeconds>
+     * .json} — into display-only {@code soc} and {@code device} ("mfr model"). Fields may themselves
+     * contain hyphens, so this is only reliable from the tail: it requires an all-digits trailing segment
+     * and at least the five expected fields, and returns blanks otherwise. Never throws.
+     */
+    private fun provenanceFromFilename(filename: String): Pair<String, String> {
+        return try {
+            val base = filename.removeSuffix(".json")
+            if (base.isBlank()) return "" to ""
+            val parts = base.split("-")
+            // Need game + mfr + model + soc + ts, and the tail must be the numeric timestamp.
+            if (parts.size < 5 || parts.last().toLongOrNull() == null) return "" to ""
+            val soc = parts[parts.size - 2].trim()
+            val model = parts[parts.size - 3].trim()
+            val mfr = parts[parts.size - 4].trim()
+            val device = listOf(mfr, model).filter { it.isNotEmpty() }.joinToString(" ")
+            soc to device
+        } catch (e: Exception) {
+            "" to ""
         }
     }
 
