@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -31,6 +32,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -210,11 +212,22 @@ fun ContentDownloadSheet(
                             Icon(Icons.Filled.FolderOpen, contentDescription = "Install from file",
                                 tint = MaterialTheme.colorScheme.primary)
                         }
-                        DropdownMenu(expanded = showPickMenu, onDismissRequest = { showPickMenu = false }) {
+                        // Outlined-card look to match the content rows / FileManager idiom (this
+                        // Material3 build has no DropdownMenu shape/border params, so style the content).
+                        val menuShape = RoundedCornerShape(10.dp)
+                        DropdownMenu(
+                            expanded = showPickMenu,
+                            onDismissRequest = { showPickMenu = false },
+                            modifier = Modifier
+                                .clip(menuShape)
+                                .background(MaterialTheme.colorScheme.surfaceContainer)
+                                .border(1.dp, MaterialTheme.colorScheme.outline, menuShape),
+                        ) {
                             DropdownMenuItem(text = { Text("Browse files") }, onClick = {
                                 showPickMenu = false
                                 filePicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.WCP, "Select content file"))
                             })
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
                             DropdownMenuItem(text = { Text("Pick via system…") }, onClick = {
                                 showPickMenu = false
                                 filePicker.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -480,10 +493,16 @@ private fun InstallProgressDialog(state: InstallCardState, onClose: () -> Unit) 
     val terminal = state.phase == InstallCardPhase.DONE || state.phase == InstallCardPhase.ERROR
     Dialog(
         onDismissRequest = { if (terminal) onClose() },
-        properties = DialogProperties(dismissOnBackPress = terminal, dismissOnClickOutside = terminal),
+        // usePlatformDefaultWidth=false lets the card use the wider padding below so long .wcp names
+        // (e.g. proton-10.0-2-arm64ec-controllerfix-unixlib.wcp) get the room to wrap tidily.
+        properties = DialogProperties(
+            dismissOnBackPress = terminal,
+            dismissOnClickOutside = terminal,
+            usePlatformDefaultWidth = false,
+        ),
     ) {
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
             shape = RoundedCornerShape(10.dp),
             colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer),
             border = BorderStroke(1.dp, cs.outline),
@@ -492,7 +511,10 @@ private fun InstallProgressDialog(state: InstallCardState, onClose: () -> Unit) 
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Filled.Memory, contentDescription = null, tint = cs.primary, modifier = Modifier.size(24.dp))
                     Spacer(Modifier.width(10.dp))
+                    // weight(1f) => the title takes the full remaining width before wrapping; capped at
+                    // 2 lines with an end-ellipsis so a long name never orphans a single trailing char.
                     Text(state.title, style = MaterialTheme.typography.titleSmall, color = cs.onSurface,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(12.dp))
