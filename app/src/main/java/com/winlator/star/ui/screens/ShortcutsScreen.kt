@@ -99,6 +99,7 @@ import com.winlator.star.communityconfigs.CanonicalDevice
 import com.winlator.star.communityconfigs.CanonicalGame
 import com.winlator.star.communityconfigs.CommunityConfigApply
 import com.winlator.star.communityconfigs.CommunityConfigRef
+import com.winlator.star.communityconfigs.DeviceIdentity
 import com.winlator.star.communityconfigs.ShortcutExporter
 import com.winlator.star.communityconfigs.UploadedConfigsStore.UploadedConfig
 import com.winlator.star.communityconfigs.GameMatcher
@@ -1063,13 +1064,11 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                 style = MaterialTheme.typography.bodySmall,
                                 color = OnSurfaceVariant,
                             )
-                            result?.userHardwareLabel?.let { hw ->
-                                Text(
-                                    text = "Your device: $hw",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = OnSurfaceVariant,
-                                )
-                            }
+                            Text(
+                                text = "Your device: ${deviceHeaderLabel(DeviceIdentity.deviceModel(), result?.userHardwareLabel)}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = OnSurfaceVariant,
+                            )
                             // "Matches my device" — filters the per-config list to configs whose
                             // device/soc match your hardware. Mirrors the catalog browser's chip; enabled
                             // only when we actually detected a SoC/GPU to compare against.
@@ -2584,13 +2583,11 @@ private fun CommunityCatalogBrowser(
                     modifier = modifier,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    catalog?.hardwareLabel?.let { hw ->
-                        Text(
-                            "Your device: $hw",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = OnSurfaceVariant,
-                        )
-                    }
+                    Text(
+                        "Your device: ${deviceHeaderLabel(catalog?.deviceModel, catalog?.hardwareLabel)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = OnSurfaceVariant,
+                    )
                     OutlinedTextField(
                         value = query,
                         onValueChange = { query = it },
@@ -2729,6 +2726,7 @@ private fun CommunityCatalogBrowser(
                             userSoc = userSoc,
                             userGpu = userGpu,
                             hardwareLabel = catalog?.hardwareLabel,
+                            deviceModel = catalog?.deviceModel,
                             onPick = onPick,
                             wide = wide,
                         )
@@ -2884,6 +2882,22 @@ private fun CommunityGameRow(game: CanonicalGame, onClick: () -> Unit) {
     }
 }
 
+// Compose the "Your device" header value: "<model> · <soc/gpu>" when both slots are known, otherwise
+// the literal "Unresolved" fills whichever slot we couldn't detect — so the user can always tell which
+// value was found and which wasn't. The both-missing case collapses to a single "Unresolved" (never
+// "Unresolved · Unresolved"). Display-only; the caller decides which values to pass and this never
+// affects device matching.
+private fun deviceHeaderLabel(model: String?, hardware: String?): String {
+    val m = model?.takeIf { it.isNotBlank() }
+    val hw = hardware?.takeIf { it.isNotBlank() }
+    return when {
+        m != null && hw != null -> "$m · $hw"
+        m != null -> "$m · Unresolved"
+        hw != null -> "Unresolved · $hw"
+        else -> "Unresolved"
+    }
+}
+
 // Per-uploaded-config list for a browser-selected game: one card per config the worker returns (votes
 // desc), each whole-row-tappable → the Apply-to-game… | View-details chooser. A "Matches my device"
 // toggle filters to configs matching your hardware. Offline / bucket miss falls back to the per-device
@@ -2896,6 +2910,7 @@ private fun CommunityDevicePanel(
     userSoc: String?,
     userGpu: String?,
     hardwareLabel: String?,
+    deviceModel: String?,
     onPick: (CommunityPick) -> Unit,
     wide: Boolean,
 ) {
@@ -2924,9 +2939,11 @@ private fun CommunityDevicePanel(
             )
             CommunityStoreBadge(isSteam = game.isSteam)
         }
-        hardwareLabel?.let {
-            Text("Your device: $it", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
-        }
+        Text(
+            "Your device: ${deviceHeaderLabel(deviceModel, hardwareLabel)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = OnSurfaceVariant,
+        )
         FilterChip(
             selected = matchesMyDevice,
             onClick = { matchesMyDevice = !matchesMyDevice },

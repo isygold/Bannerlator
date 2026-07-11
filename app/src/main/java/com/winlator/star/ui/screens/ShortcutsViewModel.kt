@@ -87,6 +87,9 @@ data class CommunityCatalog(
     val userSoc: String?,
     val userGpu: String?,
     val hardwareLabel: String?,
+    // Friendly device name (manufacturer + model), DISPLAY-ONLY — shown alongside [hardwareLabel] in
+    // the "Your device" header. Never used for matching; [hardwareLabel] remains the sole match key.
+    val deviceModel: String?,
 )
 
 /**
@@ -224,7 +227,7 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
                 val games = communityRepo.getGames()
                 val userSoc = DeviceIdentity.soc()
                 val userGpu = DeviceIdentity.gpu(getApplication())
-                CommunityCatalog(games, userSoc, userGpu, userSoc ?: userGpu)
+                CommunityCatalog(games, userSoc, userGpu, userSoc ?: userGpu, DeviceIdentity.deviceModel())
             }
             onResult(catalog)
         }
@@ -242,7 +245,7 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
                 val games = communityRepo.refreshIndex() ?: return@withContext null
                 val userSoc = DeviceIdentity.soc()
                 val userGpu = DeviceIdentity.gpu(getApplication())
-                CommunityCatalog(games, userSoc, userGpu, userSoc ?: userGpu)
+                CommunityCatalog(games, userSoc, userGpu, userSoc ?: userGpu, DeviceIdentity.deviceModel())
             }
             onResult(catalog)
         }
