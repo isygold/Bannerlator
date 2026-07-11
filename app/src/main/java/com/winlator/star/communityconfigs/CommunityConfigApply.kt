@@ -47,7 +47,13 @@ object CommunityConfigApply {
     /** Advisory only — surfaced to the user but NEVER written to the shortcut (container-scoped). */
     val ADVISORY_ONLY_KEYS: List<String> = listOf("wineVersion")
 
-    /** Composite-config sub-keys that a merge is allowed to replace; all others are preserved. */
+    /**
+     * Historical documentation of the dxwrapper/graphicsDriver sub-keys a merge replaces. The
+     * dxwrapperConfig merge is no longer limited to this set — a Bannerlator-origin config carries the
+     * FULL dxwrapperConfig, so ANY of its sub-keys (async, vulkanVersion, and any other DXVK tuning knob)
+     * may be written. It is still a preserve-others merge: only the sub-keys the config actually carries
+     * are replaced; every sub-key the target already has and the config does not is preserved.
+     */
     val MERGE_SUBKEYS: List<String> = listOf("version", "vkd3dVersion", "async", "graphics")
 
     /**
@@ -208,7 +214,9 @@ object CommunityConfigApply {
             setScalar(shortcut, key, value, changed, commit)
         }
 
-        // dxwrapperConfig — comma k=v list; merge ONLY version / vkd3dVersion / async, preserve the rest.
+        // dxwrapperConfig — comma k=v list. version / vkd3dVersion take the component-resolution path
+        // (they map to installed builds); every OTHER carried sub-key (async, vulkanVersion, …) is merged
+        // directly. Still a preserve-others merge: sub-keys the config doesn't carry are left untouched.
         val dxwCurrent = currentOrDefault(shortcut, "dxwrapperConfig", shortcut.container?.getDXWrapperConfig())
         val dxwUpdates = LinkedHashMap<String, String>()
         config.dxwrapperConfig["version"]?.let { wanted ->
@@ -223,7 +231,11 @@ object CommunityConfigApply {
                 missing, ContentProfile.ContentType.CONTENT_TYPE_VKD3D,
             )?.let { dxwUpdates["vkd3dVersion"] = it }
         }
-        config.dxwrapperConfig["async"]?.let { dxwUpdates["async"] = it } // flag, always safe
+        // Every other carried sub-key (async, vulkanVersion, and any DXVK tuning knob) — direct merge.
+        for ((k, v) in config.dxwrapperConfig) {
+            if (k == "version" || k == "vkd3dVersion") continue
+            dxwUpdates[k] = v
+        }
         if (dxwUpdates.isNotEmpty()) {
             val merged = mergeList(dxwCurrent, dxwUpdates, ",")
             if (merged != dxwCurrent) {

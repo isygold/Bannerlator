@@ -55,10 +55,10 @@ class ConfigExporterTest {
 
     @Test
     fun roundTrip_blExtFields_reproduceInput() {
-        // A representative slice of the additive bl_ext overlay, plus the DXVK async flag lifted out of
-        // the comma-list. Each must read back through export → translate into the same scalar / dxw value.
+        // A representative slice of the additive bl_ext overlay, plus the FULL dxwrapperConfig comma-list
+        // (every DXVK sub-key). Each must read back through export → translate into the same scalar / dxw.
         val effective = linkedMapOf(
-            "dxwrapperConfig" to "version=2.4.1,async=1,vulkanVersion=1.3",
+            "dxwrapperConfig" to "version=2.4.1,vkd3dVersion=2.14,async=1,vulkanVersion=1.3,maxDeviceMemory=4096",
             "screenSize" to "1280x720",
             "renderer" to "Vulkan",
             "fullscreenMode" to "1",
@@ -90,11 +90,16 @@ class ConfigExporterTest {
         assertEquals("0,1,2,3,4,5,6,7", config.scalars["cpuList"])
         assertEquals("zh_CN.UTF-8", config.scalars["lc_all"])
         assertEquals("1", config.scalars["autoCloseOnExit"])
-        // async is NOT a scalar — it overlays the dxwrapperConfig sub-map, beating the "0" heuristic.
-        assertEquals("1", config.dxwrapperConfig["async"])
-        assertFalse(config.scalars.containsKey("async"))
-        // DXVK version still travels the normal pc_* path.
+        // The FULL dxwrapperConfig round-trips: version/vkd3dVersion (also via pc_*) plus every other
+        // sub-key (async beats the "0" heuristic; vulkanVersion / maxDeviceMemory travel only in bl_ext).
         assertEquals("2.4.1", config.dxwrapperConfig["version"])
+        assertEquals("2.14", config.dxwrapperConfig["vkd3dVersion"])
+        assertEquals("1", config.dxwrapperConfig["async"])
+        assertEquals("1.3", config.dxwrapperConfig["vulkanVersion"])
+        assertEquals("4096", config.dxwrapperConfig["maxDeviceMemory"])
+        // dxwrapperConfig is merged into the dxw sub-map, never leaked as a scalar.
+        assertFalse(config.scalars.containsKey("async"))
+        assertFalse(config.scalars.containsKey("dxwrapperConfig"))
     }
 
     @Test
@@ -147,8 +152,10 @@ class ConfigExporterTest {
         assertFalse(settings.has("pc_ls_GPU_DRIVER_"))
         assertFalse(settings.has("pc_ls_AUDIO_DRIVER"))
         assertFalse(settings.has("pc_ls_boot_option"))
-        assertEquals(1, root.getJSONObject("meta").getInt("settings_count"))
+        // pc_ls_DXVK plus the bl_ext block (which carries the full dxwrapperConfig string verbatim).
+        assertEquals(2, root.getJSONObject("meta").getInt("settings_count"))
         assertEquals(1, root.getJSONObject("meta").getInt("components_count"))
+        assertEquals("version=2.3.1", settings.getJSONObject("bl_ext").getString("dxwrapperConfig"))
 
         // The emitted value is a JSON STRING with a name (BannerHub shape), read back by translate.
         val dxvk = JSONObject(settings.getString("pc_ls_DXVK")).getString("name")

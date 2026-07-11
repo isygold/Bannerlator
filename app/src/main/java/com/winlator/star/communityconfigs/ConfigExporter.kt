@@ -106,13 +106,16 @@ object ConfigExporter {
         // Additive namespaced overlay — the ~28 shortcut extras the pc_* format can't carry, stored raw
         // (raw key, raw value, no transform) so ConfigTranslator can overlay them straight back. Only
         // present/non-blank fields emit a key; the whole block is omitted when nothing qualifies, so
-        // BannerHub-origin configs never gain a bl_ext object. The DXVK async flag is lifted out of the
-        // comma-list and stored alongside them under "async" (also raw).
+        // BannerHub-origin configs never gain a bl_ext object. The FULL dxwrapperConfig comma-list is
+        // carried verbatim under "dxwrapperConfig" (every DXVK sub-key: async, vulkanVersion, and any
+        // other tuning knobs) — pc_ls_DXVK/pc_ls_VK3k still carry the version tokens for install
+        // resolution; this string carries the rest. graphicsDriverConfig is deliberately NOT carried
+        // (device-specific gpuName/BCn settings must not travel with a shared config).
         val blExt = JSONObject()
         for (key in BL_EXT_KEYS) {
             effective[key].nonBlank()?.let { blExt.put(key, it) }
         }
-        subValue(dxwCfg, ",", "async")?.let { blExt.put("async", it) }
+        dxwCfg.nonBlank()?.let { blExt.put("dxwrapperConfig", it) }
         if (blExt.length() > 0) settings.put("bl_ext", blExt)
 
         val metaObj = JSONObject()

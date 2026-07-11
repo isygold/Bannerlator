@@ -147,12 +147,22 @@ object ConfigTranslator {
         // Present only on OUR exports — BannerHub-origin configs have no bl_ext, so this loop is a no-op for
         // them and they translate exactly as before. Each raw key/value overlays scalars (overriding any
         // value the pc_* heuristics inferred, e.g. an explicit emulator="box64" beats the fex inference).
-        // The lone exception is "async", which belongs in the dxwrapperConfig sub-map, not the scalars.
+        // The lone exception is "dxwrapperConfig": it is the FULL comma-delimited DXVK sub-key list, whose
+        // every sub-key (async, vulkanVersion, version, vkd3dVersion, …) is merged into the dxw sub-map
+        // (NOT scalars), overriding the heuristic async and confirming the version tokens.
         val blExt = s.optJSONObject("bl_ext")
         if (blExt != null) {
             for (key in blExt.keys()) {
                 val value = blExt.optString(key, "")
-                if (key == "async") dxw["async"] = value else scalars[key] = value
+                if (key == "dxwrapperConfig") {
+                    for (part in value.split(",")) {
+                        val eq = part.indexOf('=')
+                        if (eq <= 0) continue
+                        dxw[part.substring(0, eq).trim()] = part.substring(eq + 1)
+                    }
+                } else {
+                    scalars[key] = value
+                }
             }
         }
 
