@@ -117,7 +117,17 @@ BannerHub's pattern) and `POST /comment` (`device = MANUFACTURER_MODEL`). Trivia
 go through the worker (we then have `sha`/`game`/`filename`).
 
 **Track 3 — uploads (reverse of `ConfigTranslator`).** Emit a `{meta, settings, components}` file FROM a
-Bannerlator shortcut, base64, `POST /upload`. **Rules for clean interop:**
+Bannerlator shortcut, base64, `POST /upload`.
+
+> **⚠️ SUPERSEDED where noted (decision 2026-07-10, reaffirmed 2026-07-11):** the "so BannerHub can also
+> read our uploads" / "one shared repo, app_source separation" framing below is the OLD plan. FINAL
+> architecture = a SEPARATE repo `bannerlator-game-configs` + worker **ns-routing** (`?ns=bannerlator`).
+> BannerHub must NEVER see Bannerlator configs (asymmetric visibility); Bannerlator reads BOTH repos and
+> merges; BannerHub reads only its own (never passes `ns`, code untouched). Uploads go ONLY to our repo.
+> `app_source="bannerlator"` still stamped (purge/labels), but repo isolation — not app_source alone — is
+> what hides our configs from BannerHub. See `project_bannerlator_bannerhub_config_crossuse` "🚀 STEP 3 PLAN".
+
+**Rules for clean interop:**
 1. **`meta.app_source = "bannerlator"`** (distinct value) so `/admin/purge` can manage our uploads
    independently and BannerHub's purge never touches them. NEVER write `"bannerhub"`.
 2. Emit the GameHub `pc_*` keys (so BannerHub can also read our uploads) by reversing `ConfigTranslator`
