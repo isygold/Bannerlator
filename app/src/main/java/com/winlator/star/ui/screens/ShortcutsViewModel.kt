@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.winlator.star.communityconfigs.AccountManager
 import com.winlator.star.communityconfigs.CanonicalDevice
 import com.winlator.star.communityconfigs.CanonicalGame
 import com.winlator.star.communityconfigs.CommunityConfigApply
@@ -434,7 +435,10 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
 
             val ok = withContext(Dispatchers.IO) {
                 val b64 = Base64.encodeToString(res.json.toByteArray(), Base64.NO_WRAP)
-                val uploaded = CommunityConfigWorker.upload(res.game, res.fileName, b64, token)
+                // Attribute the upload to the signed-in account when logged in (Phase 2); null = anonymous.
+                // The uploader name/avatar is already stamped into res.json's meta by ShortcutExporter.
+                val session = AccountManager.session(app)
+                val uploaded = CommunityConfigWorker.upload(res.game, res.fileName, b64, token, session = session)
                     ?: return@withContext false
                 // Replace confirmed: retire the previous upload (best-effort — ignore failure).
                 if (existing != null) {
@@ -456,6 +460,59 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (ok) onResult(true, "Shared \"${res.game}\" with the community.")
             else onResult(false, "Upload failed — check your connection and try again.")
+        }
+    }
+
+    /**
+     * PHASE 2 (optional accounts) — CREATE. Register a new account off the main thread; on success
+     * [AccountManager.createAccount] has already persisted the session + recovery backup locally, so the
+     * UI only needs the [AccountManager.CreateData] to show the one-time recovery key. Delivered on main.
+     */
+    fun createAccount(
+        username: String,
+        password: String,
+        onResult: (AccountManager.AccountResult<AccountManager.CreateData>) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                AccountManager.createAccount(getApplication(), username, password)
+            }
+            onResult(result)
+        }
+    }
+
+    /**
+     * PHASE 2 (optional accounts) — LOGIN. Sign in off the main thread; on success the session is already
+     * persisted locally by [AccountManager.login]. Delivered on the main thread.
+     */
+    fun loginAccount(
+        username: String,
+        password: String,
+        onResult: (AccountManager.AccountResult<AccountManager.LoginData>) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                AccountManager.login(getApplication(), username, password)
+            }
+            onResult(result)
+        }
+    }
+
+    /**
+     * PHASE 2 (optional accounts) — RESET. Reset the password with the recovery key off the main thread;
+     * on success [AccountManager.resetPassword] logs the user in with the fresh session. Delivered on main.
+     */
+    fun resetAccountPassword(
+        username: String,
+        recoveryKey: String,
+        newPassword: String,
+        onResult: (AccountManager.AccountResult<AccountManager.ResetData>) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                AccountManager.resetPassword(getApplication(), username, recoveryKey, newPassword)
+            }
+            onResult(result)
         }
     }
 

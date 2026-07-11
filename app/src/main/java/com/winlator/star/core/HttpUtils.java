@@ -73,6 +73,56 @@ public abstract class HttpUtils {
         Executors.newSingleThreadExecutor().execute(() -> postAsync(url, jsonBody, onComplete));
     }
 
+    /**
+     * The HTTP status code plus the raw response body (input OR error stream) of a POST. Unlike
+     * {@link #post}, the body is surfaced even on a non-2xx status so callers can read a JSON
+     * {@code {error}} field (the account endpoints return typed error codes that way). [body] may be
+     * null when the connection itself failed; [code] is then 0.
+     */
+    public static final class HttpResponse {
+        public final int code;
+        public final String body;
+        public HttpResponse(int code, String body) {
+            this.code = code;
+            this.body = body;
+        }
+    }
+
+    private static void postWithStatusAsync(String url, String jsonBody, Callback<HttpResponse> onComplete) {
+        try {
+            HttpURLConnection connection = (HttpURLConnection)(new URL(url)).openConnection();
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("User-Agent", "Bannerlator");
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setDoOutput(true);
+            try (OutputStream outStream = connection.getOutputStream()) {
+                outStream.write(jsonBody.getBytes(StandardCharsets.UTF_8));
+            }
+
+            int code = connection.getResponseCode();
+            InputStream inStream = (code >= 200 && code < 300)
+                    ? connection.getInputStream() : connection.getErrorStream();
+            String body = null;
+            if (inStream != null) {
+                try (InputStream in = inStream) {
+                    body = new String(StreamUtils.copyToByteArray(in), StandardCharsets.UTF_8);
+                }
+            }
+            onComplete.call(new HttpResponse(code, body));
+        }
+        catch (Exception e) {
+            onComplete.call(new HttpResponse(0, null));
+        }
+    }
+
+    /**
+     * POST a JSON body and hand back BOTH the status code and the response body (2xx or not), so the
+     * caller can read a typed {@code {error}} on a rejection. Runs off the calling thread.
+     */
+    public static void postWithStatus(final String url, final String jsonBody, final Callback<HttpResponse> onComplete) {
+        Executors.newSingleThreadExecutor().execute(() -> postWithStatusAsync(url, jsonBody, onComplete));
+    }
+
     private static void downloadAsync(String url, File destination, AtomicBoolean interruptRef, Callback<Integer> onPublishProgress, Callback<Boolean> onDownloadComplete) {
         try {
             interruptRef.set(false);

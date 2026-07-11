@@ -74,6 +74,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
@@ -94,6 +95,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import com.winlator.star.communityconfigs.AccountManager
 import com.winlator.star.communityconfigs.CanonicalDevice
 import com.winlator.star.communityconfigs.CanonicalGame
 import com.winlator.star.communityconfigs.CommunityConfigApply
@@ -131,11 +133,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
@@ -264,6 +269,9 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // the expanded row's inline description editor shares uploadDescText / uploadDescLoading (reloaded on
     // expand). deleteUploadRow drives the delete-confirm sub-dialog.
     var showMyUploads by remember { mutableStateOf(false) }
+    // Phase 2 (optional accounts) — the "My account" sheet. Opened from the globe browser's person icon;
+    // hosts create/login/reset when logged out and profile + "My uploads" + "Log out" when signed in.
+    var showMyAccount by remember { mutableStateOf(false) }
     var myUploads by remember { mutableStateOf<List<MyUploadRow>?>(null) }
     var deleteUploadRow by remember { mutableStateOf<MyUploadRow?>(null) }
     var expandedUploadSha by remember { mutableStateOf<String?>(null) }
@@ -501,13 +509,15 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             InAppFilePicker.buildIntent(context, InAppFilePicker.JSON, "Select a config .json")
         )
     }
-    // Open the My-uploads manager (shared by the per-game dialog button AND the globe browser's header).
+    // Open the My-uploads manager (shared by the per-game dialog button AND the My-account sheet).
     val openMyUploads: () -> Unit = {
         myUploads = null
         expandedUploadSha = null
         showMyUploads = true
         vm.loadMyUploads { myUploads = it }
     }
+    // Open the My-account sheet (Phase 2), the globe browser's person-icon entry point.
+    val openMyAccount: () -> Unit = { showMyAccount = true }
 
     val topBarActions = LocalTopBarActions.current
     // LaunchedEffect — not SideEffect — so this runs in the same dispatcher queue as
@@ -1346,8 +1356,21 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             onDismiss = { showCommunityBrowser = false },
             // No in-context shortcut from the browser (null) → chooser's "Apply to game…" runs the picker.
             onPick = { pick -> configAction = pick to null },
-            // My uploads — the global entry point (same manager the per-game dialog opens).
-            onMyUploads = openMyUploads,
+            // My account — the global entry point (Phase 2); the sheet hosts the "My uploads" button.
+            onMyAccount = openMyAccount,
+        )
+    }
+
+    // Phase 2 (optional accounts) — the My-account sheet. Its "My uploads" button dismisses this and opens
+    // the existing My-uploads manager (the per-game dialog still opens My uploads directly, unchanged).
+    if (showMyAccount) {
+        MyAccountDialog(
+            vm = vm,
+            onDismiss = { showMyAccount = false },
+            onOpenMyUploads = {
+                showMyAccount = false
+                openMyUploads()
+            },
         )
     }
 
@@ -1738,6 +1761,329 @@ private fun CommunityStoreBadge(isSteam: Boolean) {
     }
 }
 
+// Map a worker account error code to a human message. Reset reads "invalid" as a bad recovery key; every
+// other flow reads it as bad credentials; unknown / "network" collapses to a connection message.
+private fun accountErrorMessage(code: String, isReset: Boolean): String = when (code) {
+    "invalid_username" -> "Usernames are 3–20 characters: letters, numbers, _ or -."
+    "username_reserved" -> "That username is reserved — pick another."
+    "weak_password" -> "Password must be at least 6 characters."
+    "username_taken" -> "That username is taken."
+    "rate_limited" -> "Too many attempts — please wait a bit and try again."
+    "invalid" -> if (isReset) "That recovery key isn't right for this username." else "Wrong username or password."
+    else -> "Couldn't reach the server. Check your connection and try again."
+}
+
+// Phase 2 (optional accounts) — the "My account" sheet. Accounts are OPTIONAL: they only let a user
+// recover / attribute the community configs they share. Styled like the other community dialogs (outlined
+// box, orange accent). Three states:
+//  - LOGGED OUT: a Create / Login tab pair, plus a "Forgot password?" reset (username + recovery key +
+//    new password). Passwords go only to the worker over HTTPS — never logged, never stored locally.
+//  - AFTER CREATE: the one-time recovery key with a Copy button + an "I've saved it" confirm.
+//  - LOGGED IN: the username, a person-icon avatar placeholder (real image = Phase 3), "Show my recovery
+//    key", "My uploads", and "Log out".
+@Composable
+private fun MyAccountDialog(
+    vm: ShortcutsViewModel,
+    onDismiss: () -> Unit,
+    onOpenMyUploads: () -> Unit,
+) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val shape = RoundedCornerShape(28.dp)
+    val orange = Color(0xFFE0701C)
+
+    // Local mirror of the (non-Compose) AccountManager state; re-read after every action that changes it.
+    var account by remember { mutableStateOf(AccountManager.current(context)) }
+    // Non-null right after a successful create → show the one-time recovery key before anything else.
+    var justCreated by remember { mutableStateOf<AccountManager.CreateData?>(null) }
+
+    // Shared form state (logged-out). Passwords live ONLY in this transient field state, never persisted.
+    var tab by remember { mutableStateOf(0) } // 0 = Create, 1 = Login
+    var showReset by remember { mutableStateOf(false) }
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var recoveryKeyInput by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    // Logged-in: reveal the saved recovery key on demand.
+    var revealRecovery by remember { mutableStateOf(false) }
+
+    @Composable
+    fun ErrorText() {
+        error?.let {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = shape,
+        modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outline, shape),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Filled.AccountCircle, contentDescription = null, tint = orange)
+                Text("My account")
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                when {
+                    // --- AFTER CREATE: one-time recovery key ---------------------------------------
+                    justCreated != null -> {
+                        val data = justCreated!!
+                        Text(
+                            "Account \"${data.username}\" created.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = OnSurface,
+                        )
+                        Text("Your recovery key", style = MaterialTheme.typography.labelLarge, color = orange)
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, orange),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                data.recoveryKey,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = OnSurface,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            )
+                        }
+                        Text(
+                            "⚠️ Save this — it's the only way to reset your password if you forget it.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnSurfaceVariant,
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = {
+                                clipboard.setText(AnnotatedString(data.recoveryKey))
+                                Toast.makeText(context, "Recovery key copied.", Toast.LENGTH_SHORT).show()
+                            }) {
+                                Icon(Icons.Filled.ContentCopy, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Copy")
+                            }
+                            Spacer(Modifier.weight(1f))
+                            Button(onClick = {
+                                justCreated = null
+                                account = AccountManager.current(context)
+                            }) { Text("I've saved it") }
+                        }
+                    }
+
+                    // --- LOGGED IN: profile + actions ---------------------------------------------
+                    account != null -> {
+                        val acc = account!!
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Icon(
+                                Icons.Filled.AccountCircle,
+                                contentDescription = null,
+                                tint = orange,
+                                modifier = Modifier.size(44.dp),
+                            )
+                            Text(
+                                acc.username,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = OnSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Divider(color = DividerColor)
+                        OutlinedButton(
+                            onClick = { revealRecovery = !revealRecovery },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(if (revealRecovery) "Hide my recovery key" else "Show my recovery key") }
+                        if (revealRecovery) {
+                            val key = AccountManager.recoveryKey(context)
+                            if (key != null) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceContainer,
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = BorderStroke(1.dp, orange),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp).fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(key, style = MaterialTheme.typography.titleMedium, color = OnSurface, modifier = Modifier.weight(1f))
+                                        IconButton(onClick = {
+                                            clipboard.setText(AnnotatedString(key))
+                                            Toast.makeText(context, "Recovery key copied.", Toast.LENGTH_SHORT).show()
+                                        }) { Icon(Icons.Filled.ContentCopy, contentDescription = "Copy recovery key", modifier = Modifier.size(18.dp)) }
+                                    }
+                                }
+                            } else {
+                                Text(
+                                    "No recovery key is saved on this device.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = OnSurfaceVariant,
+                                )
+                            }
+                        }
+                        OutlinedButton(onClick = onOpenMyUploads, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Filled.CloudUpload, null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("My uploads")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                AccountManager.logout(context)
+                                account = null
+                                revealRecovery = false
+                                username = ""; password = ""; error = null
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Log out") }
+                    }
+
+                    // --- LOGGED OUT: reset flow ---------------------------------------------------
+                    showReset -> {
+                        Text("Reset password", style = MaterialTheme.typography.labelLarge, color = orange)
+                        Text(
+                            "Enter your username, your recovery key, and a new password.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = OnSurfaceVariant,
+                        )
+                        OutlinedTextField(
+                            value = username,
+                            onValueChange = { username = it; error = null },
+                            label = { Text("Username") },
+                            singleLine = true,
+                            enabled = !busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = recoveryKeyInput,
+                            onValueChange = { recoveryKeyInput = it; error = null },
+                            label = { Text("Recovery key") },
+                            singleLine = true,
+                            enabled = !busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = newPassword,
+                            onValueChange = { newPassword = it; error = null },
+                            label = { Text("New password") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            enabled = !busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        ErrorText()
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = { showReset = false; error = null }, enabled = !busy) { Text("Back") }
+                            Spacer(Modifier.weight(1f))
+                            Button(
+                                enabled = !busy && username.isNotBlank() && recoveryKeyInput.isNotBlank() && newPassword.isNotBlank(),
+                                onClick = {
+                                    busy = true; error = null
+                                    vm.resetAccountPassword(username.trim(), recoveryKeyInput.trim(), newPassword) { result ->
+                                        busy = false
+                                        when (result) {
+                                            is AccountManager.AccountResult.Success -> {
+                                                account = AccountManager.current(context)
+                                                showReset = false
+                                                password = ""; newPassword = ""; recoveryKeyInput = ""
+                                                Toast.makeText(context, "Password reset — you're signed in.", Toast.LENGTH_SHORT).show()
+                                            }
+                                            is AccountManager.AccountResult.Error ->
+                                                error = accountErrorMessage(result.code, isReset = true)
+                                        }
+                                    }
+                                },
+                            ) { if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp) else Text("Reset") }
+                        }
+                    }
+
+                    // --- LOGGED OUT: create / login tabs ------------------------------------------
+                    else -> {
+                        TabRow(selectedTabIndex = tab, containerColor = Color.Transparent, contentColor = orange) {
+                            Tab(selected = tab == 0, onClick = { tab = 0; error = null }, text = { Text("Create") })
+                            Tab(selected = tab == 1, onClick = { tab = 1; error = null }, text = { Text("Log in") })
+                        }
+                        OutlinedTextField(
+                            value = username,
+                            onValueChange = { username = it; error = null },
+                            label = { Text("Username") },
+                            singleLine = true,
+                            enabled = !busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = { password = it; error = null },
+                            label = { Text("Password") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            enabled = !busy,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        if (tab == 0) {
+                            Text(
+                                "This is just to recover your shared configs — use a throwaway password, not one you use elsewhere.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = OnSurfaceVariant,
+                            )
+                        }
+                        ErrorText()
+                        Button(
+                            enabled = !busy && username.isNotBlank() && password.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                busy = true; error = null
+                                if (tab == 0) {
+                                    vm.createAccount(username.trim(), password) { result ->
+                                        busy = false
+                                        when (result) {
+                                            is AccountManager.AccountResult.Success -> {
+                                                justCreated = result.data
+                                                password = ""
+                                            }
+                                            is AccountManager.AccountResult.Error ->
+                                                error = accountErrorMessage(result.code, isReset = false)
+                                        }
+                                    }
+                                } else {
+                                    vm.loginAccount(username.trim(), password) { result ->
+                                        busy = false
+                                        when (result) {
+                                            is AccountManager.AccountResult.Success -> {
+                                                account = AccountManager.current(context)
+                                                password = ""
+                                                Toast.makeText(context, "Signed in.", Toast.LENGTH_SHORT).show()
+                                            }
+                                            is AccountManager.AccountResult.Error ->
+                                                error = accountErrorMessage(result.code, isReset = false)
+                                        }
+                                    }
+                                }
+                            },
+                        ) {
+                            if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            else Text(if (tab == 0) "Create account" else "Log in")
+                        }
+                        TextButton(
+                            onClick = { showReset = true; error = null },
+                            enabled = !busy,
+                            modifier = Modifier.align(Alignment.End),
+                        ) { Text("Forgot password? Reset with recovery key") }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = { if (!busy) onDismiss() }) { Text("Close") } },
+    )
+}
+
 // One missing-component row on the "Config applied" screen — the SMART inline installer. Resolves the
 // config's wanted version against the downloadable catalog and offers the shortest path:
 //  - exact match  → "Install" → a small confirm → inline download+install → auto-apply → checkmark.
@@ -2071,7 +2417,7 @@ private fun CommunityCatalogBrowser(
     vm: ShortcutsViewModel,
     onDismiss: () -> Unit,
     onPick: (CommunityPick) -> Unit,
-    onMyUploads: () -> Unit,
+    onMyAccount: () -> Unit,
 ) {
     val context = LocalContext.current
     var catalog by remember { mutableStateOf<CommunityCatalog?>(null) }
@@ -2249,11 +2595,11 @@ private fun CommunityCatalogBrowser(
                             }
                         }
                     }
-                    // My uploads — the global entry point to the manager (same view the per-game dialog
-                    // opens). Only at the top level. (Uploading/importing itself is a per-game action.)
+                    // My account — the global entry point (Phase 2). Opens the account sheet, which itself
+                    // hosts the "My uploads" button. Only at the top level. (Uploading/importing is per-game.)
                     if (selectedGame == null) {
-                        IconButton(onClick = onMyUploads) {
-                            Icon(Icons.Filled.AccountCircle, contentDescription = "My uploads")
+                        IconButton(onClick = onMyAccount) {
+                            Icon(Icons.Filled.AccountCircle, contentDescription = "My account")
                         }
                     }
                     IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
@@ -2768,6 +3114,21 @@ private fun CommunityConfigDetailDialog(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                         )
                     }
+                }
+            }
+            // Uploader attribution (Phase 2). A signed-in upload carries meta.uploader → "by <username>";
+            // an anonymous config has none → "Anonymous user". Real avatar image lands in Phase 3; for now
+            // a person icon placeholder.
+            if (meta != null) {
+                val uploaderLabel = meta.uploaderName?.let { "by $it" } ?: "Anonymous user"
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(
+                        Icons.Filled.Person,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = OnSurfaceVariant,
+                    )
+                    Text(uploaderLabel, style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
                 }
             }
         }

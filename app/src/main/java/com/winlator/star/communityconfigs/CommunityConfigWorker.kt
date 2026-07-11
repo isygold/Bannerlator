@@ -172,7 +172,9 @@ object CommunityConfigWorker {
     /**
      * POST `/upload?ns=` with `{game, filename, content, upload_token}` — [contentBase64] is the config
      * JSON base64-encoded. [ns] namespaces the upload into OUR repo (default "bannerlator") so BannerHub
-     * users never see it. Returns the committed [UploadResult] on success, or null on any failure.
+     * users never see it. When [session] is non-blank (the user is signed in, Phase 2) it is added so the
+     * worker registers the upload under that account; a blank/null [session] keeps the anonymous shape.
+     * Returns the committed [UploadResult] on success, or null on any failure.
      */
     fun upload(
         game: String,
@@ -180,12 +182,14 @@ object CommunityConfigWorker {
         contentBase64: String,
         uploadToken: String,
         ns: String = "bannerlator",
+        session: String? = null,
     ): UploadResult? {
         val body = JSONObject()
             .put("game", game)
             .put("filename", filename)
             .put("content", contentBase64)
             .put("upload_token", uploadToken)
+            .also { if (!session.isNullOrBlank()) it.put("session", session) }
             .toString()
         val resp = post("$BASE/upload?ns=${enc(ns)}", body) ?: return null
         return try {

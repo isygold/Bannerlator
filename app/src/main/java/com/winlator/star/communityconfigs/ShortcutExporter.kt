@@ -87,12 +87,17 @@ object ShortcutExporter {
 
         val device = Build.MANUFACTURER + " " + Build.MODEL
         val soc = DeviceIdentity.gpu(context) ?: DeviceIdentity.soc()
+        // Optional account attribution (Phase 2): stamp the signed-in username/avatar into meta.uploader
+        // when logged in; an anonymous export leaves both null (no uploader block), unchanged behaviour.
+        val account = AccountManager.current(context)
         val meta = ConfigExporter.ExportMeta(
             appSource = "bannerlator",
             device = device,
             soc = soc,
             version = BuildConfig.VERSION_NAME,
             uploadToken = newUploadToken(),
+            uploaderName = account?.username,
+            uploaderAvatarUrl = account?.avatarUrl,
         )
 
         val json = ConfigExporter.export(effective, meta)

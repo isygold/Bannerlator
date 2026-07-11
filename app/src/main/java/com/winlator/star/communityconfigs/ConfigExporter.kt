@@ -52,6 +52,8 @@ object ConfigExporter {
      *  - [version] — the app version string, written as {@code meta.bh_version} (informational).
      *  - [uploadToken] — variable-length lowercase hex, generated in the adapter (Random is fine there);
      *    embedded in {@code meta} for later describe/delete recovery.
+     *  - [uploaderName] / [uploaderAvatarUrl] — the signed-in account attribution (Phase 2), when the user
+     *    is logged in; both null for an anonymous export (no {@code meta.uploader} block is then written).
      */
     data class ExportMeta(
         val appSource: String,
@@ -59,6 +61,8 @@ object ConfigExporter {
         val soc: String?,
         val version: String?,
         val uploadToken: String,
+        val uploaderName: String? = null,
+        val uploaderAvatarUrl: String? = null,
     )
 
     /**
@@ -123,6 +127,13 @@ object ConfigExporter {
         meta.device.nonBlank()?.let { metaObj.put("device", it) }
         meta.soc.nonBlank()?.let { metaObj.put("soc", it) }
         meta.version.nonBlank()?.let { metaObj.put("bh_version", it) }
+        // Optional signed-in attribution (Phase 2). Only written when logged in; the config-detail page
+        // reads it back to show "by <username>", falling back to "Anonymous user" when it's absent.
+        meta.uploaderName.nonBlank()?.let { name ->
+            val uploader = JSONObject().put("name", name)
+            meta.uploaderAvatarUrl.nonBlank()?.let { uploader.put("avatarUrl", it) }
+            metaObj.put("uploader", uploader)
+        }
         metaObj.put("upload_token", meta.uploadToken)
         metaObj.put("settings_count", settings.length())
         metaObj.put("components_count", components.length())
