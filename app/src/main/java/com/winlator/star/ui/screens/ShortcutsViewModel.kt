@@ -89,6 +89,19 @@ data class CommunityCatalog(
 )
 
 /**
+ * One row in the "My uploads" list: the locally-recorded [record] (reinstall-proof, from the manifest)
+ * plus the LIVE [votes] / [downloads] re-read from the worker. [stillOnline] is false when the worker no
+ * longer lists this sha/filename (deleted server-side, or unreachable) — the delete path then just prunes
+ * the local record.
+ */
+data class MyUploadRow(
+    val record: UploadedConfig,
+    val votes: Int,
+    val downloads: Int,
+    val stillOnline: Boolean,
+)
+
+/**
  * Everything the read-only Community Config detail page renders — provenance ([meta]), the config in
  * our own shortcut terms ([config]), and, when a target shortcut was supplied, the non-mutating
  * pre-apply diff ([preview]). All of it comes from the same fetch+translate the apply path uses; the
@@ -381,13 +394,17 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
      * later share can offer to replace it.
      *
      * If the user already has an upload for this game, [onExisting] is invoked on the main thread with
-     * that record and a {@code proceed} lambda; the flow SUSPENDS until the UI calls {@code proceed()}
-     * (replace confirmed). On a successful replace the old upload is best-effort deleted first.
-     * [onResult] is always delivered on the main thread.
+     * that record plus a {@code proceed} and a {@code cancel} lambda; the flow SUSPENDS until the UI
+     * calls one. {@code cancel()} exits the coroutine cleanly (nothing uploaded, no result toast) rather
+     * than leaving it parked. On a confirmed replace the old upload is best-effort deleted first.
+     * [onStart] fires on the main thread the instant the actual upload begins (after any confirm), so the
+     * button can switch its busy text from "Preparing…" to "Uploading…". [onResult] is delivered on the
+     * main thread.
      */
     fun uploadShortcutConfig(
         shortcut: Shortcut,
-        onExisting: (UploadedConfig, proceed: () -> Unit) -> Unit,
+        onExisting: (UploadedConfig, proceed: () -> Unit, cancel: () -> Unit) -> Unit,
+        onStart: () -> Unit,
         onResult: (ok: Boolean, message: String) -> Unit,
     ) {
         viewModelScope.launch {
@@ -405,11 +422,15 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
 
             val existing = withContext(Dispatchers.IO) { UploadedConfigsStore.forGame(app, res.game) }
             if (existing != null) {
-                // Ask the UI to confirm the replace, then wait here until it calls proceed().
-                val gate = CompletableDeferred<Unit>()
-                onExisting(existing) { gate.complete(Unit) }
-                gate.await()
+                // Ask the UI to confirm the replace, then wait here until it calls proceed()/cancel().
+                // cancel() completes the gate with false so the coroutine unwinds instead of hanging.
+                val gate = CompletableDeferred<Boolean>()
+                onExisting(existing, { gate.complete(true) }, { gate.complete(false) })
+                if (!gate.await()) return@launch
             }
+
+            // Past the (optional) confirm — the real upload starts now, so flip the button text.
+            onStart()
 
             val ok = withContext(Dispatchers.IO) {
                 val b64 = Base64.encodeToString(res.json.toByteArray(), Base64.NO_WRAP)
@@ -435,6 +456,77 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (ok) onResult(true, "Shared \"${res.game}\" with the community.")
             else onResult(false, "Upload failed — check your connection and try again.")
+        }
+    }
+
+    /**
+     * PHASE 3 (online sharing) — MY UPLOADS. Read the user's own upload records from
+     * [UploadedConfigsStore] (which hydrates from the durable manifest on a fresh install, so this list
+     * survives a reinstall), then re-read each one's LIVE votes / downloads from the worker
+     * ({@code list(game, "bannerlator")}, matched by sha then filename). Missing on the server →
+     * {@code stillOnline = false}, stats 0 (it may have been deleted, or we're offline). All IO off the
+     * main thread; delivered on the main thread.
+     */
+    fun loadMyUploads(onResult: (List<MyUploadRow>) -> Unit) {
+        viewModelScope.launch {
+            val rows = withContext(Dispatchers.IO) {
+                UploadedConfigsStore.all(getApplication()).map { rec ->
+                    val live = CommunityConfigWorker.list(rec.game, "bannerlator")
+                    val match = live.firstOrNull { it.sha == rec.sha }
+                        ?: live.firstOrNull { it.filename == rec.filename }
+                    MyUploadRow(
+                        record = rec,
+                        votes = match?.votes ?: 0,
+                        downloads = match?.downloads ?: 0,
+                        stillOnline = match != null,
+                    )
+                }
+            }
+            onResult(rows)
+        }
+    }
+
+    /**
+     * Delete one of the user's own uploads. Retires it server-side via
+     * {@code deleteUpload(sha, game, filename, token)} (skipped when it's already gone), then prunes the
+     * local record so the manifest + SP cache no longer list it. Returns false ONLY when the server
+     * delete was attempted and failed (network) — the caller keeps the row and toasts. All IO off-main.
+     */
+    fun deleteMyUpload(row: MyUploadRow, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                val serverOk = if (!row.stillOnline) true else CommunityConfigWorker.deleteUpload(
+                    row.record.sha, row.record.game, row.record.filename, row.record.token,
+                )
+                if (serverOk) UploadedConfigsStore.remove(getApplication(), row.record.sha)
+                serverOk
+            }
+            onDone(ok)
+        }
+    }
+
+    /**
+     * Load the current uploader description for [row] (to prefill the edit field), via {@code /desc?sha=}.
+     * Empty string when none / offline. Off the main thread.
+     */
+    fun loadMyUploadDescription(row: MyUploadRow, onResult: (String) -> Unit) {
+        viewModelScope.launch {
+            val text = withContext(Dispatchers.IO) { CommunityConfigWorker.desc(row.record.sha) }
+            onResult(text)
+        }
+    }
+
+    /**
+     * Set/replace the uploader description for [row] via {@code /describe} (authorized by the upload
+     * token that minted it). [text] is clamped to the worker's 500-char limit. Returns true on success.
+     * Off the main thread.
+     */
+    fun editMyUploadDescription(row: MyUploadRow, text: String, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                CommunityConfigWorker.describe(row.record.sha, row.record.token, text.take(500))
+            }
+            onDone(ok)
         }
     }
 

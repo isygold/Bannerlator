@@ -57,6 +57,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddToHomeScreen
 import androidx.compose.material.icons.filled.CheckCircle
@@ -68,6 +69,7 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
@@ -248,11 +250,21 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // (no target yet) so the picked file is stashed in [importedConfigUri] and a target picker is shown.
     var importPendingTarget by remember { mutableStateOf<Shortcut?>(null) }
     var importedConfigUri by remember { mutableStateOf<Uri?>(null) }
-    // Phase 3 (online sharing) — UPLOAD. True while a config upload is in flight (disables the button +
-    // shows a spinner). When the user already shared a config for this game the worker gate is surfaced
-    // as a replace-confirm: (existing record, proceed lambda) — Replace calls proceed(), Cancel dismisses.
+    // Phase 3 (online sharing) — UPLOAD. uploadingConfig gates the busy state; uploadStarted flips the
+    // button text from "Preparing…" to "Uploading…" once the real upload begins (after any replace
+    // confirm). When the user already shared a config for this game the worker gate is surfaced as a
+    // replace-confirm: (existing record, proceed, cancel) — Replace calls proceed(), Cancel calls cancel()
+    // so the parked coroutine unwinds cleanly.
     var uploadingConfig by remember { mutableStateOf(false) }
-    var replaceUploadPrompt by remember { mutableStateOf<Pair<UploadedConfig, () -> Unit>?>(null) }
+    var uploadStarted by remember { mutableStateOf(false) }
+    var replaceUploadPrompt by remember { mutableStateOf<Triple<UploadedConfig, () -> Unit, () -> Unit>?>(null) }
+    // Phase 3 (online sharing) — MY UPLOADS. showMyUploads opens the manager dialog; myUploads is the
+    // loaded list (null = still loading); the two row-action targets drive the delete-confirm / edit-desc
+    // sub-dialogs.
+    var showMyUploads by remember { mutableStateOf(false) }
+    var myUploads by remember { mutableStateOf<List<MyUploadRow>?>(null) }
+    var deleteUploadRow by remember { mutableStateOf<MyUploadRow?>(null) }
+    var editUploadRow by remember { mutableStateOf<MyUploadRow?>(null) }
     // A tapped config row → small "Apply to game… | View details" chooser. The pair carries the picked
     // config (a specific uploaded file, or a device-row fallback) plus the in-context shortcut (non-null
     // from the per-shortcut sheet, null from the catalog browser where a target hasn't been chosen yet).
@@ -902,11 +914,16 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 OutlinedButton(
                     onClick = {
                         uploadingConfig = true
+                        uploadStarted = false
                         vm.uploadShortcutConfig(
                             s,
-                            onExisting = { existing, proceed -> replaceUploadPrompt = existing to proceed },
+                            onExisting = { existing, proceed, cancel ->
+                                replaceUploadPrompt = Triple(existing, proceed, cancel)
+                            },
+                            onStart = { uploadStarted = true },
                             onResult = { ok, msg ->
                                 uploadingConfig = false
+                                uploadStarted = false
                                 replaceUploadPrompt = null
                                 Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                             },
@@ -918,12 +935,26 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                     if (uploadingConfig) {
                         CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(6.dp))
-                        Text("Uploading…")
+                        Text(if (uploadStarted) "Uploading…" else "Preparing…")
                     } else {
                         Icon(Icons.Filled.CloudUpload, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("Upload to community")
                     }
+                }
+                // Manage the configs the user has shared (list / delete / edit description). Reinstall-
+                // proof: the list hydrates from the durable manifest when SharedPreferences is empty.
+                OutlinedButton(
+                    onClick = {
+                        myUploads = null
+                        showMyUploads = true
+                        vm.loadMyUploads { myUploads = it }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(Icons.Filled.AccountCircle, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("My uploads")
                 }
                 Divider(color = DividerColor)
                 OutlinedTextField(
@@ -1111,10 +1142,17 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         )
 
         // Replace-confirm for an already-shared config (surfaced by uploadShortcutConfig's onExisting).
-        // Replace calls proceed() to resume the upload; Cancel abandons it and clears the busy state.
-        replaceUploadPrompt?.let { (_, proceed) ->
+        // Replace calls proceed() to resume the upload; Cancel calls cancel() so the parked coroutine
+        // unwinds cleanly, then clears the busy state.
+        replaceUploadPrompt?.let { (_, proceed, cancel) ->
+            val dismissReplace = {
+                replaceUploadPrompt = null
+                uploadingConfig = false
+                uploadStarted = false
+                cancel()
+            }
             AlertDialog(
-                onDismissRequest = { replaceUploadPrompt = null; uploadingConfig = false },
+                onDismissRequest = dismissReplace,
                 title = { Text("Replace your shared config?") },
                 text = {
                     Text(
@@ -1129,13 +1167,145 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                     }) { Text("Replace") }
                 },
                 dismissButton = {
-                    TextButton(onClick = {
-                        replaceUploadPrompt = null
-                        uploadingConfig = false
-                    }) { Text("Cancel") }
+                    TextButton(onClick = dismissReplace) { Text("Cancel") }
                 },
             )
         }
+    }
+
+    // Phase 3 (online sharing) — MY UPLOADS manager. Lists the user's OWN shared configs (reinstall-proof:
+    // the list hydrates from the durable manifest when SharedPreferences is empty), with live votes /
+    // downloads and per-row Delete + Edit-description actions.
+    if (showMyUploads) {
+        val myUploadsShape = RoundedCornerShape(28.dp)
+        AlertDialog(
+            onDismissRequest = { showMyUploads = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = myUploadsShape,
+            modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outline, myUploadsShape),
+            title = { Text("My uploads") },
+            text = {
+                when (val rows = myUploads) {
+                    null -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text("Loading…", color = OnSurfaceVariant)
+                    }
+                    else -> if (rows.isEmpty()) {
+                        Text("You haven't shared any configs yet.", color = OnSurfaceVariant)
+                    } else {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            rows.forEach { row ->
+                                CommunityCard(onClick = {}) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            row.record.game,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = OnSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                                            .format(java.util.Date(row.record.date))
+                                        val sub = listOf(row.record.device, row.record.soc, dateStr)
+                                            .filter { it.isNotBlank() }.joinToString(" · ")
+                                        if (sub.isNotEmpty()) {
+                                            Text(sub, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                        Text(
+                                            "★ ${row.votes}  ↓ ${row.downloads}" + if (!row.stillOnline) "  · offline" else "",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = OnSurfaceVariant,
+                                        )
+                                    }
+                                    IconButton(onClick = { editUploadRow = row }) {
+                                        Icon(Icons.Filled.Edit, contentDescription = "Edit description")
+                                    }
+                                    IconButton(onClick = { deleteUploadRow = row }) {
+                                        Icon(Icons.Filled.Delete, contentDescription = "Delete")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { showMyUploads = false }) { Text("Close") } },
+        )
+    }
+
+    // Delete-confirm for one of the user's uploads.
+    deleteUploadRow?.let { row ->
+        AlertDialog(
+            onDismissRequest = { deleteUploadRow = null },
+            title = { Text("Delete shared config?") },
+            text = { Text("Delete your shared config for \"${row.record.game}\"?", color = OnSurface) },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteUploadRow = null
+                    vm.deleteMyUpload(row) { ok ->
+                        if (ok) {
+                            myUploads = myUploads?.filterNot { it.record.sha == row.record.sha }
+                            Toast.makeText(context, "Deleted your shared config.", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(context, "Couldn't reach the server.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { deleteUploadRow = null }) { Text("Cancel") } },
+        )
+    }
+
+    // Edit-description for one of the user's uploads (prefilled with the current server-side text).
+    editUploadRow?.let { row ->
+        var descText by remember(row) { mutableStateOf("") }
+        var descLoading by remember(row) { mutableStateOf(true) }
+        LaunchedEffect(row) { vm.loadMyUploadDescription(row) { descText = it; descLoading = false } }
+        AlertDialog(
+            onDismissRequest = { editUploadRow = null },
+            title = { Text("Edit description") },
+            text = {
+                if (descLoading) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text("Loading…", color = OnSurfaceVariant)
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        OutlinedTextField(
+                            value = descText,
+                            onValueChange = { if (it.length <= 500) descText = it },
+                            label = { Text("Description for \"${row.record.game}\"") },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text("${descText.length}/500", style = MaterialTheme.typography.labelSmall, color = OnSurfaceVariant)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !descLoading,
+                    onClick = {
+                        val text = descText
+                        editUploadRow = null
+                        vm.editMyUploadDescription(row, text) { ok ->
+                            Toast.makeText(
+                                context,
+                                if (ok) "Description updated." else "Couldn't reach the server.",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    },
+                ) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { editUploadRow = null }) { Text("Cancel") } },
+        )
     }
 
     // Catalog browser (Part A) — full-catalog entry from the header button.
