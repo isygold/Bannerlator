@@ -1030,7 +1030,11 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                             // bucket miss → fall back to the per-device index rows so apply-by-device still
                             // works (no vote counts in that mode). Whole card taps → the chooser; the
                             // in-context shortcut `s` is carried so details can preview the diff.
-                            val cfg = rememberGameConfigs(vm, game)
+                            // Also look under THIS shortcut's own folder (sanitized the SAME way the
+                            // exporter keys uploads) so the user's OWN Bannerlator upload shows up even
+                            // though it isn't in the canonical index yet.
+                            val myFolder = s.name.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
+                            val cfg = rememberGameConfigs(vm, game, extraBannerlatorFolders = listOf(myFolder))
                             when {
                                 cfg.loading -> Text("Loading configs…", color = OnSurfaceVariant)
                                 cfg.entries.isNotEmpty() -> {
@@ -1490,6 +1494,25 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         ShortcutSettingsDialogScreen(
             shortcut = s,
             onDismiss = { settingsShortcut = null; vm.refresh() }
+        )
+    }
+}
+
+// Small "BANNERLATOR" source pill for configs shared through our own repo (app_source=bannerlator), so
+// users can tell them apart from BannerHub-sourced configs. Subtle orange fill, same pill shape as
+// [CommunityStoreBadge].
+@Composable
+private fun BannerlatorSourceBadge() {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color(0xFFE0701C))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    ) {
+        Text(
+            text = "BANNERLATOR",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White,
         )
     }
 }
@@ -2093,14 +2116,20 @@ private data class GameConfigsState(
 )
 
 // Fetch (once per [game]) the uploaded configs for a game from the worker and expose them as Compose
-// state. Shared by the per-shortcut sheet and the catalog browser's device panel.
+// state. Shared by the per-shortcut sheet and the catalog browser's device panel. [extraBannerlatorFolders]
+// (the per-shortcut sheet passes the shortcut's own sanitized folder name) is queried in the bannerlator
+// namespace ONLY, so a user's own upload is surfaced even before it lands in the canonical index.
 @Composable
-private fun rememberGameConfigs(vm: ShortcutsViewModel, game: CanonicalGame): GameConfigsState {
+private fun rememberGameConfigs(
+    vm: ShortcutsViewModel,
+    game: CanonicalGame,
+    extraBannerlatorFolders: List<String> = emptyList(),
+): GameConfigsState {
     var loading by remember(game) { mutableStateOf(true) }
     var entries by remember(game) { mutableStateOf<List<Pair<String, WorkerConfigEntry>>>(emptyList()) }
     LaunchedEffect(game) {
         loading = true
-        vm.fetchGameConfigs(game) { list ->
+        vm.fetchGameConfigs(game, extraBannerlatorFolders) { list ->
             entries = list
             loading = false
         }
@@ -2128,6 +2157,7 @@ private fun CommunityConfigEntryCard(entry: WorkerConfigEntry, isMatch: Boolean,
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (entry.appSource == "bannerlator") BannerlatorSourceBadge()
             Text("★ ${entry.votes}", style = MaterialTheme.typography.labelMedium, color = OnSurface)
             Text("↓ ${entry.downloads}", style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
         }

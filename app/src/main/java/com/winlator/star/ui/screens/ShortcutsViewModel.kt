@@ -226,14 +226,33 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
      * votes-desc then date-desc, because the worker only sorts WITHIN a folder. Falls back to the game
      * name as a key only when [CanonicalGame.folders] is empty. Empty on offline / bucket miss → the UI
      * falls back to per-device rows.
+     *
+     * BOTH namespaces are read: for every canonical folder we query BannerHub (no ns) AND our own
+     * `bannerlator` repo in parallel; each folder in [extraBannerlatorFolders] is queried in the
+     * `bannerlator` namespace ONLY (the per-shortcut sheet passes the shortcut's own sanitized folder
+     * so the user's OWN upload — which isn't in the canonical index yet — is still found). Every entry
+     * keeps its `appSource` so the UI can badge Bannerlator-shared configs.
      */
-    fun fetchGameConfigs(game: CanonicalGame, onResult: (List<Pair<String, WorkerConfigEntry>>) -> Unit) {
+    fun fetchGameConfigs(
+        game: CanonicalGame,
+        extraBannerlatorFolders: List<String> = emptyList(),
+        onResult: (List<Pair<String, WorkerConfigEntry>>) -> Unit,
+    ) {
         viewModelScope.launch {
             val merged = withContext(Dispatchers.IO) {
                 val keys = game.folders.ifEmpty { listOf(game.name) }.distinct()
-                val perFolder = keys
-                    .map { key -> async { key to CommunityConfigWorker.list(key) } }
-                    .awaitAll()
+                val extras = extraBannerlatorFolders.filter { it.isNotBlank() }.distinct()
+                // Per canonical folder: BannerHub (default) + our namespaced repo, both in parallel.
+                // Per extra folder: our namespaced repo only.
+                val jobs = ArrayList<kotlinx.coroutines.Deferred<Pair<String, List<WorkerConfigEntry>>>>()
+                for (key in keys) {
+                    jobs.add(async { key to CommunityConfigWorker.list(key) })
+                    jobs.add(async { key to CommunityConfigWorker.list(key, "bannerlator") })
+                }
+                for (key in extras) {
+                    jobs.add(async { key to CommunityConfigWorker.list(key, "bannerlator") })
+                }
+                val perFolder = jobs.awaitAll()
                 val seen = HashSet<String>()
                 val out = ArrayList<Pair<String, WorkerConfigEntry>>()
                 for ((folder, list) in perFolder) {

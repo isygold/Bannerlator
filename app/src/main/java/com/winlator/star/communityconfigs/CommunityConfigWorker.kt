@@ -50,9 +50,15 @@ object CommunityConfigWorker {
     private const val TAG = "CommunityConfigs"
     private const val BASE = "https://bannerhub-configs-worker.the412banner.workers.dev"
 
-    /** GET `/list?game=` — every config for [game] with votes / downloads / app_source attached. */
-    fun list(game: String): List<WorkerConfigEntry> {
-        val body = get("$BASE/list?game=${enc(game)}") ?: return emptyList()
+    /**
+     * GET `/list?game=` — every config for [game] with votes / downloads / app_source attached. When
+     * [ns] is non-blank it is appended as `&ns=` to read a NAMESPACED repo (e.g. our own
+     * `bannerlator-game-configs` via `ns=bannerlator`); a blank [ns] keeps the default BannerHub read
+     * byte-for-byte unchanged.
+     */
+    fun list(game: String, ns: String = ""): List<WorkerConfigEntry> {
+        val nsQ = if (ns.isBlank()) "" else "&ns=${enc(ns)}"
+        val body = get("$BASE/list?game=${enc(game)}$nsQ") ?: return emptyList()
         return try {
             val arr = JSONArray(body)
             val out = ArrayList<WorkerConfigEntry>(arr.length())
