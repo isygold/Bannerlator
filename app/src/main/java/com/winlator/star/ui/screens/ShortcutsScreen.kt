@@ -64,6 +64,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -94,6 +95,7 @@ import com.winlator.star.communityconfigs.CanonicalGame
 import com.winlator.star.communityconfigs.CommunityConfigApply
 import com.winlator.star.communityconfigs.CommunityConfigRef
 import com.winlator.star.communityconfigs.ShortcutExporter
+import com.winlator.star.communityconfigs.UploadedConfigsStore.UploadedConfig
 import com.winlator.star.communityconfigs.GameMatcher
 import com.winlator.star.communityconfigs.ShortcutConfig
 import com.winlator.star.communityconfigs.WorkerConfigEntry
@@ -245,6 +247,11 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // (no target yet) so the picked file is stashed in [importedConfigUri] and a target picker is shown.
     var importPendingTarget by remember { mutableStateOf<Shortcut?>(null) }
     var importedConfigUri by remember { mutableStateOf<Uri?>(null) }
+    // Phase 3 (online sharing) — UPLOAD. True while a config upload is in flight (disables the button +
+    // shows a spinner). When the user already shared a config for this game the worker gate is surfaced
+    // as a replace-confirm: (existing record, proceed lambda) — Replace calls proceed(), Cancel dismisses.
+    var uploadingConfig by remember { mutableStateOf(false) }
+    var replaceUploadPrompt by remember { mutableStateOf<Pair<UploadedConfig, () -> Unit>?>(null) }
     // A tapped config row → small "Apply to game… | View details" chooser. The pair carries the picked
     // config (a specific uploaded file, or a device-row fallback) plus the in-context shortcut (non-null
     // from the per-shortcut sheet, null from the catalog browser where a target hasn't been chosen yet).
@@ -888,6 +895,35 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                         Text("Import")
                     }
                 }
+                // Phase 3 (online sharing) — UPLOAD this shortcut's effective config to OUR community repo
+                // (ns=bannerlator). Disabled + spinner while in flight; if the user already shared one for
+                // this game, [replaceUploadPrompt] surfaces a replace-confirm before the upload proceeds.
+                OutlinedButton(
+                    onClick = {
+                        uploadingConfig = true
+                        vm.uploadShortcutConfig(
+                            s,
+                            onExisting = { existing, proceed -> replaceUploadPrompt = existing to proceed },
+                            onResult = { ok, msg ->
+                                uploadingConfig = false
+                                replaceUploadPrompt = null
+                                Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
+                            },
+                        )
+                    },
+                    enabled = !uploadingConfig,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (uploadingConfig) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Uploading…")
+                    } else {
+                        Icon(Icons.Filled.CloudUpload, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Upload to community")
+                    }
+                }
                 Divider(color = DividerColor)
                 OutlinedTextField(
                     value = communitySearch,
@@ -1068,6 +1104,33 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             confirmButton = {},
             dismissButton = { TextButton(onClick = dismiss) { Text("Close") } },
         )
+
+        // Replace-confirm for an already-shared config (surfaced by uploadShortcutConfig's onExisting).
+        // Replace calls proceed() to resume the upload; Cancel abandons it and clears the busy state.
+        replaceUploadPrompt?.let { (_, proceed) ->
+            AlertDialog(
+                onDismissRequest = { replaceUploadPrompt = null; uploadingConfig = false },
+                title = { Text("Replace your shared config?") },
+                text = {
+                    Text(
+                        "You already shared a config for \"${s.name}\". Replace it?",
+                        color = OnSurface,
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        replaceUploadPrompt = null
+                        proceed()
+                    }) { Text("Replace") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        replaceUploadPrompt = null
+                        uploadingConfig = false
+                    }) { Text("Cancel") }
+                },
+            )
+        }
     }
 
     // Catalog browser (Part A) — full-catalog entry from the header button.

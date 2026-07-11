@@ -30,6 +30,12 @@ data class WorkerComment(
     val date: String,
 )
 
+/** Result of a successful `/upload` — the committed [sha] (the delete/describe key) and repo [path]. */
+data class UploadResult(
+    val sha: String,
+    val path: String,
+)
+
 /**
  * Thin client for the first-party BannerHub configs worker (the SAME worker the app already calls for
  * Steam search). Adds the live social layer on top of the read-only GitHub mirror: per-config votes /
@@ -147,6 +153,80 @@ object CommunityConfigWorker {
             .put("device", device.take(60))
             .toString()
         val resp = post("$BASE/comment", body) ?: return false
+        return try {
+            JSONObject(resp).optBoolean("success", false)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * POST `/upload?ns=` with `{game, filename, content, upload_token}` — [contentBase64] is the config
+     * JSON base64-encoded. [ns] namespaces the upload into OUR repo (default "bannerlator") so BannerHub
+     * users never see it. Returns the committed [UploadResult] on success, or null on any failure.
+     */
+    fun upload(
+        game: String,
+        filename: String,
+        contentBase64: String,
+        uploadToken: String,
+        ns: String = "bannerlator",
+    ): UploadResult? {
+        val body = JSONObject()
+            .put("game", game)
+            .put("filename", filename)
+            .put("content", contentBase64)
+            .put("upload_token", uploadToken)
+            .toString()
+        val resp = post("$BASE/upload?ns=${enc(ns)}", body) ?: return null
+        return try {
+            val o = JSONObject(resp)
+            if (!o.optBoolean("success", false)) return null
+            val sha = o.optString("sha", "").trim()
+            if (sha.isEmpty()) return null
+            UploadResult(sha = sha, path = o.optString("path", "").trim())
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * POST `/delete?ns=` with `{sha, game, filename, upload_token}` — retires the user's own upload
+     * (authorized by the [uploadToken] that minted it). Returns true on success.
+     */
+    fun deleteUpload(
+        sha: String,
+        game: String,
+        filename: String,
+        uploadToken: String,
+        ns: String = "bannerlator",
+    ): Boolean {
+        val body = JSONObject()
+            .put("sha", sha)
+            .put("game", game)
+            .put("filename", filename)
+            .put("upload_token", uploadToken)
+            .toString()
+        val resp = post("$BASE/delete?ns=${enc(ns)}", body) ?: return false
+        return try {
+            JSONObject(resp).optBoolean("success", false)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * POST `/describe?ns=` with `{sha, token, text}` — set/replace the uploader's description for their
+     * own config (authorized by the upload [token]). Not yet wired to UI — reserved for step 3's
+     * My-uploads edit-description. Returns true on success.
+     */
+    fun describe(sha: String, token: String, text: String, ns: String = "bannerlator"): Boolean {
+        val body = JSONObject()
+            .put("sha", sha)
+            .put("token", token)
+            .put("text", text)
+            .toString()
+        val resp = post("$BASE/describe?ns=${enc(ns)}", body) ?: return false
         return try {
             JSONObject(resp).optBoolean("success", false)
         } catch (e: Exception) {

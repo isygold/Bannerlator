@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Environment
 import android.provider.DocumentsContract
+import android.util.Base64
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.documentfile.provider.DocumentFile
@@ -28,6 +29,8 @@ import com.winlator.star.communityconfigs.DeviceIdentity
 import com.winlator.star.communityconfigs.GameMatcher
 import com.winlator.star.communityconfigs.InstalledComponents
 import com.winlator.star.communityconfigs.ShortcutExporter
+import com.winlator.star.communityconfigs.UploadedConfigsStore
+import com.winlator.star.communityconfigs.UploadedConfigsStore.UploadedConfig
 import com.winlator.star.container.Container
 import com.winlator.star.container.ContainerManager
 import com.winlator.star.container.Shortcut
@@ -37,6 +40,7 @@ import com.winlator.star.core.WinePath
 import com.winlator.star.store.StarLaunchBridge
 import com.winlator.star.ui.screens.adrenodownload.DriverSources
 import com.winlator.star.ui.screens.adrenodownload.RemoteDriverRepository
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -329,6 +333,71 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val res = withContext(Dispatchers.IO) { ShortcutExporter.fromShortcut(shortcut, getApplication()) }
             onResult(res)
+        }
+    }
+
+    /**
+     * PHASE 3 (online sharing) — UPLOAD. Share [shortcut]'s effective config to OUR community repo
+     * (namespace {@code bannerlator}, never seen by BannerHub users). Builds the same artifact
+     * [exportShortcutConfig] does, then, off the main thread: base64s the JSON and POSTs it to the
+     * worker's {@code /upload}. Records the result in [UploadedConfigsStore] (reinstall-proof) so a
+     * later share can offer to replace it.
+     *
+     * If the user already has an upload for this game, [onExisting] is invoked on the main thread with
+     * that record and a {@code proceed} lambda; the flow SUSPENDS until the UI calls {@code proceed()}
+     * (replace confirmed). On a successful replace the old upload is best-effort deleted first.
+     * [onResult] is always delivered on the main thread.
+     */
+    fun uploadShortcutConfig(
+        shortcut: Shortcut,
+        onExisting: (UploadedConfig, proceed: () -> Unit) -> Unit,
+        onResult: (ok: Boolean, message: String) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val res = withContext(Dispatchers.IO) { ShortcutExporter.fromShortcut(shortcut, app) }
+            // The provenance the store records lives in the config's own meta (written by ConfigExporter).
+            val meta = try { JSONObject(res.json).optJSONObject("meta") } catch (e: Exception) { null }
+            val token = meta?.optString("upload_token", "")?.trim().orEmpty()
+            val soc = meta?.optString("soc", "")?.trim().orEmpty()
+            val device = meta?.optString("device", "")?.trim().orEmpty()
+            if (token.isEmpty()) {
+                onResult(false, "Upload failed — check your connection and try again.")
+                return@launch
+            }
+
+            val existing = withContext(Dispatchers.IO) { UploadedConfigsStore.forGame(app, res.game) }
+            if (existing != null) {
+                // Ask the UI to confirm the replace, then wait here until it calls proceed().
+                val gate = CompletableDeferred<Unit>()
+                onExisting(existing) { gate.complete(Unit) }
+                gate.await()
+            }
+
+            val ok = withContext(Dispatchers.IO) {
+                val b64 = Base64.encodeToString(res.json.toByteArray(), Base64.NO_WRAP)
+                val uploaded = CommunityConfigWorker.upload(res.game, res.fileName, b64, token)
+                    ?: return@withContext false
+                // Replace confirmed: retire the previous upload (best-effort — ignore failure).
+                if (existing != null) {
+                    CommunityConfigWorker.deleteUpload(existing.sha, existing.game, existing.filename, existing.token)
+                }
+                UploadedConfigsStore.add(
+                    app,
+                    UploadedConfig(
+                        game = res.game,
+                        filename = res.fileName,
+                        sha = uploaded.sha,
+                        token = token,
+                        soc = soc,
+                        device = device,
+                        date = System.currentTimeMillis(),
+                    ),
+                )
+                true
+            }
+            if (ok) onResult(true, "Shared \"${res.game}\" with the community.")
+            else onResult(false, "Upload failed — check your connection and try again.")
         }
     }
 
