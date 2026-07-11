@@ -49,6 +49,42 @@ object ShortcutExporter {
         put(effective, "inputType", shortcut.getExtra("inputType"))
         put(effective, "execArgs", shortcut.getExtra("execArgs"))
 
+        // The additive bl_ext overlay — the ~28 extra shortcut settings the pc_* format can't carry.
+        // Fields with a clean container getter resolve EFFECTIVE (shortcut override, else container
+        // default); the rest have no matching/clean container getter and are read shortcut-scoped only.
+        // (emulator is already resolved above for the FEX gate; ConfigExporter picks it up from there.)
+        put(effective, "screenSize", orDefault(shortcut, "screenSize", container?.getScreenSize()))
+        put(effective, "renderer", orDefault(shortcut, "renderer", container?.getRenderer()))
+        put(effective, "fullscreenMode", orDefault(shortcut, "fullscreenMode", container?.getFullscreenMode()?.toString()))
+        put(effective, "frameGenEngine", orDefault(shortcut, "frameGenEngine", container?.getFrameGenEngine()))
+        put(effective, "box64Version", orDefault(shortcut, "box64Version", container?.getBox64Version()))
+        put(effective, "box64Preset", orDefault(shortcut, "box64Preset", container?.getBox64Preset()))
+        put(effective, "fexcorePreset", orDefault(shortcut, "fexcorePreset", container?.getFEXCorePreset()))
+        put(effective, "cpuList", orDefault(shortcut, "cpuList", container?.getCPUList()))
+        put(effective, "wincomponents", orDefault(shortcut, "wincomponents", container?.getWinComponents()))
+        put(effective, "midiSoundFont", orDefault(shortcut, "midiSoundFont", container?.getMIDISoundFont()))
+        put(effective, "lc_all", orDefault(shortcut, "lc_all", container?.getLC_ALL()))
+        put(effective, "reshadeLoadout", orDefault(shortcut, "reshadeLoadout", container?.getReshadeLoadout()))
+        put(effective, "reshadeMode", orDefault(shortcut, "reshadeMode", container?.getReshadeMode()))
+        put(effective, "reshadeParams", orDefault(shortcut, "reshadeParams", container?.getReshadeParams()))
+        put(effective, "reshadeEffect", orDefault(shortcut, "reshadeEffect", container?.getReshadeEffect()))
+        // No clean/matching container getter for these — read shortcut-scoped only (getExtra). e.g.
+        // sfCompatMode's container form is getRendererSfCompatMode() (a boolean, not the extra's string),
+        // and startupSelection's is a byte — neither cleanly matches the extra's string, so getExtra-only.
+        put(effective, "renderScale", shortcut.getExtra("renderScale"))
+        put(effective, "sfCompatMode", shortcut.getExtra("sfCompatMode"))
+        put(effective, "fpsLimiterEnabled", shortcut.getExtra("fpsLimiterEnabled"))
+        put(effective, "sharpnessEffect", shortcut.getExtra("sharpnessEffect"))
+        put(effective, "sharpnessLevel", shortcut.getExtra("sharpnessLevel"))
+        put(effective, "sharpnessDenoise", shortcut.getExtra("sharpnessDenoise"))
+        put(effective, "startupSelection", shortcut.getExtra("startupSelection"))
+        put(effective, "exclusiveXInput", shortcut.getExtra("exclusiveXInput"))
+        put(effective, "disableXinput", shortcut.getExtra("disableXinput"))
+        put(effective, "simTouchScreen", shortcut.getExtra("simTouchScreen"))
+        put(effective, "numControllers", shortcut.getExtra("numControllers"))
+        put(effective, "controlsProfile", shortcut.getExtra("controlsProfile"))
+        put(effective, "autoCloseOnExit", shortcut.getExtra("autoCloseOnExit"))
+
         val device = Build.MANUFACTURER + " " + Build.MODEL
         val soc = DeviceIdentity.gpu(context) ?: DeviceIdentity.soc()
         val meta = ConfigExporter.ExportMeta(

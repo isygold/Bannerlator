@@ -26,6 +26,23 @@ import org.json.JSONObject
 object ConfigExporter {
 
     /**
+     * The shortcut {@code [Extra Data]} keys carried VERBATIM (raw key, raw value) inside the additive
+     * {@code settings.bl_ext} block — the ~28 settings the {@code pc_*} format can't represent. Emitted
+     * only when present/non-blank, so a config with none of them (or a BannerHub-origin config) never
+     * grows a bl_ext object. Read back by {@link ConfigTranslator#translate} as a scalar overlay, leaving
+     * BannerHub-origin configs (which have no bl_ext) completely unaffected. The DXVK {@code async} flag
+     * is NOT here — it is lifted out of {@code dxwrapperConfig} separately and stored under {@code async}.
+     */
+    val BL_EXT_KEYS: List<String> = listOf(
+        "screenSize", "renderer", "renderScale", "sfCompatMode", "fullscreenMode", "frameGenEngine",
+        "fpsLimiterEnabled", "sharpnessEffect", "sharpnessLevel", "sharpnessDenoise", "reshadeLoadout",
+        "reshadeMode", "reshadeParams", "reshadeEffect", "emulator", "box64Version", "box64Preset",
+        "fexcorePreset", "cpuList", "startupSelection", "exclusiveXInput", "disableXinput",
+        "simTouchScreen", "numControllers", "controlsProfile", "wincomponents", "midiSoundFont",
+        "lc_all", "autoCloseOnExit",
+    )
+
+    /**
      * The non-deterministic provenance the adapter supplies. Kept out of the pure core so [export]
      * stays reproducible for the same inputs.
      *
@@ -85,6 +102,18 @@ object ConfigExporter {
         }
         effective["envVars"].nonBlank()?.let { settings.put("pc_ls_environment_variable", it) }
         effective["execArgs"].nonBlank()?.let { settings.put("pc_ls_boot_option", it) }
+
+        // Additive namespaced overlay — the ~28 shortcut extras the pc_* format can't carry, stored raw
+        // (raw key, raw value, no transform) so ConfigTranslator can overlay them straight back. Only
+        // present/non-blank fields emit a key; the whole block is omitted when nothing qualifies, so
+        // BannerHub-origin configs never gain a bl_ext object. The DXVK async flag is lifted out of the
+        // comma-list and stored alongside them under "async" (also raw).
+        val blExt = JSONObject()
+        for (key in BL_EXT_KEYS) {
+            effective[key].nonBlank()?.let { blExt.put(key, it) }
+        }
+        subValue(dxwCfg, ",", "async")?.let { blExt.put("async", it) }
+        if (blExt.length() > 0) settings.put("bl_ext", blExt)
 
         val metaObj = JSONObject()
         metaObj.put("app_source", meta.appSource)

@@ -25,12 +25,23 @@ object CommunityConfigApply {
 
     private const val TAG = "CommunityConfigs"
 
-    /** Shortcut [Extra Data] keys a community config may set directly via putExtra(). */
+    /**
+     * Shortcut [Extra Data] keys a community config may set directly via putExtra(). Documentation only
+     * — the apply loop writes every {@code config.scalars} entry unconditionally (it does NOT gate on
+     * this list), so this is the authoritative inventory, not an enforced filter. The second group is
+     * the additive {@code bl_ext} overlay ({@link ConfigExporter#BL_EXT_KEYS}) that lifts coverage from
+     * the {@code pc_*}-only set to ~36/39.
+     */
     val OVERRIDABLE_KEYS: List<String> = listOf(
         "dxwrapper", "dxwrapperConfig", "graphicsDriver", "graphicsDriverConfig",
         "emulator", "fexcoreVersion", "fexcorePreset", "box64Version", "box64Preset",
         "audioDriver", "cpuList", "envVars", "screenSize", "wincomponents", "renderer",
         "fpsLimiter", "frameGenEngine", "sfCompatMode", "inputType", "execArgs",
+        // bl_ext overlay additions:
+        "renderScale", "fullscreenMode", "sharpnessEffect", "sharpnessLevel", "sharpnessDenoise",
+        "reshadeLoadout", "reshadeMode", "reshadeParams", "reshadeEffect", "startupSelection",
+        "exclusiveXInput", "disableXinput", "simTouchScreen", "numControllers", "controlsProfile",
+        "midiSoundFont", "lc_all", "autoCloseOnExit", "fpsLimiterEnabled",
     )
 
     /** Advisory only — surfaced to the user but NEVER written to the shortcut (container-scoped). */

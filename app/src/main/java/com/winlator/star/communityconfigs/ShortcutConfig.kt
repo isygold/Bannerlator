@@ -143,6 +143,19 @@ object ConfigTranslator {
         val advisories = LinkedHashMap<String, String>()
         if (!proton.isNullOrBlank()) advisories["wineVersion"] = proton
 
+        // Bannerlator's additive namespaced overlay: the ~28 shortcut extras the pc_* format can't carry.
+        // Present only on OUR exports — BannerHub-origin configs have no bl_ext, so this loop is a no-op for
+        // them and they translate exactly as before. Each raw key/value overlays scalars (overriding any
+        // value the pc_* heuristics inferred, e.g. an explicit emulator="box64" beats the fex inference).
+        // The lone exception is "async", which belongs in the dxwrapperConfig sub-map, not the scalars.
+        val blExt = s.optJSONObject("bl_ext")
+        if (blExt != null) {
+            for (key in blExt.keys()) {
+                val value = blExt.optString(key, "")
+                if (key == "async") dxw["async"] = value else scalars[key] = value
+            }
+        }
+
         Log.d(TAG, "Translated config: dxwrapper=$dxwrapper dxvk=$dxvk vkd3d=$vkd3d turnip=$turnip fex=$fex proton=$proton")
         return ShortcutConfig(
             scalars = scalars,

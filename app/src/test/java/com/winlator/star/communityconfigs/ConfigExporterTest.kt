@@ -54,6 +54,75 @@ class ConfigExporterTest {
     }
 
     @Test
+    fun roundTrip_blExtFields_reproduceInput() {
+        // A representative slice of the additive bl_ext overlay, plus the DXVK async flag lifted out of
+        // the comma-list. Each must read back through export → translate into the same scalar / dxw value.
+        val effective = linkedMapOf(
+            "dxwrapperConfig" to "version=2.4.1,async=1,vulkanVersion=1.3",
+            "screenSize" to "1280x720",
+            "renderer" to "Vulkan",
+            "fullscreenMode" to "1",
+            "box64Version" to "0.3.2",
+            "box64Preset" to "COMPATIBILITY",
+            // Explicit box64 must OVERRIDE the pc_* fex-inference heuristic (fexcorePreset contains "fex").
+            "emulator" to "box64",
+            "fexcorePreset" to "STABILITY",
+            "reshadeMode" to "1",
+            "numControllers" to "2",
+            "cpuList" to "0,1,2,3,4,5,6,7",
+            "lc_all" to "zh_CN.UTF-8",
+            "autoCloseOnExit" to "1",
+        )
+
+        val json = ConfigExporter.export(effective, meta)
+        val config = ConfigTranslator.translate(JSONObject(json))
+
+        assertEquals("1280x720", config.scalars["screenSize"])
+        assertEquals("Vulkan", config.scalars["renderer"])
+        assertEquals("1", config.scalars["fullscreenMode"])
+        assertEquals("0.3.2", config.scalars["box64Version"])
+        assertEquals("COMPATIBILITY", config.scalars["box64Preset"])
+        // Overlay beats the fex heuristic even though the settings blob contains "fexcorePreset".
+        assertEquals("box64", config.scalars["emulator"])
+        assertEquals("STABILITY", config.scalars["fexcorePreset"])
+        assertEquals("1", config.scalars["reshadeMode"])
+        assertEquals("2", config.scalars["numControllers"])
+        assertEquals("0,1,2,3,4,5,6,7", config.scalars["cpuList"])
+        assertEquals("zh_CN.UTF-8", config.scalars["lc_all"])
+        assertEquals("1", config.scalars["autoCloseOnExit"])
+        // async is NOT a scalar — it overlays the dxwrapperConfig sub-map, beating the "0" heuristic.
+        assertEquals("1", config.dxwrapperConfig["async"])
+        assertFalse(config.scalars.containsKey("async"))
+        // DXVK version still travels the normal pc_* path.
+        assertEquals("2.4.1", config.dxwrapperConfig["version"])
+    }
+
+    @Test
+    fun translate_withoutBlExt_unaffected() {
+        // A BannerHub-origin config (no bl_ext) must translate EXACTLY as before — the overlay is a no-op.
+        val json = """
+            {"meta":{},"settings":{
+              "pc_ls_DXVK":"{\"name\":\"dxvk-2.4.1\"}",
+              "pc_ls_AUDIO_DRIVER":"1",
+              "pc_ls_update_enable_xinput":true
+            },"components":[]}
+        """.trimIndent()
+        val config = ConfigTranslator.translate(JSONObject(json))
+
+        assertEquals("dxvk", config.scalars["dxwrapper"])
+        assertEquals("box64", config.scalars["emulator"])
+        assertEquals("pulseaudio", config.scalars["audioDriver"])
+        assertEquals("1", config.scalars["inputType"])
+        assertEquals("2.4.1", config.dxwrapperConfig["version"])
+        // Heuristic async ("0" — name has no "async") is untouched with no bl_ext to override it.
+        assertEquals("0", config.dxwrapperConfig["async"])
+        // None of the bl_ext-only scalars leak in.
+        assertFalse(config.scalars.containsKey("screenSize"))
+        assertFalse(config.scalars.containsKey("box64Version"))
+        assertFalse(config.scalars.containsKey("fullscreenMode"))
+    }
+
+    @Test
     fun export_meta_isBannerlatorNamespaced() {
         val root = JSONObject(ConfigExporter.export(emptyMap(), meta))
         val m = root.getJSONObject("meta")
