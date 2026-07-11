@@ -2,6 +2,7 @@ package com.winlator.star.communityconfigs
 
 import android.content.Context
 import android.os.Environment
+import android.util.Base64
 import android.util.Log
 import com.winlator.star.core.HttpUtils
 import org.json.JSONObject
@@ -151,6 +152,31 @@ object AccountManager {
         val backupUserId = recoveryBackup(context)?.userId.orEmpty()
         saveLogin(context, backupUserId, username, session, null)
         return AccountResult.Success(ResetData(session))
+    }
+
+    /**
+     * PHASE 3 (optional accounts) — AVATAR. POST {@code /account/avatar {session,image,content_type}} where
+     * [bytes] is the already-downscaled avatar (the caller compresses it to ≤512KB JPEG client-side). On
+     * success the worker returns the stable {@code avatarUrl} (same URL, overwritten on each change); we
+     * mirror it into the locally-stored session so every avatar surface refreshes without a re-login, and
+     * hand the URL back. Returns {@code Error("not_signed_in")} when logged out, or the worker's typed code
+     * ({@code bad_type}, {@code bad_size}, {@code bad_image}, {@code invalid}) on rejection. Blocking — run
+     * off the main thread; degrades to [AccountResult.Error] rather than throwing.
+     */
+    fun uploadAvatar(context: Context, bytes: ByteArray, contentType: String): AccountResult<String> {
+        val session = session(context) ?: return AccountResult.Error("not_signed_in")
+        val body = JSONObject()
+            .put("session", session)
+            .put("image", Base64.encodeToString(bytes, Base64.NO_WRAP))
+            .put("content_type", contentType)
+            .toString()
+        val resp = post("$BASE/account/avatar", body)
+        val json = parseOk(resp) ?: return errorFrom(resp)
+        val url = json.optString("avatarUrl", "").trim()
+        if (url.isBlank()) return AccountResult.Error("network")
+        // Mirror the new URL into the stored session so the ☰ swap / drawer header / dialogs all update.
+        current(context)?.let { saveLogin(context, it.userId, it.username, it.session, url) }
+        return AccountResult.Success(url)
     }
 
     // --- local state -----------------------------------------------------------------------------

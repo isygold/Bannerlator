@@ -74,7 +74,6 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
@@ -126,6 +125,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import com.winlator.star.ui.AccountAvatar
+import com.winlator.star.ui.AccountUiBus
 import com.winlator.star.ui.LocalTopBarActions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -518,6 +519,13 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     }
     // Open the My-account sheet (Phase 2), the globe browser's person-icon entry point.
     val openMyAccount: () -> Unit = { showMyAccount = true }
+    // Phase 3: the nav-drawer's profile header lands here then flips this one-shot flag — open the sheet.
+    LaunchedEffect(AccountUiBus.openMyAccountRequested) {
+        if (AccountUiBus.openMyAccountRequested) {
+            AccountUiBus.openMyAccountRequested = false
+            showMyAccount = true
+        }
+    }
 
     val topBarActions = LocalTopBarActions.current
     // LaunchedEffect — not SideEffect — so this runs in the same dispatcher queue as
@@ -1773,14 +1781,47 @@ private fun accountErrorMessage(code: String, isReset: Boolean): String = when (
     else -> "Couldn't reach the server. Check your connection and try again."
 }
 
+/** Phase 3 (optional accounts) — the worker's typed avatar-upload rejections, in plain language. */
+private fun avatarErrorMessage(code: String): String = when (code) {
+    "bad_type" -> "That image type isn't supported — pick a JPEG, PNG, or WebP."
+    "bad_size" -> "That image is too large — pick a smaller one."
+    "bad_image" -> "That file isn't a valid image."
+    "not_signed_in" -> "Sign in first to set a profile picture."
+    else -> "Couldn't reach the server. Check your connection and try again."
+}
+
+/**
+ * Phase 3 (optional accounts) — decode [uri] downscaled (longest side ~512px via [ImageUtils]) and
+ * re-encode to a JPEG ByteArray that fits the worker's 512KB cap, dropping quality until it does. Runs
+ * off the main thread (bitmap work + IO); returns null on any read/decode failure so the caller degrades
+ * to a toast rather than crashing.
+ */
+private fun compressAvatar(context: Context, uri: Uri): ByteArray? {
+    return try {
+        val bitmap = com.winlator.star.core.ImageUtils.getBitmapFromUri(context, uri, 512) ?: return null
+        val maxBytes = 512 * 1024
+        var quality = 85
+        var bytes: ByteArray
+        do {
+            val out = java.io.ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+            bytes = out.toByteArray()
+            quality -= 10
+        } while (bytes.size > maxBytes && quality >= 35)
+        if (bytes.size > maxBytes) null else bytes
+    } catch (e: Exception) {
+        null
+    }
+}
+
 // Phase 2 (optional accounts) — the "My account" sheet. Accounts are OPTIONAL: they only let a user
 // recover / attribute the community configs they share. Styled like the other community dialogs (outlined
 // box, orange accent). Three states:
 //  - LOGGED OUT: a Create / Login tab pair, plus a "Forgot password?" reset (username + recovery key +
 //    new password). Passwords go only to the worker over HTTPS — never logged, never stored locally.
 //  - AFTER CREATE: the one-time recovery key with a Copy button + an "I've saved it" confirm.
-//  - LOGGED IN: the username, a person-icon avatar placeholder (real image = Phase 3), "Show my recovery
-//    key", "My uploads", and "Log out".
+//  - LOGGED IN: the avatar (tap or "Change picture" → system image picker → ≤512KB JPEG → upload) + the
+//    username, "Show my recovery key", "My uploads", and "Log out".
 @Composable
 private fun MyAccountDialog(
     vm: ShortcutsViewModel,
@@ -1808,6 +1849,39 @@ private fun MyAccountDialog(
     var error by remember { mutableStateOf<String?>(null) }
     // Logged-in: reveal the saved recovery key on demand.
     var revealRecovery by remember { mutableStateOf(false) }
+
+    // Phase 3 (optional accounts) — AVATAR. avatarBusy gates the upload spinner; avatarBust cache-busts
+    // the (stable-per-user) avatar URL so Coil re-fetches the just-replaced picture instead of the cached
+    // one. The picker compresses to ≤512KB JPEG off-main, then uploads via AccountManager.
+    val scope = rememberCoroutineScope()
+    var avatarBusy by remember { mutableStateOf(false) }
+    var avatarBust by remember { mutableStateOf(0L) }
+    val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        avatarBusy = true
+        scope.launch {
+            val bytes = withContext(Dispatchers.IO) { compressAvatar(context, uri) }
+            if (bytes == null) {
+                avatarBusy = false
+                Toast.makeText(context, "Couldn't read that image.", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val result = withContext(Dispatchers.IO) {
+                AccountManager.uploadAvatar(context, bytes, "image/jpeg")
+            }
+            avatarBusy = false
+            when (result) {
+                is AccountManager.AccountResult.Success -> {
+                    account = AccountManager.current(context)
+                    avatarBust = System.currentTimeMillis()
+                    AccountUiBus.refresh(context)
+                    Toast.makeText(context, "Profile picture updated.", Toast.LENGTH_SHORT).show()
+                }
+                is AccountManager.AccountResult.Error ->
+                    Toast.makeText(context, avatarErrorMessage(result.code), Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     @Composable
     fun ErrorText() {
@@ -1873,6 +1947,7 @@ private fun MyAccountDialog(
                             Button(onClick = {
                                 justCreated = null
                                 account = AccountManager.current(context)
+                                AccountUiBus.refresh(context)
                             }) { Text("I've saved it") }
                         }
                     }
@@ -1880,20 +1955,38 @@ private fun MyAccountDialog(
                     // --- LOGGED IN: profile + actions ---------------------------------------------
                     account != null -> {
                         val acc = account!!
+                        // Stable-per-user URL → append the cache-bust once we've just replaced the picture.
+                        val displayAvatarUrl = acc.avatarUrl?.let {
+                            if (avatarBust > 0L) "$it&t=$avatarBust" else it
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Icon(
-                                Icons.Filled.AccountCircle,
-                                contentDescription = null,
-                                tint = orange,
-                                modifier = Modifier.size(44.dp),
-                            )
-                            Text(
-                                acc.username,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = OnSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            Box(contentAlignment = Alignment.Center) {
+                                AccountAvatar(
+                                    avatarUrl = displayAvatarUrl,
+                                    size = 48.dp,
+                                    fallbackTint = orange,
+                                    modifier = Modifier.clickable(enabled = !avatarBusy) {
+                                        avatarPicker.launch("image/*")
+                                    },
+                                )
+                                if (avatarBusy) {
+                                    CircularProgressIndicator(Modifier.size(26.dp), strokeWidth = 2.dp)
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    acc.username,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = OnSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                TextButton(
+                                    onClick = { avatarPicker.launch("image/*") },
+                                    enabled = !avatarBusy,
+                                    contentPadding = PaddingValues(vertical = 2.dp),
+                                ) { Text("Change picture", style = MaterialTheme.typography.labelMedium) }
+                            }
                         }
                         Divider(color = DividerColor)
                         OutlinedButton(
@@ -1939,6 +2032,7 @@ private fun MyAccountDialog(
                                 account = null
                                 revealRecovery = false
                                 username = ""; password = ""; error = null
+                                AccountUiBus.refresh(context)
                             },
                             modifier = Modifier.fillMaxWidth(),
                         ) { Text("Log out") }
@@ -1990,6 +2084,7 @@ private fun MyAccountDialog(
                                         when (result) {
                                             is AccountManager.AccountResult.Success -> {
                                                 account = AccountManager.current(context)
+                                                AccountUiBus.refresh(context)
                                                 showReset = false
                                                 password = ""; newPassword = ""; recoveryKeyInput = ""
                                                 Toast.makeText(context, "Password reset — you're signed in.", Toast.LENGTH_SHORT).show()
@@ -2057,6 +2152,7 @@ private fun MyAccountDialog(
                                         when (result) {
                                             is AccountManager.AccountResult.Success -> {
                                                 account = AccountManager.current(context)
+                                                AccountUiBus.refresh(context)
                                                 password = ""
                                                 Toast.makeText(context, "Signed in.", Toast.LENGTH_SHORT).show()
                                             }
@@ -3116,17 +3212,16 @@ private fun CommunityConfigDetailDialog(
                     }
                 }
             }
-            // Uploader attribution (Phase 2). A signed-in upload carries meta.uploader → "by <username>";
-            // an anonymous config has none → "Anonymous user". Real avatar image lands in Phase 3; for now
-            // a person icon placeholder.
+            // Uploader attribution (Phase 2 label + Phase 3 avatar). A signed-in upload carries
+            // meta.uploader → "by <username>" plus its avatar when set; an anonymous config has none →
+            // "Anonymous user" with the person-icon placeholder (AccountAvatar's null fallback).
             if (meta != null) {
                 val uploaderLabel = meta.uploaderName?.let { "by $it" } ?: "Anonymous user"
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Icon(
-                        Icons.Filled.Person,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                        tint = OnSurfaceVariant,
+                    AccountAvatar(
+                        avatarUrl = meta.uploaderAvatarUrl,
+                        size = 16.dp,
+                        fallbackTint = OnSurfaceVariant,
                     )
                     Text(uploaderLabel, style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
                 }

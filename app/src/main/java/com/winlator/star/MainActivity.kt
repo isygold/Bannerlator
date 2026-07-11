@@ -74,6 +74,7 @@ import com.winlator.star.store.AmazonMainActivity
 import com.winlator.star.store.EpicMainActivity
 import com.winlator.star.store.GogMainActivity
 import com.winlator.star.store.SteamMainActivity
+import com.winlator.star.ui.AccountUiBus
 import com.winlator.star.ui.AppDrawerContent
 import com.winlator.star.ui.AppNavGraph
 import com.winlator.star.ui.AppTopBar
@@ -368,9 +369,14 @@ private fun AppShell(
 
     // Clear top bar actions on navigation so stale actions from a previous screen don't persist.
     // Screens that need actions re-set them via SideEffect on each recomposition.
+    // Also re-read the optional signed-in account so the ☰→avatar swap / drawer header reflect a login
+    // or logout that happened on the screen we're returning from.
     LaunchedEffect(currentRoute) {
         topBarActionsState.value = {}
+        AccountUiBus.refresh(context)
     }
+    // Reactive mirror of the signed-in account (null = logged out / anonymous UX unchanged).
+    val account = AccountUiBus.account
 
     val screenTitle = when {
         currentRoute.startsWith("container_detail") -> {
@@ -387,6 +393,7 @@ private fun AppShell(
         drawerContent = {
             AppDrawerContent(
                 currentRoute = currentRoute,
+                account = account,
                 onNavigate = { screen ->
                     scope.launch { drawerState.close() }
                     navController.navigate(screen.route) {
@@ -403,6 +410,16 @@ private fun AppShell(
                     scope.launch { drawerState.close() }
                     onAboutRequested()
                 },
+                // The My-account sheet lives on the Shortcuts screen; land there, then ask it to open.
+                onMyAccount = {
+                    scope.launch { drawerState.close() }
+                    navController.navigate(Screen.Games.route) {
+                        popUpTo(navController.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                    AccountUiBus.requestMyAccount()
+                },
             )
         },
     ) {
@@ -412,6 +429,8 @@ private fun AppShell(
                 AppTopBar(
                     title = screenTitle,
                     showBack = editInputControls,
+                    // Signed-in + has a picture → the ☰ becomes their avatar (still opens the drawer).
+                    avatarUrl = account?.avatarUrl,
                     onNavClick = {
                         if (editInputControls) {
                             navController.popBackStack()

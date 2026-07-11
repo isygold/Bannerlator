@@ -52,6 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.winlator.star.R
+import com.winlator.star.communityconfigs.AccountManager
 import com.winlator.star.ui.theme.LocalAccentDim
 
 private fun iconFor(screen: Screen): Int = when (screen) {
@@ -72,6 +73,9 @@ fun AppDrawerContent(
     onNavigate: (Screen) -> Unit,
     onLaunchStore: (Screen) -> Unit,
     onAbout: () -> Unit,
+    // PHASE 3 (optional accounts): null = logged out (subtle "Sign in" row); non-null = profile header.
+    account: AccountManager.Account? = null,
+    onMyAccount: () -> Unit = {},
 ) {
     var showHelp by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -94,6 +98,8 @@ fun AppDrawerContent(
             .verticalScroll(rememberScrollState()),
     ) {
         Spacer(Modifier.height(18.dp))
+
+        DrawerAccountHeader(account = account, onMyAccount = onMyAccount)
 
         DrawerSectionHeader("Library")
         DrawerItem(Screen.Games,         currentRoute, onNavigate)
@@ -131,6 +137,57 @@ fun AppDrawerContent(
         StorageWidget()
         Spacer(Modifier.height(12.dp))
     }
+}
+
+@Composable
+private fun DrawerAccountHeader(account: AccountManager.Account?, onMyAccount: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onMyAccount)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        AccountAvatar(
+            avatarUrl = account?.avatarUrl,
+            size = 40.dp,
+            fallbackTint = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            if (account != null) {
+                Text(
+                    text = account.username,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+                Text(
+                    text = "My account",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp,
+                )
+            } else {
+                Text(
+                    text = "Sign in / My account",
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                Text(
+                    text = "Optional — to manage your shared configs",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+    HorizontalDivider(
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+        modifier = Modifier.padding(start = 20.dp, top = 6.dp, end = 20.dp, bottom = 2.dp)
+    )
 }
 
 @Composable
