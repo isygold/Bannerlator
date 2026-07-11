@@ -1,8 +1,8 @@
 # Star-Compose — Progress Log
 
-## 2026-07-11 — 🌐 ONLINE SHARING FEATURE-COMPLETE (steps 1–4 + My uploads + auto-index) — branch `feat/config-upload`, NOT merged
+## 2026-07-11 — 🌐 ONLINE SHARING FEATURE-COMPLETE — ✅ MERGED TO MAIN (`6843009d`), NOT tagged
 
-> **The whole "give back" half of community configs is now built. Branch `feat/config-upload` off main `f440f3c8`, code tip `19e82c32`. NOT merged, NOT tagged. Latest APK `/sdcard/Download/bannerlator-my-uploads-v2-19e82c3-standard.apk`. User installed it, will device-test the newest UI (My-uploads v2 + 4b catalog visibility) after work. Full plan/arch: memory [[project_bannerlator_bannerhub_config_crossuse]].**
+> **The whole "give back" half of community configs is built AND merged. ✅ MERGED TO MAIN (fast-forward, main tip `6843009d`, +8 commits from `feat/config-upload`). NOT tagged (still 2.6-preN). Main artifacts build dispatched: run `29166165248` (`release_number=1.0-test`). Latest APK `/sdcard/Download/bannerlator-my-uploads-v2-19e82c3-standard.apk`. User installed it, will device-test the newest UI (My-uploads v2 + 4b catalog visibility) after work. Full plan/arch: memory [[project_bannerlator_bannerhub_config_crossuse]].**
 >
 > **Asymmetric visibility (BannerHub NEVER sees Bannerlator configs; Bannerlator sees BOTH) — PROVEN.** Uploads → separate `bannerlator-game-configs` repo via worker `?ns=bannerlator`; BannerHub reads only its own repo (never passes ns).
 >
@@ -13,7 +13,7 @@
 > **✅ AUTO-INDEX — uploads index in ~1min not 24h.** New 2nd workflow `bgc-repo/.github/workflows/trigger-on-upload.yml` (`721ad38`): on push to `configs/**` → `gh workflow run sync-from-bannerhub.yml` (workflow_dispatch fires with default GITHUB_TOKEN + actions:write, no PAT). Loop-safe (sync commits root files only, `[skip ci]`; trigger watches configs/** only). Daily cron stays as safety net.
 > **✅ Step 3 — My uploads manager.** v1 (`e60a81c3`): "My uploads" list (from manifest, reinstall-proof) + delete + edit-description + polish (replace-Cancel no longer parks the coroutine; button "Preparing…"→"Uploading…"). v2 (`19e82c32`): **globe catalog-browser entry point** (👤 person icon; top bar now ↻ Refresh · 👤 My uploads · ✕ Close — upload/import icon REMOVED from globe) + **expandable-list + summary redesign** (header `Shared N · ↓total · ★total`; tap a row to expand → inline description `OutlinedTextField` prefilled from `/desc`, Save inline, Delete; no separate edit modal). Same view opens from globe 👤 AND per-game dialog.
 >
-> **▶️ NEXT (after user's device test):** verify My-uploads v2 (globe 👤 → expand → inline edit) + 4b catalog visibility (globe → Refresh → DiRT 3 shows the config) + auto-trigger workflow (next real upload fires it). THEN **merge `feat/config-upload` → main** (carries steps 2/4a/4b-app/My-uploads; ns-download fix; polish) → cut **`2.6-pre2`**. Commit trail on branch: `8b0eea95`(2)→`571c65ee`(4a)→`945c092a`(ns-fix)→`aa5a600d`(docs)→`5b8c157d`(refresh+fallback)→`e60a81c3`(My-uploads v1)→`19e82c32`(My-uploads v2). 2.6 release notes drafted in topic file.
+> **▶️ NEXT:** user device-tests My-uploads v2 (globe 👤 → expand → inline edit) + 4b catalog visibility (globe → Refresh → DiRT 3 shows the config) + auto-trigger workflow (next real upload fires it). THEN cut **`2.6-pre2`** (versionCode bump + tag prerelease + `update.json`). Merge to main = DONE. Commit trail on branch: `8b0eea95`(2)→`571c65ee`(4a)→`945c092a`(ns-fix)→`aa5a600d`(docs)→`5b8c157d`(refresh+fallback)→`e60a81c3`(My-uploads v1)→`19e82c32`(My-uploads v2). 2.6 release notes drafted in topic file.
 
 ## 2026-07-11 — 🌐 STEP 3 ONLINE SHARING: worker ns-routing DEPLOYED+VERIFIED + client upload action BUILT
 
