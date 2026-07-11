@@ -102,18 +102,22 @@ public class DXVKConfigDialog {
         String configFile = config.get("dxvkConfigFile");
         boolean hasConfigFile = configFile != null && !configFile.isEmpty() && !configFile.equals("0") && !configFile.equals("None");
 
+        // DXVK_FRAME_RATE is a standalone env var, independent of DXVK_CONFIG / DXVK_CONFIG_FILE.
+        String framerate = config.get("framerate");
+        if (!framerate.isEmpty() && !framerate.equals("0")) {
+            envVars.put("DXVK_FRAME_RATE", framerate);
+        }
+
         // When a custom DXVK_CONFIG_FILE is selected, skip DXVK_CONFIG entirely
         // so the user's config file has full control (DXVK_CONFIG would override it).
         if (!hasConfigFile) {
-            String framerate = config.get("framerate");
             StringBuilder contentBuilder = new StringBuilder();
             if (!framerate.isEmpty() && !framerate.equals("0")) {
                 contentBuilder.append("dxgi.maxFrameRate = ").append(framerate).append("; ");
                 contentBuilder.append("d3d9.maxFrameRate = ").append(framerate);
-                envVars.put("DXVK_FRAME_RATE", framerate);
             }
 
-            // Append vegas-specific defaults always — harmless for plain DXVK
+            // Append vegas-specific defaults — harmless for plain DXVK
             {
                 if (contentBuilder.length() > 0) contentBuilder.append("; ");
                 contentBuilder.append("dxvk.enableStarProfile = Auto; ");
