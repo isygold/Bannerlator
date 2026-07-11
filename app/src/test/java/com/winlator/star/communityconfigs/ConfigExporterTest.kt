@@ -59,6 +59,9 @@ class ConfigExporterTest {
         // (every DXVK sub-key). Each must read back through export → translate into the same scalar / dxw.
         val effective = linkedMapOf(
             "dxwrapperConfig" to "version=2.4.1,vkd3dVersion=2.14,async=1,vulkanVersion=1.3,maxDeviceMemory=4096",
+            // Raw wrapper CHOICE must survive verbatim and OVERRIDE the pc_* inference (versions present
+            // would otherwise infer "dxvk+vkd3d") — this is what makes VEGAS (and any wrapper) round-trip.
+            "dxwrapper" to "vegas",
             "screenSize" to "1280x720",
             "renderer" to "Vulkan",
             "fullscreenMode" to "1",
@@ -77,6 +80,8 @@ class ConfigExporterTest {
         val json = ConfigExporter.export(effective, meta)
         val config = ConfigTranslator.translate(JSONObject(json))
 
+        // Raw dxwrapper overlays scalars, overriding the version-based inference (would be "dxvk+vkd3d").
+        assertEquals("vegas", config.scalars["dxwrapper"])
         assertEquals("1280x720", config.scalars["screenSize"])
         assertEquals("Vulkan", config.scalars["renderer"])
         assertEquals("1", config.scalars["fullscreenMode"])

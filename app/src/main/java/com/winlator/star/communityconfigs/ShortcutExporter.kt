@@ -38,6 +38,7 @@ object ShortcutExporter {
         // with). Composite k=v lists (dxwrapperConfig / graphicsDriverConfig) and the scalars with a
         // clean container getter fall back; execArgs / inputType are read as-is (shortcut-scoped).
         val effective = LinkedHashMap<String, String>()
+        put(effective, "dxwrapper", orDefault(shortcut, "dxwrapper", container?.getDXWrapper()))
         put(effective, "dxwrapperConfig", orDefault(shortcut, "dxwrapperConfig", container?.getDXWrapperConfig()))
         put(effective, "graphicsDriverConfig", orDefault(shortcut, "graphicsDriverConfig", container?.getGraphicsDriverConfig()))
         put(effective, "graphicsDriver", orDefault(shortcut, "graphicsDriver", container?.getGraphicsDriver()))

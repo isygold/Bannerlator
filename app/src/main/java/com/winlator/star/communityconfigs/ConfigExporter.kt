@@ -34,6 +34,10 @@ object ConfigExporter {
      * is NOT here — it is lifted out of {@code dxwrapperConfig} separately and stored under {@code async}.
      */
     val BL_EXT_KEYS: List<String> = listOf(
+        // dxwrapper = the raw DX-wrapper CHOICE (dxvk / dxvk+vkd3d / wined3d / vegas). The pc_* path only
+        // INFERS this from the DXVK/VKD3D versions, so a "vegas" (or any non-inferrable) wrapper choice
+        // would be lost on import; carrying it verbatim makes every wrapper — incl. VEGAS — round-trip.
+        "dxwrapper",
         "screenSize", "renderer", "renderScale", "sfCompatMode", "fullscreenMode", "frameGenEngine",
         "fpsLimiterEnabled", "sharpnessEffect", "sharpnessLevel", "sharpnessDenoise", "reshadeLoadout",
         "reshadeMode", "reshadeParams", "reshadeEffect", "emulator", "box64Version", "box64Preset",
