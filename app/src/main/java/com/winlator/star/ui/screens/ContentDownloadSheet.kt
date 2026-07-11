@@ -75,7 +75,7 @@ fun ContentDownloadSheet(
     var installProgress by remember { mutableStateOf<Map<String, Float>>(emptyMap()) }
     var installingKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
     // The content-card install dialog (local-file import AND catalog download share it) — null when idle.
-    var installDialog by remember { mutableStateOf<InstallDialogState?>(null) }
+    var installDialog by remember { mutableStateOf<InstallCardState?>(null) }
     var showInfoProfile by remember { mutableStateOf<ContentProfile?>(null) }
     var confirmRemoveProfile by remember { mutableStateOf<ContentProfile?>(null) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
@@ -100,21 +100,21 @@ fun ContentDownloadSheet(
             // Version/desc aren't known until the archive is parsed — seed the card with the filename +
             // (single-type screens) the content type, then let the % bar carry the rest.
             val fname = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotEmpty() } ?: "Content file"
-            installDialog = InstallDialogState(
+            installDialog = InstallCardState(
                 title = fname,
                 type = contentTypes.singleOrNull()?.toString(),
-                phase = InstallPhase.INSTALLING,
+                phase = InstallCardPhase.INSTALLING,
             )
             installContent(context, cm, uri, onProgress = { f, _ ->
-                installDialog = installDialog?.copy(fraction = f, phase = InstallPhase.INSTALLING)
+                installDialog = installDialog?.copy(fraction = f, phase = InstallCardPhase.INSTALLING)
             }) { ok ->
                 if (ok) {
-                    installDialog = installDialog?.copy(fraction = 1f, phase = InstallPhase.DONE)
+                    installDialog = installDialog?.copy(fraction = 1f, phase = InstallCardPhase.DONE)
                     loadProfiles(cm, contentTypes) { profiles = it }
                     refreshKey++
                     onContentChanged()
                 } else {
-                    installDialog = installDialog?.copy(phase = InstallPhase.ERROR, error = "Install failed.")
+                    installDialog = installDialog?.copy(phase = InstallCardPhase.ERROR, error = "Install failed.")
                 }
             }
         }
@@ -177,7 +177,7 @@ fun ContentDownloadSheet(
     // while the install is running; auto-closes shortly after it finishes.
     installDialog?.let { st -> InstallProgressDialog(st, onClose = { installDialog = null }) }
     LaunchedEffect(installDialog?.phase) {
-        if (installDialog?.phase == InstallPhase.DONE) {
+        if (installDialog?.phase == InstallCardPhase.DONE) {
             delay(900)
             installDialog = null
         }
@@ -272,13 +272,13 @@ fun ContentDownloadSheet(
                                         installProgress = installProgress[key],
                                         onDownload = {
                                             // Seed the content-card dialog immediately with the full profile info.
-                                            installDialog = InstallDialogState(
+                                            installDialog = InstallCardState(
                                                 title = profile.verName,
                                                 type = profile.type.toString(),
                                                 verName = profile.verName,
                                                 verCode = profile.verCode.toString(),
                                                 desc = profile.desc,
-                                                phase = InstallPhase.DOWNLOADING,
+                                                phase = InstallCardPhase.DOWNLOADING,
                                             )
                                             downloadingKeys = downloadingKeys + key
                                             downloadProgress = downloadProgress + (key to 0f)
@@ -287,7 +287,7 @@ fun ContentDownloadSheet(
                                                     downloadToCache(context, profile) { frac ->
                                                         activity?.runOnUiThread {
                                                             downloadProgress = downloadProgress + (key to frac)
-                                                            installDialog = installDialog?.copy(fraction = frac, phase = InstallPhase.DOWNLOADING)
+                                                            installDialog = installDialog?.copy(fraction = frac, phase = InstallCardPhase.DOWNLOADING)
                                                         }
                                                     }
                                                 }
@@ -296,29 +296,29 @@ fun ContentDownloadSheet(
                                                     downloadingKeys = downloadingKeys - key
                                                     downloadProgress = downloadProgress - key
                                                     installProgress = installProgress + (key to 0f)
-                                                    installDialog = installDialog?.copy(fraction = 0f, phase = InstallPhase.INSTALLING)
+                                                    installDialog = installDialog?.copy(fraction = 0f, phase = InstallCardPhase.INSTALLING)
                                                     installContent(context, cm, uri, onProgress = { f, _ ->
                                                         // Monotonic: ignore the brief XZ-probe reset before the ZSTD pass.
                                                         val prev = installProgress[key] ?: 0f
                                                         val next = maxOf(prev, f)
                                                         installProgress = installProgress + (key to next)
-                                                        installDialog = installDialog?.copy(fraction = next, phase = InstallPhase.INSTALLING)
+                                                        installDialog = installDialog?.copy(fraction = next, phase = InstallCardPhase.INSTALLING)
                                                     }) { ok ->
                                                         installingKeys = installingKeys - key
                                                         installProgress = installProgress - key
                                                         if (ok) {
-                                                            installDialog = installDialog?.copy(fraction = 1f, phase = InstallPhase.DONE)
+                                                            installDialog = installDialog?.copy(fraction = 1f, phase = InstallCardPhase.DONE)
                                                             loadProfiles(cm, contentTypes) { profiles = it }
                                                             refreshKey++
                                                             onContentChanged()
                                                         } else {
-                                                            installDialog = installDialog?.copy(phase = InstallPhase.ERROR, error = "Install failed.")
+                                                            installDialog = installDialog?.copy(phase = InstallCardPhase.ERROR, error = "Install failed.")
                                                         }
                                                     }
                                                 } else {
                                                     downloadingKeys = downloadingKeys - key
                                                     downloadProgress = downloadProgress - key
-                                                    installDialog = installDialog?.copy(phase = InstallPhase.ERROR, error = "Download failed.")
+                                                    installDialog = installDialog?.copy(phase = InstallCardPhase.ERROR, error = "Download failed.")
                                                 }
                                             }
                                         },
@@ -457,27 +457,27 @@ private fun InfoField(label: String, value: String) {
 }
 
 // ── Install dialog (content-card styled) ──────────────────────────────────────
-private enum class InstallPhase { DOWNLOADING, INSTALLING, DONE, ERROR }
+private enum class InstallCardPhase { DOWNLOADING, INSTALLING, DONE, ERROR }
 
 // Snapshot the install-card dialog renders. Catalog installs seed every field up front; local-file
 // imports seed title/type only and fill the % bar as extraction runs.
-private data class InstallDialogState(
+private data class InstallCardState(
     val title: String,
     val type: String? = null,
     val verName: String? = null,
     val verCode: String? = null,
     val desc: String? = null,
     val fraction: Float = 0f,
-    val phase: InstallPhase = InstallPhase.INSTALLING,
+    val phase: InstallCardPhase = InstallCardPhase.INSTALLING,
     val error: String? = null,
 )
 
 // The same outlined-card look as the content rows, carrying the Content-Info fields plus a live bar.
 // Dismiss is blocked until the install reaches a terminal (DONE / ERROR) state.
 @Composable
-private fun InstallProgressDialog(state: InstallDialogState, onClose: () -> Unit) {
+private fun InstallProgressDialog(state: InstallCardState, onClose: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    val terminal = state.phase == InstallPhase.DONE || state.phase == InstallPhase.ERROR
+    val terminal = state.phase == InstallCardPhase.DONE || state.phase == InstallCardPhase.ERROR
     Dialog(
         onDismissRequest = { if (terminal) onClose() },
         properties = DialogProperties(dismissOnBackPress = terminal, dismissOnClickOutside = terminal),
@@ -504,7 +504,7 @@ private fun InstallProgressDialog(state: InstallDialogState, onClose: () -> Unit
                     Text(state.desc, color = cs.onSurface, style = MaterialTheme.typography.bodySmall)
                 }
                 Spacer(Modifier.height(16.dp))
-                if (state.phase == InstallPhase.ERROR) {
+                if (state.phase == InstallCardPhase.ERROR) {
                     Text(state.error ?: "Install failed.", color = cs.error, style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(8.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -513,11 +513,11 @@ private fun InstallProgressDialog(state: InstallDialogState, onClose: () -> Unit
                 } else {
                     val frac = state.fraction.coerceIn(0f, 1f)
                     val label = when (state.phase) {
-                        InstallPhase.DOWNLOADING -> "Downloading"
-                        InstallPhase.DONE -> "Done"
+                        InstallCardPhase.DOWNLOADING -> "Downloading"
+                        InstallCardPhase.DONE -> "Done"
                         else -> "Installing"
                     }
-                    val barColor = if (state.phase == InstallPhase.DONE) Color(0xFF4CAF50) else cs.primary
+                    val barColor = if (state.phase == InstallCardPhase.DONE) Color(0xFF4CAF50) else cs.primary
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(label, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                         Text("${(frac * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
