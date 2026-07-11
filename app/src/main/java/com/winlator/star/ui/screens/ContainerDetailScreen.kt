@@ -1471,8 +1471,13 @@ internal fun LabeledDropdown(
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
             modifier = Modifier.menuAnchor().fillMaxWidth()
         )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { opt ->
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.outlinedMenuCard(),
+        ) {
+            options.forEachIndexed { idx, opt ->
+                if (idx > 0) MenuItemDivider()
                 val optEnabled = opt !in disabledOptions
                 DropdownMenuItem(
                     text = { Text(opt) },
@@ -1517,8 +1522,13 @@ private fun CompactDropdown(
                 ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
             }
         }
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { opt ->
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.outlinedMenuCard(),
+        ) {
+            options.forEachIndexed { idx, opt ->
+                if (idx > 0) MenuItemDivider()
                 DropdownMenuItem(
                     text = { Text(opt) },
                     onClick = { onSelect(opt); expanded = false }
