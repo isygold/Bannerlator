@@ -251,10 +251,17 @@ object CommunityConfigApply {
             }
         }
 
-        // Proton / wineVersion — container-only, advisory only.
+        // Proton / wineVersion — container-only, advisory only. Suppress the nudge when the container
+        // ALREADY runs the same base Proton: the config's advisory value is normalized (e.g.
+        // "proton-11.0-arm64ec"), so normalize the container's raw wineVersion the same way before
+        // comparing — otherwise "proton-11.0-arm64ec" vs "Proton-11.0-1-arm64ec-4" reads as a mismatch
+        // when it's the identical build (a config exported from this very container tripped exactly that).
         config.advisories["wineVersion"]?.let { proton ->
-            val have = containerWineVersion?.takeIf { it.isNotBlank() } ?: "your container's"
-            advisories.add("config used $proton (container-only) — your container is $have; change it in the container editor if needed.")
+            val containerKey = containerWineVersion?.takeIf { it.isNotBlank() }?.let { ConfigTranslator.protonKey(it) }
+            if (containerKey == null || !containerKey.equals(proton, ignoreCase = true)) {
+                val have = containerWineVersion?.takeIf { it.isNotBlank() } ?: "your container's"
+                advisories.add("config used $proton (container-only) — your container is $have; change it in the container editor if needed.")
+            }
         }
 
         val message = when {

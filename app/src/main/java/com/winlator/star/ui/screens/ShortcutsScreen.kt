@@ -8,6 +8,8 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
+import android.media.MediaScannerConnection
+import android.os.Environment
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.drawable.Icon
@@ -69,6 +71,9 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Upload
@@ -88,6 +93,7 @@ import com.winlator.star.communityconfigs.CanonicalDevice
 import com.winlator.star.communityconfigs.CanonicalGame
 import com.winlator.star.communityconfigs.CommunityConfigApply
 import com.winlator.star.communityconfigs.CommunityConfigRef
+import com.winlator.star.communityconfigs.ShortcutExporter
 import com.winlator.star.communityconfigs.GameMatcher
 import com.winlator.star.communityconfigs.ShortcutConfig
 import com.winlator.star.communityconfigs.WorkerConfigEntry
@@ -132,6 +138,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.preference.PreferenceManager
 import androidx.compose.ui.viewinterop.AndroidView
@@ -231,6 +238,13 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var installSheetFor by remember { mutableStateOf<CommunityConfigApply.MissingComponent?>(null) }
     // Missing GPU driver the user tapped "Browse all drivers" on → opens the adrenotools driver browser.
     var driverSheetFor by remember { mutableStateOf<CommunityConfigApply.MissingDriver?>(null) }
+    // Phase 3 step 2 — LOCAL export/import.
+    // The generated export artifact awaiting a Share / Save-to-Downloads choice (null = no export sheet).
+    var exportResult by remember { mutableStateOf<ShortcutExporter.ExportResult?>(null) }
+    // The shortcut a freshly-picked import file applies to; null means it came from the catalog browser
+    // (no target yet) so the picked file is stashed in [importedConfigUri] and a target picker is shown.
+    var importPendingTarget by remember { mutableStateOf<Shortcut?>(null) }
+    var importedConfigUri by remember { mutableStateOf<Uri?>(null) }
     // A tapped config row → small "Apply to game… | View details" chooser. The pair carries the picked
     // config (a specific uploaded file, or a device-row fallback) plus the in-context shortcut (non-null
     // from the per-shortcut sheet, null from the catalog browser where a target hasn't been chosen yet).
@@ -275,6 +289,67 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         applyPicker = null
         if (GameMatcher.match(sc.name, listOf(pick.game)).isNotEmpty()) runCommunityApply(sc, pick)
         else applyMismatch = sc to pick
+    }
+
+    // Phase 3 step 2 — IMPORT runner. Read + translate + apply an imported file to [sc], funnelling
+    // into the SAME applyBusy → applyResult → smart-install flow a browsed config takes. A malformed
+    // file returns a clean ok=false result (shown by the existing "Couldn't apply" dialog), never a crash.
+    val runImport: (Shortcut, Uri) -> Unit = { sc, uri ->
+        applyBusy = true
+        applyResult = null
+        applyTarget = sc
+        vm.importConfigFile(uri, sc) { res ->
+            applyBusy = false
+            applyResult = res
+        }
+    }
+
+    // Phase 3 step 2 — EXPORT. Write the generated config to cacheDir/community_configs/export/<file>
+    // off-main, then hand it off. Share uses the app's existing FileProvider (${applicationId}.tileprovider,
+    // the same authority the save-share + updater use); Save copies it to public Downloads and toasts.
+    val shareExport: (ShortcutExporter.ExportResult) -> Unit = { res ->
+        exportResult = null
+        scope.launch(Dispatchers.IO) {
+            val dir = File(context.cacheDir, "community_configs/export").apply { mkdirs() }
+            val file = File(dir, res.fileName)
+            file.writeText(res.json)
+            withContext(Dispatchers.Main) {
+                try {
+                    val authority = context.packageName + ".tileprovider"
+                    val uri = FileProvider.getUriForFile(context, authority, file)
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "application/json"
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        putExtra(Intent.EXTRA_SUBJECT, res.game)
+                        putExtra(Intent.EXTRA_TEXT, "Bannerlator config for ${res.game}")
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(Intent.createChooser(send, "Share config"))
+                } catch (e: Exception) {
+                    Toast.makeText(context, "Couldn't share the config.", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+    val saveExportToDownloads: (ShortcutExporter.ExportResult) -> Unit = { res ->
+        exportResult = null
+        scope.launch(Dispatchers.IO) {
+            val ok = try {
+                val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                if (!downloads.exists()) downloads.mkdirs()
+                val out = File(downloads, res.fileName)
+                out.writeText(res.json)
+                out.setReadable(true, false)
+                MediaScannerConnection.scanFile(context, arrayOf(out.absolutePath), null, null)
+                out.absolutePath
+            } catch (e: Exception) {
+                null
+            }
+            withContext(Dispatchers.Main) {
+                if (ok != null) Toast.makeText(context, "Saved to $ok", Toast.LENGTH_LONG).show()
+                else Toast.makeText(context, "Couldn't save the config.", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     // Shared "Scrape cover" action so both grid tiles and list rows fire the same flow.
@@ -379,6 +454,26 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) InAppFilePicker.pickedUri(result.data)?.let { handleShortcutImport(it) }
+    }
+    // Phase 3 step 2 — config-import picker (in-app File Manager, `.json` only). A known
+    // [importPendingTarget] applies straight to that shortcut; otherwise (from the catalog browser)
+    // the picked file is stashed and a target picker is shown.
+    val importConfigInAppLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            InAppFilePicker.pickedUri(result.data)?.let { uri ->
+                val target = importPendingTarget
+                if (target != null) runImport(target, uri) else importedConfigUri = uri
+            }
+        }
+    }
+    // Launch the config-import picker for [target] (null = from the browser → pick a target afterwards).
+    val launchConfigImport: (Shortcut?) -> Unit = { target ->
+        importPendingTarget = target
+        importConfigInAppLauncher.launch(
+            InAppFilePicker.buildIntent(context, InAppFilePicker.JSON, "Select a config .json")
+        )
     }
 
     val topBarActions = LocalTopBarActions.current
@@ -762,6 +857,27 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 val result = communityResult
                 val game = result?.match
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // Phase 3 step 2 — local export/import for THIS shortcut. Share generates a config file
+                // and opens the Share/Save sheet; Import picks a `.json` and applies it straight to `s`.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { vm.exportShortcutConfig(s) { exportResult = it } },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Filled.Share, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Share config")
+                    }
+                    OutlinedButton(
+                        onClick = { launchConfigImport(s) },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Icon(Icons.Filled.FileUpload, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Import")
+                    }
+                }
+                Divider(color = DividerColor)
                 OutlinedTextField(
                     value = communitySearch,
                     onValueChange = { q ->
@@ -950,6 +1066,8 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             onDismiss = { showCommunityBrowser = false },
             // No in-context shortcut from the browser (null) → chooser's "Apply to game…" runs the picker.
             onPick = { pick -> configAction = pick to null },
+            // Import a local config file → pick a target shortcut afterwards (launchConfigImport(null)).
+            onImport = { launchConfigImport(null) },
         )
     }
 
@@ -1076,6 +1194,71 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 }) { Text("Apply anyway") }
             },
             dismissButton = { TextButton(onClick = { applyMismatch = null }) { Text("Cancel") } },
+        )
+    }
+
+    // Phase 3 step 2 — EXPORT hand-off. After a config artifact is generated, offer the two local
+    // sinks: Share (ACTION_SEND via the app FileProvider) or Save to the public Downloads folder.
+    exportResult?.let { res ->
+        AlertDialog(
+            onDismissRequest = { exportResult = null },
+            title = { Text("Share this game's config") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("A config file for \"${res.game}\" is ready.", color = OnSurface)
+                    Text(res.fileName, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant)
+                }
+            },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { saveExportToDownloads(res) }) {
+                        Icon(Icons.Filled.Download, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Save to Downloads")
+                    }
+                    TextButton(onClick = { shareExport(res) }) {
+                        Icon(Icons.Filled.Share, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Share")
+                    }
+                }
+            },
+            dismissButton = { TextButton(onClick = { exportResult = null }) { Text("Cancel") } },
+        )
+    }
+
+    // Phase 3 step 2 — IMPORT target picker. Reached only from the catalog browser (no in-context
+    // shortcut): mirrors the apply-target picker — pick which shortcut the imported file applies to.
+    importedConfigUri?.let { uri ->
+        val shortcutList = vm.currentShortcuts()
+        AlertDialog(
+            onDismissRequest = { importedConfigUri = null },
+            title = { Text("Apply imported config to…") },
+            text = {
+                if (shortcutList.isEmpty()) {
+                    Text("You have no shortcuts yet.", color = OnSurfaceVariant)
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
+                    ) {
+                        shortcutList.forEach { sc ->
+                            Text(
+                                text = sc.name,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        importedConfigUri = null
+                                        runImport(sc, uri)
+                                    }
+                                    .padding(vertical = 12.dp),
+                                color = OnSurface,
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { importedConfigUri = null }) { Text("Cancel") } },
         )
     }
 
@@ -1589,6 +1772,7 @@ private fun CommunityCatalogBrowser(
     vm: ShortcutsViewModel,
     onDismiss: () -> Unit,
     onPick: (CommunityPick) -> Unit,
+    onImport: () -> Unit,
 ) {
     var catalog by remember { mutableStateOf<CommunityCatalog?>(null) }
     var loading by remember { mutableStateOf(true) }
@@ -1727,6 +1911,12 @@ private fun CommunityCatalogBrowser(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f).padding(start = if (selectedGame == null) 4.dp else 0.dp),
                     )
+                    // Import a local config `.json` (then pick a target shortcut). Only at the top level.
+                    if (selectedGame == null) {
+                        IconButton(onClick = onImport) {
+                            Icon(Icons.Filled.FileUpload, contentDescription = "Import config file")
+                        }
+                    }
                     IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
                 }
                 Divider(color = DividerColor)

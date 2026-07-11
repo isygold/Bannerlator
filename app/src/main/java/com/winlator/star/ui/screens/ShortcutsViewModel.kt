@@ -27,6 +27,7 @@ import com.winlator.star.communityconfigs.ShortcutConfig
 import com.winlator.star.communityconfigs.DeviceIdentity
 import com.winlator.star.communityconfigs.GameMatcher
 import com.winlator.star.communityconfigs.InstalledComponents
+import com.winlator.star.communityconfigs.ShortcutExporter
 import com.winlator.star.container.Container
 import com.winlator.star.container.ContainerManager
 import com.winlator.star.container.Shortcut
@@ -44,6 +45,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
@@ -309,6 +311,63 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
                     containerWineVersion = shortcut.container?.getWineVersion(),
                     isAdreno = GPUInformation.isAdrenoGPU(getApplication()),
                 )
+            }
+            if (result.ok && result.changed.isNotEmpty()) refresh()
+            onResult(result)
+        }
+    }
+
+    /**
+     * PHASE 3 step 2 — EXPORT. Resolve [shortcut]'s effective settings into a shareable config
+     * artifact via [ShortcutExporter]. Off the main thread (pure reads + string work); the caller
+     * hands the returned [ShortcutExporter.ExportResult] to the share sheet / Save-to-Downloads path.
+     */
+    fun exportShortcutConfig(
+        shortcut: Shortcut,
+        onResult: (ShortcutExporter.ExportResult) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val res = withContext(Dispatchers.IO) { ShortcutExporter.fromShortcut(shortcut, getApplication()) }
+            onResult(res)
+        }
+    }
+
+    /**
+     * PHASE 3 step 2 — IMPORT. Read a config file at [uri], translate it, resolve components against
+     * what's installed, then SURGICALLY merge into [target] — the identical apply path a browsed
+     * config takes, so smart-install works for imported files too. All IO is off the main thread; a
+     * missing/unreadable/malformed file returns a clean [CommunityConfigApply.ConfigApplyResult]
+     * (ok=false) instead of throwing.
+     */
+    fun importConfigFile(
+        uri: Uri,
+        target: Shortcut,
+        onResult: (CommunityConfigApply.ConfigApplyResult) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    val text = getApplication<Application>().contentResolver.openInputStream(uri)
+                        ?.bufferedReader()?.use { it.readText() }
+                        ?: return@withContext CommunityConfigApply.ConfigApplyResult(
+                            ok = false,
+                            message = "Couldn't read that file.",
+                        )
+                    val config = ConfigTranslator.translate(JSONObject(text))
+                    val installed = InstalledComponents.read(getApplication())
+                    CommunityConfigApply.apply(
+                        shortcut = target,
+                        config = config,
+                        installed = installed,
+                        containerWineVersion = target.container?.getWineVersion(),
+                        isAdreno = GPUInformation.isAdrenoGPU(getApplication()),
+                    )
+                } catch (e: Exception) {
+                    CommunityConfigApply.ConfigApplyResult(
+                        ok = false,
+                        message = "That file isn't a valid config (${e.message ?: "parse error"}).",
+                    )
+                }
             }
             if (result.ok && result.changed.isNotEmpty()) refresh()
             onResult(result)
