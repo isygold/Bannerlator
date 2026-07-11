@@ -53,6 +53,19 @@ class CommunityConfigRepository(context: Context) {
         return emptyList()
     }
 
+    /**
+     * FORCE a fresh pull of the index, bypassing BOTH the in-memory and disk/24h caches: re-downloads
+     * {@code games_canonical.json} with a cache-busting query so a stale CDN copy isn't served, then
+     * updates the in-mem + disk cache with the fresh copy and returns the parsed games. Returns null on
+     * failure (offline / bad body) so the caller can KEEP showing the previously cached index. Blocking —
+     * call from a background thread.
+     */
+    fun refreshIndex(): List<CanonicalGame>? {
+        val busted = INDEX_URL + "?t=" + System.currentTimeMillis()
+        val fetched = fetchIndexBlocking(busted) ?: return null
+        return parseAndCache(fetched)
+    }
+
     private fun isStale(): Boolean {
         val lastModified = indexFile.lastModified()
         return lastModified <= 0L || (System.currentTimeMillis() - lastModified) > MAX_AGE_MS
@@ -93,10 +106,10 @@ class CommunityConfigRepository(context: Context) {
     }
 
     /** Blocking GET of the index via HttpUtils' async download bridged to a synchronous result. */
-    private fun fetchIndexBlocking(): String? {
+    private fun fetchIndexBlocking(url: String = INDEX_URL): String? {
         val latch = java.util.concurrent.CountDownLatch(1)
         val holder = arrayOfNulls<String>(1)
-        HttpUtils.download(INDEX_URL) { body ->
+        HttpUtils.download(url) { body ->
             holder[0] = body
             latch.countDown()
         }

@@ -72,6 +72,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FileUpload
@@ -1871,8 +1872,11 @@ private fun CommunityCatalogBrowser(
     onPick: (CommunityPick) -> Unit,
     onImport: () -> Unit,
 ) {
+    val context = LocalContext.current
     var catalog by remember { mutableStateOf<CommunityCatalog?>(null) }
     var loading by remember { mutableStateOf(true) }
+    // True while a manual index refresh is in flight (disables the button + shows a spinner).
+    var refreshing by remember { mutableStateOf(false) }
     // Filters/search/selection survive rotation (rememberSaveable) so the user keeps their place;
     // the drilled-in game is keyed by its identity string (CanonicalGame isn't itself saveable).
     var query by rememberSaveable { mutableStateOf("") }
@@ -2011,6 +2015,39 @@ private fun CommunityCatalogBrowser(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f).padding(start = if (selectedGame == null) 4.dp else 0.dp),
                     )
+                    // Force-refresh the community index (bypass the 24h cache) so freshly-folded uploads
+                    // appear now. Only at the top level; spinner + disabled while refreshing.
+                    if (selectedGame == null) {
+                        IconButton(
+                            onClick = {
+                                refreshing = true
+                                vm.refreshCommunityIndex { fresh ->
+                                    refreshing = false
+                                    if (fresh != null) {
+                                        catalog = fresh
+                                        Toast.makeText(
+                                            context,
+                                            "Community index refreshed (${fresh.games.size} games)",
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            "Couldn't refresh the community index.",
+                                            Toast.LENGTH_SHORT,
+                                        ).show()
+                                    }
+                                }
+                            },
+                            enabled = !refreshing,
+                        ) {
+                            if (refreshing) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Filled.Refresh, contentDescription = "Refresh community index")
+                            }
+                        }
+                    }
                     // Import a local config `.json` (then pick a target shortcut). Only at the top level.
                     if (selectedGame == null) {
                         IconButton(onClick = onImport) {

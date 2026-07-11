@@ -217,6 +217,24 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
+     * FORCE-refresh the community index (bypasses the in-mem + disk/24h cache) so the catalog browser
+     * picks up freshly-folded uploads on demand. Delivers a rebuilt [CommunityCatalog] on the main
+     * thread so the browser re-renders with the fresh games list, or null when the refresh failed
+     * (offline / bad body) — the caller then keeps the previously loaded index and shows a toast.
+     */
+    fun refreshCommunityIndex(onResult: (CommunityCatalog?) -> Unit) {
+        viewModelScope.launch {
+            val catalog = withContext(Dispatchers.IO) {
+                val games = communityRepo.refreshIndex() ?: return@withContext null
+                val userSoc = DeviceIdentity.soc()
+                val userGpu = DeviceIdentity.gpu(getApplication())
+                CommunityCatalog(games, userSoc, userGpu, userSoc ?: userGpu)
+            }
+            onResult(catalog)
+        }
+    }
+
+    /**
      * Fetch every uploaded config for [game] across ALL of its worker folders and merge them. A
      * canonical game aggregates several BannerHub folder names under one appid, so we must query each
      * folder (in parallel) and CONCATENATE — querying only the first non-empty folder drops the rest.
