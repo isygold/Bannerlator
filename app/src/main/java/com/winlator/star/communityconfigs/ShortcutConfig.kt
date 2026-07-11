@@ -77,6 +77,15 @@ object ConfigTranslator {
         val arm = if (Regex("arm64x|arm64ec", RegexOption.IGNORE_CASE).containsMatchIn(n)) "-arm64ec" else ""
         return "proton-${m.groupValues[1]}$arm"
     }
+
+    /**
+     * Public Proton normalizer — reduces any Proton/Wine name to its comparable key ({@code
+     * proton-<major.minor>[-arm64ec]}). Lets the apply engine tell whether a config's Proton and the
+     * container's Proton are the SAME base build even when the raw names differ (e.g. the config's
+     * normalized {@code proton-11.0-arm64ec} vs the container's {@code Proton-11.0-1-arm64ec-4}).
+     */
+    fun protonKey(name: String): String = protonVer(name)
+
     private fun fexVer(n: String) = n.trim()
 
     /** Parse a whole BannerHub config JSON object → [ShortcutConfig]. Never throws (malformed → best effort). */
