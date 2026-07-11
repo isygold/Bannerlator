@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.winlator.star.contents.ContentProfile
 import com.winlator.star.contents.ContentsManager
 import com.winlator.star.contents.Downloader
@@ -42,6 +43,7 @@ import com.winlator.star.ui.findActivity
 import com.winlator.star.util.ImportEtaTracker
 import com.winlator.star.util.InAppFilePicker
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -72,10 +74,8 @@ fun ContentDownloadSheet(
     // Install progress (0..1) — a time-based ramp for now; byte-accurate plumbing lands next build.
     var installProgress by remember { mutableStateOf<Map<String, Float>>(emptyMap()) }
     var installingKeys by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var fileInstalling by remember { mutableStateOf(false) }
-    // Determinate extraction progress for the manual "install from file" path (null = unknown size).
-    var fileInstallFraction by remember { mutableStateOf<Float?>(null) }
-    var fileInstallEta by remember { mutableStateOf("") }
+    // The content-card install dialog (local-file import AND catalog download share it) — null when idle.
+    var installDialog by remember { mutableStateOf<InstallDialogState?>(null) }
     var showInfoProfile by remember { mutableStateOf<ContentProfile?>(null) }
     var confirmRemoveProfile by remember { mutableStateOf<ContentProfile?>(null) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
@@ -97,17 +97,25 @@ fun ContentDownloadSheet(
     // wrapped as a file:// Uri) and the system SAF picker (result.data.data).
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         (result.data?.data ?: InAppFilePicker.pickedUri(result.data))?.let { uri ->
-            fileInstalling = true
-            fileInstallFraction = null
-            fileInstallEta = ""
-            installContent(context, cm, uri, onProgress = { f, eta -> fileInstallFraction = f; fileInstallEta = eta }) { ok ->
-                fileInstalling = false
-                fileInstallFraction = null
+            // Version/desc aren't known until the archive is parsed — seed the card with the filename +
+            // (single-type screens) the content type, then let the % bar carry the rest.
+            val fname = uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotEmpty() } ?: "Content file"
+            installDialog = InstallDialogState(
+                title = fname,
+                type = contentTypes.singleOrNull()?.toString(),
+                phase = InstallPhase.INSTALLING,
+            )
+            installContent(context, cm, uri, onProgress = { f, _ ->
+                installDialog = installDialog?.copy(fraction = f, phase = InstallPhase.INSTALLING)
+            }) { ok ->
                 if (ok) {
+                    installDialog = installDialog?.copy(fraction = 1f, phase = InstallPhase.DONE)
                     loadProfiles(cm, contentTypes) { profiles = it }
                     refreshKey++
                     onContentChanged()
-                } else errorMsg = "Install failed."
+                } else {
+                    installDialog = installDialog?.copy(phase = InstallPhase.ERROR, error = "Install failed.")
+                }
             }
         }
     }
@@ -165,6 +173,16 @@ fun ContentDownloadSheet(
         )
     }
 
+    // Content-card install dialog (shows Content-Info fields + a live 0..100% bar). Blocks dismiss
+    // while the install is running; auto-closes shortly after it finishes.
+    installDialog?.let { st -> InstallProgressDialog(st, onClose = { installDialog = null }) }
+    LaunchedEffect(installDialog?.phase) {
+        if (installDialog?.phase == InstallPhase.DONE) {
+            delay(900)
+            installDialog = null
+        }
+    }
+
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -185,37 +203,24 @@ fun ContentDownloadSheet(
                         color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.weight(1f),
                     )
-                    if (fileInstalling) {
-                        val frac = fileInstallFraction
-                        if (frac != null) {
-                            // Determinate: percent + ETA for large extractions.
-                            CircularProgressIndicator(progress = { frac }, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
-                            Spacer(Modifier.width(8.dp))
-                            val eta = fileInstallEta.takeIf { it.isNotEmpty() }?.let { " · $it" } ?: ""
-                            Text("${(frac * 100).toInt()}%$eta", style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        } else {
-                            CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                    // Install-from-file entry point. Progress now lives in the content-card dialog.
+                    var showPickMenu by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton(onClick = { showPickMenu = true }) {
+                            Icon(Icons.Filled.FolderOpen, contentDescription = "Install from file",
+                                tint = MaterialTheme.colorScheme.primary)
                         }
-                    } else {
-                        var showPickMenu by remember { mutableStateOf(false) }
-                        Box {
-                            IconButton(onClick = { showPickMenu = true }) {
-                                Icon(Icons.Filled.FolderOpen, contentDescription = "Install from file",
-                                    tint = MaterialTheme.colorScheme.primary)
-                            }
-                            DropdownMenu(expanded = showPickMenu, onDismissRequest = { showPickMenu = false }) {
-                                DropdownMenuItem(text = { Text("Browse files") }, onClick = {
-                                    showPickMenu = false
-                                    filePicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.WCP, "Select content file"))
+                        DropdownMenu(expanded = showPickMenu, onDismissRequest = { showPickMenu = false }) {
+                            DropdownMenuItem(text = { Text("Browse files") }, onClick = {
+                                showPickMenu = false
+                                filePicker.launch(InAppFilePicker.buildIntent(context, InAppFilePicker.WCP, "Select content file"))
+                            })
+                            DropdownMenuItem(text = { Text("Pick via system…") }, onClick = {
+                                showPickMenu = false
+                                filePicker.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                                    addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
                                 })
-                                DropdownMenuItem(text = { Text("Pick via system…") }, onClick = {
-                                    showPickMenu = false
-                                    filePicker.launch(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                                        addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
-                                    })
-                                })
-                            }
+                            })
                         }
                     }
                 }
@@ -249,7 +254,11 @@ fun ContentDownloadSheet(
                         }
                     } else {
                         Box(Modifier.fillMaxWidth().weight(1f)) {
-                            LazyColumn(Modifier.fillMaxSize()) {
+                            LazyColumn(
+                                Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
                                 items(shown, key = { ContentsManager.getEntryName(it) }) { profile ->
                                     val key = ContentsManager.getEntryName(profile)
                                     val isLocal = profile.remoteUrl == null
@@ -262,6 +271,15 @@ fun ContentDownloadSheet(
                                         progress = downloadProgress[key],
                                         installProgress = installProgress[key],
                                         onDownload = {
+                                            // Seed the content-card dialog immediately with the full profile info.
+                                            installDialog = InstallDialogState(
+                                                title = profile.verName,
+                                                type = profile.type.toString(),
+                                                verName = profile.verName,
+                                                verCode = profile.verCode.toString(),
+                                                desc = profile.desc,
+                                                phase = InstallPhase.DOWNLOADING,
+                                            )
                                             downloadingKeys = downloadingKeys + key
                                             downloadProgress = downloadProgress + (key to 0f)
                                             scope.launch {
@@ -269,6 +287,7 @@ fun ContentDownloadSheet(
                                                     downloadToCache(context, profile) { frac ->
                                                         activity?.runOnUiThread {
                                                             downloadProgress = downloadProgress + (key to frac)
+                                                            installDialog = installDialog?.copy(fraction = frac, phase = InstallPhase.DOWNLOADING)
                                                         }
                                                     }
                                                 }
@@ -277,30 +296,35 @@ fun ContentDownloadSheet(
                                                     downloadingKeys = downloadingKeys - key
                                                     downloadProgress = downloadProgress - key
                                                     installProgress = installProgress + (key to 0f)
+                                                    installDialog = installDialog?.copy(fraction = 0f, phase = InstallPhase.INSTALLING)
                                                     installContent(context, cm, uri, onProgress = { f, _ ->
                                                         // Monotonic: ignore the brief XZ-probe reset before the ZSTD pass.
                                                         val prev = installProgress[key] ?: 0f
-                                                        installProgress = installProgress + (key to maxOf(prev, f))
+                                                        val next = maxOf(prev, f)
+                                                        installProgress = installProgress + (key to next)
+                                                        installDialog = installDialog?.copy(fraction = next, phase = InstallPhase.INSTALLING)
                                                     }) { ok ->
                                                         installingKeys = installingKeys - key
                                                         installProgress = installProgress - key
                                                         if (ok) {
+                                                            installDialog = installDialog?.copy(fraction = 1f, phase = InstallPhase.DONE)
                                                             loadProfiles(cm, contentTypes) { profiles = it }
                                                             refreshKey++
                                                             onContentChanged()
-                                                        } else errorMsg = "Install failed."
+                                                        } else {
+                                                            installDialog = installDialog?.copy(phase = InstallPhase.ERROR, error = "Install failed.")
+                                                        }
                                                     }
                                                 } else {
                                                     downloadingKeys = downloadingKeys - key
                                                     downloadProgress = downloadProgress - key
-                                                    errorMsg = "Download failed."
+                                                    installDialog = installDialog?.copy(phase = InstallPhase.ERROR, error = "Download failed.")
                                                 }
                                             }
                                         },
                                         onInfo = { showInfoProfile = profile },
                                         onRemove = { confirmRemoveProfile = profile },
                                     )
-                                    Divider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
                                 }
                             }
                         }
@@ -323,7 +347,8 @@ fun ContentDownloadSheet(
     inUseKey: String? = null,
 ) = ContentDownloadSheet(listOf(contentType), onDismiss, onContentChanged, inUseKey)
 
-// ── Row (adrenotools style: flat row, Memory icon, name, trailing cloud / state) ──
+// ── Row (outlined card matching the FileManager / CommunityCard idiom: surfaceContainer fill,
+// 1dp outline, rounded 10dp; Memory icon, name, trailing cloud / state) ──
 @Composable
 private fun DownloadContentItem(
     profile: ContentProfile,
@@ -340,65 +365,68 @@ private fun DownloadContentItem(
     val busy = isDownloading || isInstalling
     val installedBlue = Color(0xFF4FC3F7) // intentional: distinct installed/in-use status blue, not the accent
     val cs = MaterialTheme.colorScheme
-    // Whole row is tappable to download when it's an available (not-installed, not-busy) entry —
+    // Whole card is tappable to download when it's an available (not-installed, not-busy) entry —
     // matches the adrenotools EntryRow behaviour.
     val rowClickable = !busy && !isLocal
-    Column(
-        Modifier
+    Card(
+        modifier = Modifier
             .fillMaxWidth()
-            .then(if (rowClickable) Modifier.clickable(onClick = onDownload) else Modifier)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .then(if (rowClickable) Modifier.clickable(onClick = onDownload) else Modifier),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer),
+        border = BorderStroke(1.dp, cs.outline),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Icon(Icons.Filled.Memory, contentDescription = null, tint = cs.primary, modifier = Modifier.size(22.dp))
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(profile.verName, style = MaterialTheme.typography.bodyMedium, color = cs.onSurface)
-                val sub = when {
-                    isInUse -> "In use"
-                    isLocal -> "Installed"
-                    !profile.desc.isNullOrEmpty() -> profile.desc
-                    else -> null
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Filled.Memory, contentDescription = null, tint = cs.primary, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(profile.verName, style = MaterialTheme.typography.bodyMedium, color = cs.onSurface)
+                    val sub = when {
+                        isInUse -> "In use"
+                        isLocal -> "Installed"
+                        !profile.desc.isNullOrEmpty() -> profile.desc
+                        else -> null
+                    }
+                    if (sub != null) {
+                        Text(
+                            sub,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isInUse) installedBlue else cs.onSurfaceVariant,
+                        )
+                    }
                 }
-                if (sub != null) {
-                    Text(
-                        sub,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isInUse) installedBlue else cs.onSurfaceVariant,
-                    )
+                when {
+                    busy -> {}
+                    isLocal -> {
+                        Icon(Icons.Filled.CheckCircle, contentDescription = "Installed", tint = installedBlue,
+                            modifier = Modifier.size(20.dp))
+                        Spacer(Modifier.width(14.dp))
+                        Icon(Icons.Filled.Info, contentDescription = "Info", tint = cs.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp).clickable(onClick = onInfo))
+                        Spacer(Modifier.width(14.dp))
+                        Icon(Icons.Filled.Delete, contentDescription = "Remove", tint = Color(0xFFEF5350), // intentional: destructive-action red
+                            modifier = Modifier.size(20.dp).clickable(onClick = onRemove))
+                    }
+                    else -> Icon(Icons.Filled.CloudDownload, contentDescription = "Download", tint = cs.primary,
+                        modifier = Modifier.size(22.dp))
                 }
             }
-            when {
-                busy -> {}
-                isLocal -> {
-                    Icon(Icons.Filled.CheckCircle, contentDescription = "Installed", tint = installedBlue,
-                        modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(14.dp))
-                    Icon(Icons.Filled.Info, contentDescription = "Info", tint = cs.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp).clickable(onClick = onInfo))
-                    Spacer(Modifier.width(14.dp))
-                    Icon(Icons.Filled.Delete, contentDescription = "Remove", tint = Color(0xFFEF5350), // intentional: destructive-action red
-
-                        modifier = Modifier.size(20.dp).clickable(onClick = onRemove))
+            // 0→100 determinate bar for both phases — blue "Downloading", green "Installing".
+            if (busy) {
+                Spacer(Modifier.height(6.dp))
+                val frac = (if (isInstalling) installProgress else progress)?.coerceIn(0f, 1f) ?: 0f
+                val barColor = if (isInstalling) Color(0xFF4CAF50) else cs.primary // intentional: green = "installing" phase, distinct from blue download phase
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(if (isInstalling) "Installing" else "Downloading",
+                        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    Text("${(frac * 100).toInt()}%",
+                        style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 }
-                else -> Icon(Icons.Filled.CloudDownload, contentDescription = "Download", tint = cs.primary,
-                    modifier = Modifier.size(22.dp))
+                Spacer(Modifier.height(3.dp))
+                LinearProgressIndicator(progress = frac, modifier = Modifier.fillMaxWidth().height(4.dp),
+                    color = barColor, trackColor = cs.surfaceContainerHighest)
             }
-        }
-        // 0→100 determinate bar for both phases — blue "Downloading", green "Installing".
-        if (busy) {
-            Spacer(Modifier.height(6.dp))
-            val frac = (if (isInstalling) installProgress else progress)?.coerceIn(0f, 1f) ?: 0f
-            val barColor = if (isInstalling) Color(0xFF4CAF50) else cs.primary // intentional: green = "installing" phase, distinct from blue download phase
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(if (isInstalling) "Installing" else "Downloading",
-                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                Text("${(frac * 100).toInt()}%",
-                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-            }
-            Spacer(Modifier.height(3.dp))
-            LinearProgressIndicator(progress = frac, modifier = Modifier.fillMaxWidth().height(4.dp),
-                color = barColor, trackColor = cs.surfaceContainerHighest)
         }
     }
 }
@@ -425,6 +453,81 @@ private fun InfoField(label: String, value: String) {
     Row(modifier = Modifier.padding(vertical = 2.dp)) {
         Text("$label: ", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         Text(value, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+// ── Install dialog (content-card styled) ──────────────────────────────────────
+private enum class InstallPhase { DOWNLOADING, INSTALLING, DONE, ERROR }
+
+// Snapshot the install-card dialog renders. Catalog installs seed every field up front; local-file
+// imports seed title/type only and fill the % bar as extraction runs.
+private data class InstallDialogState(
+    val title: String,
+    val type: String? = null,
+    val verName: String? = null,
+    val verCode: String? = null,
+    val desc: String? = null,
+    val fraction: Float = 0f,
+    val phase: InstallPhase = InstallPhase.INSTALLING,
+    val error: String? = null,
+)
+
+// The same outlined-card look as the content rows, carrying the Content-Info fields plus a live bar.
+// Dismiss is blocked until the install reaches a terminal (DONE / ERROR) state.
+@Composable
+private fun InstallProgressDialog(state: InstallDialogState, onClose: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val terminal = state.phase == InstallPhase.DONE || state.phase == InstallPhase.ERROR
+    Dialog(
+        onDismissRequest = { if (terminal) onClose() },
+        properties = DialogProperties(dismissOnBackPress = terminal, dismissOnClickOutside = terminal),
+    ) {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(10.dp),
+            colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer),
+            border = BorderStroke(1.dp, cs.outline),
+        ) {
+            Column(Modifier.fillMaxWidth().padding(20.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Filled.Memory, contentDescription = null, tint = cs.primary, modifier = Modifier.size(24.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text(state.title, style = MaterialTheme.typography.titleSmall, color = cs.onSurface,
+                        modifier = Modifier.weight(1f))
+                }
+                Spacer(Modifier.height(12.dp))
+                state.type?.let { InfoField("Type", it) }
+                state.verName?.let { InfoField("Version", it) }
+                state.verCode?.let { InfoField("Code", it) }
+                if (!state.desc.isNullOrEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(state.desc, color = cs.onSurface, style = MaterialTheme.typography.bodySmall)
+                }
+                Spacer(Modifier.height(16.dp))
+                if (state.phase == InstallPhase.ERROR) {
+                    Text(state.error ?: "Install failed.", color = cs.error, style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = onClose) { Text("Close", color = cs.primary) }
+                    }
+                } else {
+                    val frac = state.fraction.coerceIn(0f, 1f)
+                    val label = when (state.phase) {
+                        InstallPhase.DOWNLOADING -> "Downloading"
+                        InstallPhase.DONE -> "Done"
+                        else -> "Installing"
+                    }
+                    val barColor = if (state.phase == InstallPhase.DONE) Color(0xFF4CAF50) else cs.primary
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(label, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                        Text("${(frac * 100).toInt()}%", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    LinearProgressIndicator(progress = frac, modifier = Modifier.fillMaxWidth().height(6.dp),
+                        color = barColor, trackColor = cs.surfaceContainerHighest)
+                }
+            }
+        }
     }
 }
 
