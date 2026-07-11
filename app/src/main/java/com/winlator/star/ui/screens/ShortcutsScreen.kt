@@ -1856,12 +1856,12 @@ private fun MyAccountDialog(
     // Logged-in: reveal the saved recovery key on demand.
     var revealRecovery by remember { mutableStateOf(false) }
 
-    // Phase 3 (optional accounts) — AVATAR. avatarBusy gates the upload spinner; avatarBust cache-busts
-    // the (stable-per-user) avatar URL so Coil re-fetches the just-replaced picture instead of the cached
-    // one. The picker compresses to ≤512KB JPEG off-main, then uploads via AccountManager.
+    // Phase 3 (optional accounts) — AVATAR. avatarBusy gates the upload spinner. The cache-bust now lives in
+    // AccountManager's avatar_version (Phase 4): uploadAvatar bumps it, so account.displayAvatarUrl below
+    // changes and every avatar surface (this dialog + the ☰ + the drawer + the browser 👤) refetches in
+    // lockstep. The picker compresses to ≤512KB JPEG off-main, then uploads via AccountManager.
     val scope = rememberCoroutineScope()
     var avatarBusy by remember { mutableStateOf(false) }
-    var avatarBust by remember { mutableStateOf(0L) }
     val avatarPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         avatarBusy = true
@@ -1878,8 +1878,9 @@ private fun MyAccountDialog(
             avatarBusy = false
             when (result) {
                 is AccountManager.AccountResult.Success -> {
+                    // uploadAvatar already bumped avatar_version → re-reading the account yields a fresh
+                    // displayAvatarUrl, and refresh() propagates it to the ☰ / drawer / browser 👤 too.
                     account = AccountManager.current(context)
-                    avatarBust = System.currentTimeMillis()
                     AccountUiBus.refresh(context)
                     Toast.makeText(context, "Profile picture updated.", Toast.LENGTH_SHORT).show()
                 }
@@ -1961,10 +1962,8 @@ private fun MyAccountDialog(
                     // --- LOGGED IN: profile + actions ---------------------------------------------
                     account != null -> {
                         val acc = account!!
-                        // Stable-per-user URL → append the cache-bust once we've just replaced the picture.
-                        val displayAvatarUrl = acc.avatarUrl?.let {
-                            if (avatarBust > 0L) "$it&t=$avatarBust" else it
-                        }
+                        // Versioned URL from AccountManager (Phase 4) — bumped on every picture change.
+                        val displayAvatarUrl = acc.displayAvatarUrl
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Box(contentAlignment = Alignment.Center) {
                                 AccountAvatar(
@@ -2700,11 +2699,18 @@ private fun CommunityCatalogBrowser(
                             }
                         }
                     }
-                    // My account — the global entry point (Phase 2). Opens the account sheet, which itself
-                    // hosts the "My uploads" button. Only at the top level. (Uploading/importing is per-game.)
+                    // My account — the global entry point (Phase 2). Opens the SAME My-account sheet as the
+                    // nav-drawer, and reads the SAME AccountUiBus state (Phase 4) so signed-in + a picture →
+                    // this 👤 shows the user's avatar (versioned, in lockstep with the ☰ / drawer). The 🌐
+                    // globe that OPENS this browser stays a globe — only this person icon becomes the avatar.
                     if (selectedGame == null) {
+                        val myAvatarUrl = AccountUiBus.account?.displayAvatarUrl
                         IconButton(onClick = onMyAccount) {
-                            Icon(Icons.Filled.AccountCircle, contentDescription = "My account")
+                            if (myAvatarUrl != null) {
+                                AccountAvatar(avatarUrl = myAvatarUrl, size = 28.dp)
+                            } else {
+                                Icon(Icons.Filled.AccountCircle, contentDescription = "My account")
+                            }
                         }
                     }
                     IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }

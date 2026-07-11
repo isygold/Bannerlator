@@ -149,7 +149,7 @@ private fun DrawerAccountHeader(account: AccountManager.Account?, onMyAccount: (
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         AccountAvatar(
-            avatarUrl = account?.avatarUrl,
+            avatarUrl = account?.displayAvatarUrl,
             size = 40.dp,
             fallbackTint = MaterialTheme.colorScheme.primary,
         )

@@ -430,7 +430,8 @@ private fun AppShell(
                     title = screenTitle,
                     showBack = editInputControls,
                     // Signed-in + has a picture → the ☰ becomes their avatar (still opens the drawer).
-                    avatarUrl = account?.avatarUrl,
+                    // Versioned URL so a live picture change refreshes the swap in lockstep with the drawer.
+                    avatarUrl = account?.displayAvatarUrl,
                     onNavClick = {
                         if (editInputControls) {
                             navController.popBackStack()

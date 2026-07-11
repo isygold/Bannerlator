@@ -80,13 +80,31 @@ object AccountManager {
     /** Payload of a successful {@code /account/reset} — the fresh [session] the new password minted. */
     data class ResetData(val session: String)
 
-    /** The currently signed-in account read from local state, or null when logged out. */
+    /**
+     * The currently signed-in account read from local state, or null when logged out. [avatarVersion] is a
+     * locally-tracked timestamp bumped on every avatar change (and stamped at login) — it never comes from
+     * the worker; it exists purely to version the otherwise-stable [avatarUrl].
+     */
     data class Account(
         val userId: String,
         val username: String,
         val session: String,
         val avatarUrl: String?,
-    )
+        val avatarVersion: Long = 0L,
+    ) {
+        /**
+         * PHASE 4 (optional accounts) — the avatar URL every LOCAL-user surface should render. The worker's
+         * avatar URL is stable per user ({@code /account/avatar?uid=<uid>}), so Coil (and the worker's 5-min
+         * HTTP cache) would keep serving the OLD picture after a change. Appending {@code &t=<avatarVersion>}
+         * — bumped on each change — makes every surface refetch the new image in lockstep. Null when logged
+         * out or the user has no picture (the caller falls back to the person icon).
+         */
+        val displayAvatarUrl: String?
+            get() = avatarUrl?.let { url ->
+                if (avatarVersion <= 0L) url
+                else url + (if (url.contains("?")) "&" else "?") + "t=" + avatarVersion
+            }
+    }
 
     /** The reinstall-proof recovery backup — enough to reset the password after a wipe. */
     data class RecoveryBackup(
@@ -159,6 +177,9 @@ object AccountManager {
         )
         if (data.session.isBlank()) return AccountResult.Error("network")
         saveLogin(context, data.userId, data.username, data.session, data.avatarUrl)
+        // Stamp a fresh avatar version on login so the picture is refetched on this device (and the worker's
+        // 5-min HTTP cache is bypassed once). Harmless when the account has no avatar.
+        if (data.avatarUrl != null) bumpAvatarVersion(context)
         return AccountResult.Success(data)
     }
 
@@ -208,6 +229,9 @@ object AccountManager {
         val json = parseOk(resp) ?: return errorFrom(resp)
         val url = json.optString("avatarUrl", "").trim()
         if (url.isBlank()) return AccountResult.Error("network")
+        // The avatar URL is stable per user, so bump the local version FIRST — that's what actually busts
+        // Coil's cache (and the worker's 5-min HTTP cache) so every avatar surface refetches the new image.
+        bumpAvatarVersion(context)
         // Mirror the new URL into the stored session so the ☰ swap / drawer header / dialogs all update.
         current(context)?.let { saveLogin(context, it.userId, it.username, it.session, url) }
         return AccountResult.Success(url)
@@ -227,6 +251,7 @@ object AccountManager {
             username = username,
             session = session,
             avatarUrl = sp.getString(K_AVATAR, null)?.trim()?.ifBlank { null },
+            avatarVersion = sp.getLong(K_AVATAR_VERSION, 0L),
         )
     }
 
@@ -264,7 +289,18 @@ object AccountManager {
             .remove(K_USERNAME)
             .remove(K_SESSION)
             .remove(K_AVATAR)
+            .remove(K_AVATAR_VERSION)
             .apply()
+    }
+
+    /** The local avatar version (a timestamp), 0 when never set. Versions the otherwise-stable avatar URL. */
+    fun avatarVersion(context: Context): Long = prefs(context).getLong(K_AVATAR_VERSION, 0L)
+
+    /** Bump the local avatar version to now so every avatar surface refetches the just-changed picture. */
+    fun bumpAvatarVersion(context: Context): Long {
+        val v = System.currentTimeMillis()
+        prefs(context).edit().putLong(K_AVATAR_VERSION, v).apply()
+        return v
     }
 
     /** The saved recovery key (from the durable backup file), or null when none was ever backed up. */
@@ -298,6 +334,7 @@ object AccountManager {
     private const val K_USERNAME = "username"
     private const val K_SESSION = "session"
     private const val K_AVATAR = "avatarUrl"
+    private const val K_AVATAR_VERSION = "avatar_version"
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
