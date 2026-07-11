@@ -40,6 +40,7 @@ object ShortcutExporter {
         val effective = LinkedHashMap<String, String>()
         put(effective, "dxwrapperConfig", orDefault(shortcut, "dxwrapperConfig", container?.getDXWrapperConfig()))
         put(effective, "graphicsDriverConfig", orDefault(shortcut, "graphicsDriverConfig", container?.getGraphicsDriverConfig()))
+        put(effective, "graphicsDriver", orDefault(shortcut, "graphicsDriver", container?.getGraphicsDriver()))
         put(effective, "emulator", orDefault(shortcut, "emulator", container?.getEmulator()))
         put(effective, "fexcoreVersion", orDefault(shortcut, "fexcoreVersion", container?.getFEXCoreVersion()))
         put(effective, "audioDriver", orDefault(shortcut, "audioDriver", container?.getAudioDriver()))

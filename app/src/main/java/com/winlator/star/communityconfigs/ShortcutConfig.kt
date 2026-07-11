@@ -44,7 +44,8 @@ data class ShortcutConfig(
  * Mirrors {@code tools/translate.py} in The412Banner/bannerlator-game-configs field-for-field so the
  * client stays in lockstep with the CI-side reference:
  *   pc_ls_DXVK → dxwrapper + dxwrapperConfig.version; pc_ls_VK3k → dxwrapperConfig.vkd3dVersion;
- *   pc_ls_GPU_DRIVER_ → graphicsDriverConfig.version; pc_set_constant_95 → emulator + fexcoreVersion;
+ *   pc_ls_GPU_DRIVER_ → graphicsDriverConfig.version; pc_ls_GRAPHICS_WRAPPER → graphicsDriver (scalar);
+ *   pc_set_constant_95 → emulator + fexcoreVersion;
  *   pc_ls_AUDIO_DRIVER → audioDriver; pc_ls_boot_option → execArgs; pc_ls_environment_variable → envVars;
  *   pc_ls_update_enable_xinput → inputType. pc_ls_CONTAINER_LIST (Proton) is advisory only.
  * XiaoJi-only fields (steam_client, hub_type, base component) are dropped.
@@ -120,6 +121,10 @@ object ConfigTranslator {
         scalars["dxwrapper"] = dxwrapper
         scalars["emulator"] = if (isFex) "fexcore" else "box64"
         if (isFex && !fex.isNullOrBlank()) scalars["fexcoreVersion"] = fex
+        // graphicsDriver = the top-level wrapper selection (plain scalar string, e.g. "wrapper-bcn_layer");
+        // written straight back so a Mali/BCn wrapper choice survives the round-trip.
+        val wrapper = s.optString("pc_ls_GRAPHICS_WRAPPER", "").trim()
+        if (wrapper.isNotEmpty()) scalars["graphicsDriver"] = wrapper
         scalars["audioDriver"] = if (s.optString("pc_ls_AUDIO_DRIVER", "1") == "1") "pulseaudio" else "alsa"
         scalars["inputType"] = if (s.optBoolean("pc_ls_update_enable_xinput", true)) "1" else "0"
         val envv = s.optString("pc_ls_environment_variable", "").trim()

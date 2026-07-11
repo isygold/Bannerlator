@@ -16,7 +16,8 @@ import org.json.JSONObject
  * The mapping is the exact inverse of [ConfigTranslator] (same keys, inverse value transforms):
  *   dxwrapperConfig.version → pc_ls_DXVK; dxwrapperConfig.vkd3dVersion → pc_ls_VK3k;
  *   graphicsDriverConfig.version → pc_ls_GPU_DRIVER_; emulator+fexcoreVersion → pc_set_constant_95;
- *   wineVersion → pc_ls_CONTAINER_LIST; audioDriver → pc_ls_AUDIO_DRIVER; inputType →
+ *   wineVersion → pc_ls_CONTAINER_LIST; graphicsDriver → pc_ls_GRAPHICS_WRAPPER (plain scalar);
+ *   audioDriver → pc_ls_AUDIO_DRIVER; inputType →
  *   pc_ls_update_enable_xinput; envVars → pc_ls_environment_variable; execArgs → pc_ls_boot_option.
  * Each component-bearing value is a JSON STRING with a {@code name} (matching BannerHub's own
  * export shape, so {@link ConfigTranslator#jname} reads it back). Only present/non-blank source
@@ -68,6 +69,11 @@ object ConfigExporter {
         if (turnip != null) { putNamed(settings, "pc_ls_GPU_DRIVER_", turnip); addComponent(components, turnip, "GPU") }
         if (fex != null) { putNamed(settings, "pc_set_constant_95", fex); addComponent(components, fex, "FEXCore") }
         if (proton != null) putNamed(settings, "pc_ls_CONTAINER_LIST", proton)
+
+        // graphicsDriver = the top-level wrapper selection ("wrapper-original" / "wrapper-leegao" /
+        // "wrapper-bcn_layer" / …). A plain SCALAR string, NOT a {"name":…} component — it picks which
+        // wrapper .tzst is extracted, not a downloadable build — so no components[] entry is added.
+        effective["graphicsDriver"].nonBlank()?.let { settings.put("pc_ls_GRAPHICS_WRAPPER", it) }
 
         // audioDriver → "1" for pulseaudio else "0" (inverse of the translator's read).
         effective["audioDriver"].nonBlank()?.let {

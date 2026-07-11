@@ -29,6 +29,7 @@ class ConfigExporterTest {
             // Composite k=v lists carry extra sub-fields the export must ignore (only version tokens matter).
             "dxwrapperConfig" to "version=2.4.1,vkd3dVersion=2.14,async=0,vulkanVersion=1.3",
             "graphicsDriverConfig" to "version=Mesa Turnip v25.0.0;gpuName=Adreno 750",
+            "graphicsDriver" to "wrapper-bcn_layer",
             "emulator" to "fexcore",
             "fexcoreVersion" to "Fex_20260428",
             "audioDriver" to "pulseaudio",
@@ -43,6 +44,7 @@ class ConfigExporterTest {
         assertEquals("2.4.1", config.dxwrapperConfig["version"])
         assertEquals("2.14", config.dxwrapperConfig["vkd3dVersion"])
         assertEquals("Mesa Turnip v25.0.0", config.graphicsDriverConfig["version"])
+        assertEquals("wrapper-bcn_layer", config.scalars["graphicsDriver"])
         assertEquals("fexcore", config.scalars["emulator"])
         assertEquals("Fex_20260428", config.scalars["fexcoreVersion"])
         assertEquals("pulseaudio", config.scalars["audioDriver"])
@@ -82,6 +84,20 @@ class ConfigExporterTest {
         // The emitted value is a JSON STRING with a name (BannerHub shape), read back by translate.
         val dxvk = JSONObject(settings.getString("pc_ls_DXVK")).getString("name")
         assertEquals("2.3.1", dxvk)
+    }
+
+    @Test
+    fun export_graphicsWrapper_isPlainStringNotComponent() {
+        val effective = mapOf("graphicsDriver" to "wrapper-bcn_layer")
+        val root = JSONObject(ConfigExporter.export(effective, meta))
+        val settings = root.getJSONObject("settings")
+
+        // Emitted as a PLAIN scalar string — NOT a {"name":…} component wrapper.
+        assertEquals("wrapper-bcn_layer", settings.getString("pc_ls_GRAPHICS_WRAPPER"))
+        assertNull(settings.opt("pc_ls_GRAPHICS_WRAPPER") as? JSONObject)
+        // It counts toward settings_count but adds NO components[] entry.
+        assertEquals(1, root.getJSONObject("meta").getInt("settings_count"))
+        assertEquals(0, root.getJSONObject("meta").getInt("components_count"))
     }
 
     @Test
