@@ -69,7 +69,8 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
@@ -259,12 +260,15 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     var uploadStarted by remember { mutableStateOf(false) }
     var replaceUploadPrompt by remember { mutableStateOf<Triple<UploadedConfig, () -> Unit, () -> Unit>?>(null) }
     // Phase 3 (online sharing) — MY UPLOADS. showMyUploads opens the manager dialog; myUploads is the
-    // loaded list (null = still loading); the two row-action targets drive the delete-confirm / edit-desc
-    // sub-dialogs.
+    // loaded list (null = still loading). The list is expandable (single-expand via expandedUploadSha);
+    // the expanded row's inline description editor shares uploadDescText / uploadDescLoading (reloaded on
+    // expand). deleteUploadRow drives the delete-confirm sub-dialog.
     var showMyUploads by remember { mutableStateOf(false) }
     var myUploads by remember { mutableStateOf<List<MyUploadRow>?>(null) }
     var deleteUploadRow by remember { mutableStateOf<MyUploadRow?>(null) }
-    var editUploadRow by remember { mutableStateOf<MyUploadRow?>(null) }
+    var expandedUploadSha by remember { mutableStateOf<String?>(null) }
+    var uploadDescText by remember { mutableStateOf("") }
+    var uploadDescLoading by remember { mutableStateOf(false) }
     // A tapped config row → small "Apply to game… | View details" chooser. The pair carries the picked
     // config (a specific uploaded file, or a device-row fallback) plus the in-context shortcut (non-null
     // from the per-shortcut sheet, null from the catalog browser where a target hasn't been chosen yet).
@@ -496,6 +500,13 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         importConfigInAppLauncher.launch(
             InAppFilePicker.buildIntent(context, InAppFilePicker.JSON, "Select a config .json")
         )
+    }
+    // Open the My-uploads manager (shared by the per-game dialog button AND the globe browser's header).
+    val openMyUploads: () -> Unit = {
+        myUploads = null
+        expandedUploadSha = null
+        showMyUploads = true
+        vm.loadMyUploads { myUploads = it }
     }
 
     val topBarActions = LocalTopBarActions.current
@@ -945,11 +956,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 // Manage the configs the user has shared (list / delete / edit description). Reinstall-
                 // proof: the list hydrates from the durable manifest when SharedPreferences is empty.
                 OutlinedButton(
-                    onClick = {
-                        myUploads = null
-                        showMyUploads = true
-                        vm.loadMyUploads { myUploads = it }
-                    },
+                    onClick = openMyUploads,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(Icons.Filled.AccountCircle, null, modifier = Modifier.size(18.dp))
@@ -1173,13 +1180,24 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         }
     }
 
-    // Phase 3 (online sharing) — MY UPLOADS manager. Lists the user's OWN shared configs (reinstall-proof:
-    // the list hydrates from the durable manifest when SharedPreferences is empty), with live votes /
-    // downloads and per-row Delete + Edit-description actions.
+    // Phase 3 (online sharing) — MY UPLOADS manager. A summary header + expandable list of the user's OWN
+    // shared configs (reinstall-proof: hydrates from the durable manifest when SharedPreferences is empty).
+    // Expanding a row (single-expand via expandedUploadSha) reveals its inline description editor +
+    // Save / Delete. The expanded row's description is (re)loaded from the worker by this LaunchedEffect.
+    LaunchedEffect(expandedUploadSha, showMyUploads) {
+        val sha = expandedUploadSha
+        val row = if (showMyUploads && sha != null) myUploads?.firstOrNull { it.record.sha == sha } else null
+        if (row != null) {
+            uploadDescLoading = true
+            uploadDescText = ""
+            vm.loadMyUploadDescription(row) { uploadDescText = it; uploadDescLoading = false }
+        }
+    }
     if (showMyUploads) {
         val myUploadsShape = RoundedCornerShape(28.dp)
+        val closeMyUploads = { showMyUploads = false; expandedUploadSha = null }
         AlertDialog(
-            onDismissRequest = { showMyUploads = false },
+            onDismissRequest = closeMyUploads,
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             shape = myUploadsShape,
             modifier = Modifier.border(1.dp, MaterialTheme.colorScheme.outline, myUploadsShape),
@@ -1195,37 +1213,97 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                         Text("You haven't shared any configs yet.", color = OnSurfaceVariant)
                     } else {
                         Column(
-                            modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
+                            // Summary header — aggregate across every uploaded config.
+                            Text(
+                                "Shared ${rows.size} config${if (rows.size == 1) "" else "s"} · ↓ ${rows.sumOf { it.downloads }} · ★ ${rows.sumOf { it.votes }}",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = Color(0xFFE0701C),
+                            )
                             rows.forEach { row ->
-                                CommunityCard(onClick = {}) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            row.record.game,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = OnSurface,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
-                                            .format(java.util.Date(row.record.date))
-                                        val sub = listOf(row.record.device, row.record.soc, dateStr)
-                                            .filter { it.isNotBlank() }.joinToString(" · ")
-                                        if (sub.isNotEmpty()) {
-                                            Text(sub, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                val expanded = expandedUploadSha == row.record.sha
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                                ) {
+                                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                        // Collapsed header — tapping anywhere on it toggles expand.
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().clickable {
+                                                expandedUploadSha = if (expanded) null else row.record.sha
+                                            },
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    row.record.game,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = OnSurface,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                                val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                                                    .format(java.util.Date(row.record.date))
+                                                val sub = listOf(row.record.device, row.record.soc, dateStr)
+                                                    .filter { it.isNotBlank() }.joinToString(" · ") +
+                                                    if (!row.stillOnline) " · offline" else ""
+                                                Text(sub, style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            }
+                                            Text("★${row.votes}  ↓${row.downloads}", style = MaterialTheme.typography.labelMedium, color = OnSurfaceVariant)
+                                            Icon(
+                                                if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                                                contentDescription = if (expanded) "Collapse" else "Expand",
+                                            )
                                         }
-                                        Text(
-                                            "★ ${row.votes}  ↓ ${row.downloads}" + if (!row.stillOnline) "  · offline" else "",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            color = OnSurfaceVariant,
-                                        )
-                                    }
-                                    IconButton(onClick = { editUploadRow = row }) {
-                                        Icon(Icons.Filled.Edit, contentDescription = "Edit description")
-                                    }
-                                    IconButton(onClick = { deleteUploadRow = row }) {
-                                        Icon(Icons.Filled.Delete, contentDescription = "Delete")
+                                        if (expanded) {
+                                            Spacer(Modifier.height(8.dp))
+                                            Text(
+                                                if (row.stillOnline) "● Online" else "● Removed",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = if (row.stillOnline) Color(0xFF3BA55D) else MaterialTheme.colorScheme.error,
+                                            )
+                                            Spacer(Modifier.height(6.dp))
+                                            OutlinedTextField(
+                                                value = uploadDescText,
+                                                onValueChange = { if (it.length <= 500) uploadDescText = it },
+                                                label = { Text(if (uploadDescLoading) "Loading description…" else "Description") },
+                                                enabled = !uploadDescLoading,
+                                                modifier = Modifier.fillMaxWidth(),
+                                            )
+                                            Text("${uploadDescText.length}/500", style = MaterialTheme.typography.labelSmall, color = OnSurfaceVariant)
+                                            Spacer(Modifier.height(6.dp))
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                OutlinedButton(onClick = { deleteUploadRow = row }) {
+                                                    Icon(Icons.Filled.Delete, null, modifier = Modifier.size(18.dp))
+                                                    Spacer(Modifier.width(6.dp))
+                                                    Text("Delete")
+                                                }
+                                                Spacer(Modifier.weight(1f))
+                                                Button(
+                                                    enabled = !uploadDescLoading,
+                                                    onClick = {
+                                                        val text = uploadDescText
+                                                        vm.editMyUploadDescription(row, text) { ok ->
+                                                            Toast.makeText(
+                                                                context,
+                                                                if (ok) "Description updated." else "Couldn't reach the server.",
+                                                                Toast.LENGTH_SHORT,
+                                                            ).show()
+                                                        }
+                                                    },
+                                                ) { Text("Save") }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1234,7 +1312,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 }
             },
             confirmButton = {},
-            dismissButton = { TextButton(onClick = { showMyUploads = false }) { Text("Close") } },
+            dismissButton = { TextButton(onClick = closeMyUploads) { Text("Close") } },
         )
     }
 
@@ -1261,53 +1339,6 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         )
     }
 
-    // Edit-description for one of the user's uploads (prefilled with the current server-side text).
-    editUploadRow?.let { row ->
-        var descText by remember(row) { mutableStateOf("") }
-        var descLoading by remember(row) { mutableStateOf(true) }
-        LaunchedEffect(row) { vm.loadMyUploadDescription(row) { descText = it; descLoading = false } }
-        AlertDialog(
-            onDismissRequest = { editUploadRow = null },
-            title = { Text("Edit description") },
-            text = {
-                if (descLoading) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(10.dp))
-                        Text("Loading…", color = OnSurfaceVariant)
-                    }
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        OutlinedTextField(
-                            value = descText,
-                            onValueChange = { if (it.length <= 500) descText = it },
-                            label = { Text("Description for \"${row.record.game}\"") },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Text("${descText.length}/500", style = MaterialTheme.typography.labelSmall, color = OnSurfaceVariant)
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = !descLoading,
-                    onClick = {
-                        val text = descText
-                        editUploadRow = null
-                        vm.editMyUploadDescription(row, text) { ok ->
-                            Toast.makeText(
-                                context,
-                                if (ok) "Description updated." else "Couldn't reach the server.",
-                                Toast.LENGTH_SHORT,
-                            ).show()
-                        }
-                    },
-                ) { Text("Save") }
-            },
-            dismissButton = { TextButton(onClick = { editUploadRow = null }) { Text("Cancel") } },
-        )
-    }
-
     // Catalog browser (Part A) — full-catalog entry from the header button.
     if (showCommunityBrowser && !communityDialogsGated) {
         CommunityCatalogBrowser(
@@ -1315,8 +1346,8 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             onDismiss = { showCommunityBrowser = false },
             // No in-context shortcut from the browser (null) → chooser's "Apply to game…" runs the picker.
             onPick = { pick -> configAction = pick to null },
-            // Import a local config file → pick a target shortcut afterwards (launchConfigImport(null)).
-            onImport = { launchConfigImport(null) },
+            // My uploads — the global entry point (same manager the per-game dialog opens).
+            onMyUploads = openMyUploads,
         )
     }
 
@@ -2040,7 +2071,7 @@ private fun CommunityCatalogBrowser(
     vm: ShortcutsViewModel,
     onDismiss: () -> Unit,
     onPick: (CommunityPick) -> Unit,
-    onImport: () -> Unit,
+    onMyUploads: () -> Unit,
 ) {
     val context = LocalContext.current
     var catalog by remember { mutableStateOf<CommunityCatalog?>(null) }
@@ -2218,10 +2249,11 @@ private fun CommunityCatalogBrowser(
                             }
                         }
                     }
-                    // Import a local config `.json` (then pick a target shortcut). Only at the top level.
+                    // My uploads — the global entry point to the manager (same view the per-game dialog
+                    // opens). Only at the top level. (Uploading/importing itself is a per-game action.)
                     if (selectedGame == null) {
-                        IconButton(onClick = onImport) {
-                            Icon(Icons.Filled.FileUpload, contentDescription = "Import config file")
+                        IconButton(onClick = onMyUploads) {
+                            Icon(Icons.Filled.AccountCircle, contentDescription = "My uploads")
                         }
                     }
                     IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
