@@ -336,8 +336,10 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         scope.launch(Dispatchers.IO) {
             val ok = try {
                 val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                if (!downloads.exists()) downloads.mkdirs()
-                val out = File(downloads, res.fileName)
+                // Exported configs live under Download/bannerlator/game-configs/ (created if absent).
+                val exportDir = File(downloads, "bannerlator/game-configs")
+                if (!exportDir.exists()) exportDir.mkdirs()
+                val out = File(exportDir, res.fileName)
                 out.writeText(res.json)
                 out.setReadable(true, false)
                 MediaScannerConnection.scanFile(context, arrayOf(out.absolutePath), null, null)
