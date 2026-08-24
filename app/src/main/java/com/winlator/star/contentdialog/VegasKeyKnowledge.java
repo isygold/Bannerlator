@@ -420,6 +420,12 @@ public final class VegasKeyKnowledge {
             case REMOVED:
                 return "removed in " + released.get(removed.get(norm));
             case UNLISTED:
+                // Namespace-aware honesty: a vegas.* key the manifest can't prove is a
+                // FORK feature by construction — claiming "DXVK still reads it" is true
+                // but misleading (the claim that matters is it's not upstream). Reserve
+                // the generic wording for genuinely upstream-ish keys.
+                if (norm.startsWith("vegas.") || norm.startsWith("dxvk.vegas."))
+                    return "vegas-only · not in v" + version + " notes";
                 return "not in v" + version + " notes — DXVK still reads it";
             case UNKNOWN:
                 return "? unknown for v" + version;

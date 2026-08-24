@@ -31,7 +31,7 @@
     {
       "name": "dxvk.enableStarProfile",
       "introducedIn": "2.4.1-cf04e7f",
-      "note": "star profile tuning, default Auto"
+      "note": "Star/Vegas-only master switch (StarEngine lineage — NOT upstream DXVK), default Auto"
     },
     {
       "name": "dxvk.tileReuse",
@@ -51,6 +51,21 @@
     {
       "name": "vegas.enableVSync",
       "introducedIn": "2.7.3"
+    },
+    {
+      "name": "vegas.profileDraws",
+      "introducedIn": "2.4.1-cf04e7f",
+      "note": "governor per-draw metrics feed (verified working in 2.4.1 runtime)"
+    },
+    {
+      "name": "vegas.forceTranscode",
+      "introducedIn": "2.4.1-cf04e7f",
+      "note": "force BCn transcode path"
+    },
+    {
+      "name": "vegas.enableFramegen",
+      "introducedIn": "2.4.1-cf04e7f",
+      "note": "frame-generation master switch, Auto tri-state"
     }
   ],
   "envStyle": [

@@ -419,26 +419,29 @@ private fun installWcp(
 internal object VegasStockConfigFetcher {
     private const val RELEASES_URL = "https://api.github.com/repos/isygold/vegas-releases/releases"
 
-    /**
-     * @return Pair(successCount, failures as "verName: reason")
-     */
-    fun fetchMissing(context: android.content.Context, verNames: List<String>): Pair<Int, List<String>> {
-        if (verNames.isEmpty()) return 0 to emptyList()
-        val wanted = verNames.toSet()
-        val body = Downloader.downloadString(RELEASES_URL)
-            ?: return 0 to verNames.map { "$it: release feed unreachable" }
+    /** One release that ships (or could ship) a stock .conf asset. */
+    data class ReleaseConf(
+        val tag: String,
+        val date: String,
+        val confName: String?,   // null = release ships no config asset
+        val confUrl: String?,
+        val verNames: List<String>, // verNames derived from this release's wcp assets
+    )
 
-        // One pass over the feed: per release, collect its wcp-derived verNames and its
-        // .conf asset; first release mentioning a wanted verName wins (newest first).
-        data class Hit(val confUrl: String?, val confName: String?, val tag: String)
-        val resolved = linkedMapOf<String, Hit>()
+    /**
+     * Full feed listing for the inline config-download sheet: every release with its
+     * date, wcp-derived verNames and .conf asset (when present) — mirroring what the
+     * build sheet shows so users can pick per version instead of guessing.
+     */
+    fun listReleaseConfigs(): List<ReleaseConf> {
+        val body = Downloader.downloadString(RELEASES_URL) ?: return emptyList()
+        val out = mutableListOf<ReleaseConf>()
         runCatching {
             val arr = org.json.JSONArray(body)
             for (i in 0 until arr.length()) {
                 val rel = arr.optJSONObject(i) ?: continue
-                val tag = rel.optString("tag_name", "")
-                var confUrl: String? = null
                 var confName: String? = null
+                var confUrl: String? = null
                 val wcps = mutableListOf<String>()
                 val assets = rel.optJSONArray("assets") ?: continue
                 for (j in 0 until assets.length()) {
@@ -449,45 +452,55 @@ internal object VegasStockConfigFetcher {
                     when {
                         aname.endsWith(".conf") &&
                             (aname.startsWith("vegas-config-") || aname == "dxvk.conf") -> {
-                            confUrl = url; confName = aname
+                            confName = aname; confUrl = url
                         }
                         aname.endsWith(".wcp") ->
                             wcps += aname.removePrefix("vegas-").removeSuffix(".wcp")
                     }
                 }
-                for (vn in wcps) if (vn in wanted && vn !in resolved) {
-                    resolved[vn] = Hit(confUrl, confName, tag)
-                }
+                out += ReleaseConf(
+                    tag = rel.optString("tag_name", ""),
+                    date = rel.optString("published_at", "").take(10),
+                    confName = confName,
+                    confUrl = confUrl,
+                    verNames = wcps,
+                )
             }
-        }.onFailure { return 0 to verNames.map { "$it: feed parse failed" } }
-
-        if (resolved.isEmpty()) return 0 to verNames.map { "$it: no matching release" }
-
-        var ok = 0
-        val failures = mutableListOf<String>()
-        for ((verName, hit) in resolved) {
-            if (hit.confUrl == null) {
-                failures += "$verName: release ships no config asset"
-                continue
-            }
-            runCatching {
-                val vegasDir = ContentsManager.getContentTypeDir(
-                    context, ContentProfile.ContentType.CONTENT_TYPE_VEGAS)
-                val confDir = java.io.File(vegasDir, "configs")
-                if (!confDir.exists()) confDir.mkdirs()
-                val parked = java.io.File(confDir, "$verName.conf")
-                if (Downloader.downloadFile(hit.confUrl, parked, null)) {
-                    recordStockProvenance(
-                        confDir, verName, hit.tag,
-                        hit.confName ?: hit.confUrl.substringAfterLast('/', hit.confUrl),
-                        hit.confUrl,
-                    )
-                    ok++
-                } else {
-                    failures += "$verName: download failed"
-                }
-            }.onFailure { failures += "$verName: ${it.message}" }
         }
-        return ok to failures
+        return out
+    }
+
+    /** Result of a park attempt. */
+    sealed class ParkResult {
+        data class Ok(val parkedAs: String) : ParkResult()
+        data class Fail(val reason: String) : ParkResult()
+    }
+
+    /**
+     * Download + park one release's config. Parks under EVERY verName this release's
+     * wcps derive that is currently INSTALLED (so loadVegasStockSources pairs it);
+     * when none is installed, parks under the first derived verName anyway (harmless
+     * orphan — it starts pairing the moment that build gets installed).
+     */
+    fun park(context: android.content.Context, rel: ReleaseConf): ParkResult {
+        if (rel.confUrl == null) return ParkResult.Fail("release ships no config asset")
+        val assetName = rel.confName ?: rel.confUrl.substringAfterLast('/', rel.confUrl)
+        return runCatching {
+            val vegasDir = ContentsManager.getContentTypeDir(
+                context, ContentProfile.ContentType.CONTENT_TYPE_VEGAS)
+            val confDir = java.io.File(vegasDir, "configs")
+            if (!confDir.exists()) confDir.mkdirs()
+            val targets = rel.verNames.ifEmpty { listOf(rel.tag.removePrefix("v")) }
+            var last: ParkResult? = null
+            for (verName in targets) {
+                val parked = java.io.File(confDir, "$verName.conf")
+                if (!Downloader.downloadFile(rel.confUrl, parked, null)) {
+                    last = ParkResult.Fail("download failed"); continue
+                }
+                recordStockProvenance(confDir, verName, rel.tag, assetName, rel.confUrl)
+                last = ParkResult.Ok(verName)
+            }
+            last ?: ParkResult.Fail("no target version derived")
+        }.getOrElse { ParkResult.Fail(it.message ?: "unknown error") }
     }
 }

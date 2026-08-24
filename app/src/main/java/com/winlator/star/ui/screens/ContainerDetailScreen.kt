@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
@@ -71,6 +72,7 @@ import com.winlator.star.core.WineUtils
 import com.winlator.star.core.WineThemeManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import android.widget.Toast
 import kotlinx.coroutines.Dispatchers
@@ -111,6 +113,7 @@ fun ContainerDetailScreen(
     var showFexCoreDownloadSheet by remember { mutableStateOf(false) }
     var showDxvkDownloadSheet    by remember { mutableStateOf(false) }
     var showVegasDownloadSheet   by remember { mutableStateOf(false) }
+    var showStockConfigSheet     by remember { mutableStateOf(false) }
     var showVkd3dDownloadSheet   by remember { mutableStateOf(false) }
     var showVulkanConfig          by remember { mutableStateOf(false) }
     // Bumped after a DXVK/VKD3D/Vegas download so the open DxvkConfigDialog re-reads its version lists.
@@ -249,6 +252,7 @@ fun ContainerDetailScreen(
             // Close the config dialog first — the download sheet is a ModalBottomSheet (activity
             // window) and would otherwise render BEHIND this AlertDialog. It reopens on sheet dismiss.
             onDownloadDxvk = { showDxvkConfig = false; if (isVegasWrapper) showVegasDownloadSheet = true else showDxvkDownloadSheet = true },
+            onOpenConfigDownload = { showDxvkConfig = false; showStockConfigSheet = true },
             onDownloadVkd3d = { showDxvkConfig = false; showVkd3dDownloadSheet = true }
         )
     }
@@ -342,6 +346,11 @@ fun ContainerDetailScreen(
         VegasDownloadSheet(
             onDismiss = { showVegasDownloadSheet = false; showDxvkConfig = true },
             onContentChanged = { dxvkRefreshKey++ }
+        )
+    }
+    if (showStockConfigSheet) {
+        StockConfigDownloadSheet(
+            onDismiss = { showStockConfigSheet = false; showDxvkConfig = true }
         )
     }
 }
@@ -2192,7 +2201,6 @@ internal fun DxvkConfigDialog(
     // versions whose parked .conf is missing can be fetched straight from the releases
     // feed without re-downloading the whole build.
     val installedVegasVersions = remember { mutableStateOf(listOf<String>()) }
-    var fetchingConfigs by remember { mutableStateOf(false) }
     val customEntries = remember { mutableStateOf(listOf<String>()) }
     var useDefaults by remember { mutableStateOf(true) }
     var selectedStock by remember { mutableStateOf<String?>(null) }   // stock verName
@@ -2224,6 +2232,26 @@ internal fun DxvkConfigDialog(
     var notesLoading by remember { mutableStateOf(false) }
     var notesSource by remember { mutableStateOf<String?>(null) }  // "live" | "bundled" | "none"
     var showNotes by remember { mutableStateOf(false) }
+
+    // Re-sync installed versions every time this dialog is composed (it only exists while
+    // open): deletions made in the contents hub previously left ghosts in the uni-select.
+    LaunchedEffect(Unit) {
+        if (!isVegas) return@LaunchedEffect
+        withContext(Dispatchers.IO) {
+            val cm = ContentsManager(context)
+            cm.syncContents()
+            val versions = DXVKConfigDialog.loadVegasVersionList(context, cm)
+            val stock = DXVKConfigDialog.loadVegasStockSources(context, cm)
+            val installed = cm.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_VEGAS)
+                ?.mapNotNull { it.verName }?.distinct().orEmpty()
+            withContext(Dispatchers.Main) {
+                allDxvkVersions.value = versions
+                stockSources.value = stock
+                installedVegasVersions.value = installed
+                if (selectedDxvk !in versions) selectedDxvk = versions.firstOrNull() ?: selectedDxvk
+            }
+        }
+    }
 
     LaunchedEffect(refreshKey) {
         withContext(Dispatchers.IO) {
@@ -2341,7 +2369,10 @@ internal fun DxvkConfigDialog(
         vegasCatalog != null && selectedStock != null && (activeStockTag == null || !vegasCatalog.isCovered(activeStockTag))
     }
     var showCatalogDialog by remember { mutableStateOf(false) }
-    var forkFilter by remember { mutableStateOf(false) }
+    // Fork-Feature filter persists across dialog opens (user request: toggle → OK → reopen
+    // must stay filtered). Written through on every flip — cheap pref, no OK gate needed.
+    val forkFilterPrefs = remember { context.getSharedPreferences("vegas_config_ui", Context.MODE_PRIVATE) }
+    var forkFilter by remember { mutableStateOf(forkFilterPrefs.getBoolean("forkFilter", false)) }
     // §6a.6 schema-aware editor: wrong-family key awaiting the block-with-explanation dialog.
     var pendingSchemaBlock by remember { mutableStateOf<String?>(null) }
     // §6b.1 user-initiated "Check for new builds" (report only — observation, never mutation).
@@ -2544,45 +2575,6 @@ internal fun DxvkConfigDialog(
         }
     }
 
-    // Inline ⬇ on the stock-config row: installed builds whose parked .conf is missing.
-    val missingConfigVersions = remember(stockSources.value, installedVegasVersions.value) {
-        installedVegasVersions.value.filter { v -> stockSources.value.none { it.verName == v } }
-    }
-
-    // Fetch just the config asset(s) for those builds — same feed and parking rules as
-    // the download sheet's install path, without re-downloading the .wcp.
-    fun fetchMissingStockConfigs() {
-        if (fetchingConfigs) return
-        val targets = missingConfigVersions
-        if (targets.isEmpty()) return
-        fetchingConfigs = true
-        scope.launch {
-            val (ok, failures) = withContext(Dispatchers.IO) {
-                VegasStockConfigFetcher.fetchMissing(context, targets)
-            }
-            fetchingConfigs = false
-            val msg = when {
-                failures.isEmpty() -> "Fetched $ok stock config${if (ok == 1) "" else "s"}"
-                ok == 0 -> "Config download failed — ${failures.first()}"
-                else -> "Fetched $ok, failed ${failures.size} (${failures.first()})"
-            }
-            Toast.makeText(activity, msg, Toast.LENGTH_LONG).show()
-            if (ok > 0) {
-                // Reload sources so the dropdown picks up the newly parked configs.
-                val (s, inst) = withContext(Dispatchers.IO) {
-                    val cm = ContentsManager(context)
-                    cm.syncContents()
-                    Pair(
-                        DXVKConfigDialog.loadVegasStockSources(context, cm),
-                        cm.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_VEGAS)
-                            ?.mapNotNull { it.verName }?.distinct().orEmpty()
-                    )
-                }
-                stockSources.value = s
-                installedVegasVersions.value = inst
-            }
-        }
-    }
 
     val pickCustomConfigLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -2760,9 +2752,16 @@ internal fun DxvkConfigDialog(
                                         withContext(Dispatchers.IO) {
                                             val cm = ContentsManager(context)
                                             cm.syncContents()
+                                            // Match the exact "vegas-<selected>" name OR any hash-suffixed
+                                            // variant ("vegas-2.4.1-cf04e7f" vs "-3137660" asset renames) —
+                                            // exact-equality silently no-oped for renamed installs.
                                             val expectedName = "vegas-$selectedDxvk"
                                             val profile = cm.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_VEGAS)
-                                                .firstOrNull { it.verName == expectedName }
+                                                .firstOrNull {
+                                                    it.verName == expectedName ||
+                                                        it.verName.removePrefix("vegas-") == selectedDxvk ||
+                                                        it.verName == selectedDxvk
+                                                }
                                             if (profile != null) {
                                                 cm.removeContent(profile)
                                                 cm.syncContents()
@@ -3019,23 +3018,15 @@ internal fun DxvkConfigDialog(
                                 { s -> selectedStock = s; selectedCustom = null; useDefaults = false },
                                 modifier = Modifier.weight(1f)
                             )
-                            // Inline fetch for installed builds whose parked stock config is
-                            // missing (older install / failed side-fetch): pulls just the
-                            // .conf asset from the same releases feed the download sheet uses.
-                            if (isVegas && missingConfigVersions.isNotEmpty()) {
-                                IconButton(
-                                    enabled = !fetchingConfigs,
-                                    onClick = { fetchMissingStockConfigs() }
-                                ) {
-                                    if (fetchingConfigs) {
-                                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                                    } else {
-                                        Icon(
-                                            Icons.Filled.Download,
-                                            contentDescription = "Download missing stock configs",
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
+                            // Inline ⬇ hands off to the host-level config-download sheet
+                            // (same layering as the build sheets: dialog hides, sheet shows).
+                            if (isVegas) {
+                                IconButton(onClick = onOpenConfigDownload) {
+                                    Icon(
+                                        Icons.Filled.Download,
+                                        contentDescription = "Download stock configs",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
                                 }
                             }
                         }
@@ -3118,7 +3109,7 @@ internal fun DxvkConfigDialog(
                         if (!configSourceMissing && configSourceText.isNotEmpty()) {
                             Spacer(Modifier.height(6.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Switch(checked = forkFilter, onCheckedChange = { forkFilter = it }, modifier = Modifier.height(32.dp))
+                                Switch(checked = forkFilter, onCheckedChange = { forkFilter = it; forkFilterPrefs.edit().putBoolean("forkFilter", it).apply() }, modifier = Modifier.height(32.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text("Fork-feature filter", style = MaterialTheme.typography.bodySmall)
                             }
@@ -3160,7 +3151,7 @@ internal fun DxvkConfigDialog(
                                         VegasKeyCatalog.Bucket.IN_BUILD -> ""
                                         VegasKeyCatalog.Bucket.OTHER_BUILD -> " · another VEGAS build"
                                         VegasKeyCatalog.Bucket.UPSTREAM -> " · upstream DXVK"
-                                        VegasKeyCatalog.Bucket.NOWHERE -> " · not in any VEGAS config"
+                                        VegasKeyCatalog.Bucket.NOWHERE -> " · not in baseline template"
                                     }
                                 else ""
                                 val badge = baseBadge + bucketPart + if (catalogBehind) " · unverified" else ""
@@ -3293,7 +3284,7 @@ internal fun DxvkConfigDialog(
                                         Text("$t — ${st?.name?.lowercase()?.replace('_', '-') ?: "?"}")
                                     }
                                     Spacer(Modifier.height(4.dp))
-                                    Text("Updated at build time (assistant-side maintenance). No background watcher — Bannerlator has no WorkManager/JobScheduler; check again in a future build.")
+                                    Text("Updated at build time (assistant-side maintenance).\nCheck for new builds")
                                     Spacer(Modifier.height(6.dp))
                                     TextButton(onClick = { runLiveCheck() }, enabled = !liveChecking) {
                                         Text(if (liveChecking) "Checking…" else "Check for new builds", style = MaterialTheme.typography.bodySmall)
@@ -3893,3 +3884,97 @@ private fun ContentInstallGear(
 }
 
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stock-config download sheet: every vegas-releases release that ships (or
+// could ship) a .conf asset, listed like the build sheet — tag, date, asset
+// name, and whether the matching build is installed. Tap a row to download +
+// park + record provenance; the stock dropdown picks it up on next open.
+@Composable
+private fun StockConfigDownloadSheet(
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val activity = context.findActivity()
+    val scope = rememberCoroutineScope()
+    var loading by remember { mutableStateOf(true) }
+    var rows by remember { mutableStateOf(listOf<VegasStockConfigFetcher.ReleaseConf>()) }
+    var parkedTag by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        rows = withContext(Dispatchers.IO) { VegasStockConfigFetcher.listReleaseConfigs() }
+        loading = false
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            Text("Stock configs", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Tap a version to fetch its config. Builds without a shipped config show none.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        if (loading) {
+            Row(Modifier.fillMaxWidth().padding(24.dp), horizontalArrangement = Arrangement.Center) {
+                CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
+            }
+        } else if (rows.isEmpty()) {
+            Text(
+                "Couldn't reach the releases feed — check connection and retry.",
+                Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
+        } else {
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+                items(rows.size) { idx ->
+                    val rel = rows[idx]
+                    val hasConf = rel.confUrl != null
+                    val busy = parkedTag == rel.tag
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = hasConf && !busy) {
+                                parkedTag = rel.tag
+                                scope.launch {
+                                    val res = withContext(Dispatchers.IO) { VegasStockConfigFetcher.park(context, rel) }
+                                    parkedTag = null
+                                    when (res) {
+                                        is VegasStockConfigFetcher.ParkResult.Ok ->
+                                            activity?.let { Toast.makeText(it, "Parked as ${res.parkedAs}.conf", Toast.LENGTH_SHORT).show() }
+                                        is VegasStockConfigFetcher.ParkResult.Fail ->
+                                            activity?.let { Toast.makeText(it, "Failed: ${res.reason}", Toast.LENGTH_LONG).show() }
+                                    }
+                                }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                    ) {
+                        Icon(
+                            if (hasConf) Icons.Filled.Download else Icons.Filled.Block,
+                            contentDescription = null,
+                            tint = if (hasConf) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(rel.tag.ifEmpty { "(untagged)" }, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                buildString {
+                                    append(rel.confName ?: "no config asset")
+                                    if (rel.date.isNotEmpty()) append("  ·  ${rel.date}")
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (busy) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    }
+                }
+            }
+        }
+    }
+}
