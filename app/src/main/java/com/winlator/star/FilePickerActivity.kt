@@ -64,5 +64,9 @@ class FilePickerActivity : ComponentActivity() {
         const val EXTRA_PICKER_TITLE = "pickerTitle"
         const val EXTRA_PICK_DIRECTORY = "pickDirectory"
         const val EXTRA_SELECTED_FILE = "selectedFile"
+        // Upstream InAppFilePicker puts this extra (add-a-game-from-C: flow). The fork's
+        // slim FileManagerScreen doesn't consume it yet — accepted and ignored here so the
+        // merged picker plumbing compiles; the Drive C location returns with a future port.
+        const val EXTRA_CONTAINER_DRIVE_C = "containerDriveC"
     }
 }
