@@ -1,8 +1,14 @@
 {
   "schemaVersion": 1,
-  "forkBuild": "119c7406",
-  "generated": "2026-08-16",
-  "released": ["2.7.3", "2.7.4-beta", "2.8.0"],
+  "forkBuild": "87b0866",
+  "generated": "2026-08-24",
+  "released": [
+    "1.11.1-60383b1",
+    "1.11.2-3299d2a",
+    "2.4.1-cf04e7f",
+    "2.4.1-3137660",
+    "2.7.3"
+  ],
   "vanilla": [
     "dxvk.numCompilerThreads",
     "dxvk.numAsyncThreads",
@@ -24,7 +30,7 @@
   "gated": [
     {
       "name": "dxvk.enableStarProfile",
-      "introducedIn": "2.7.3",
+      "introducedIn": "2.4.1-cf04e7f",
       "note": "star profile tuning, default Auto"
     },
     {
@@ -34,18 +40,20 @@
     },
     {
       "name": "vegas.enableUpscaler",
-      "introducedIn": "2.7.3",
+      "introducedIn": "2.4.1-cf04e7f",
       "note": "default Auto"
     },
     {
       "name": "vegas.telemetry",
-      "introducedIn": "2.7.4-beta",
+      "introducedIn": "2.4.1-cf04e7f",
       "note": "off by default, Auto tri-state"
     },
     {
       "name": "vegas.enableVSync",
-      "introducedIn": "2.8.0"
+      "introducedIn": "2.7.3"
     }
   ],
-  "envStyle": ["[other]"]
+  "envStyle": [
+    "[other]"
+  ]
 }
