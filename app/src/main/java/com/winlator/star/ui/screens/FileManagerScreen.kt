@@ -203,12 +203,6 @@ fun FileManagerScreen(
     pickExtensions: List<String> = emptyList(),
     initialDir: File? = null,
     pickerTitle: String? = null,
-    // The chosen container's C: drive (`<container>/.wine/drive_c`), passed only by the add-a-game
-    // flow which already knows the target container. When non-null AND it exists, the picker offers a
-    // working "Drive C:" location (rail item + drive-chip menu) so the user can browse/pick a game
-    // that lives on C: — some games only boot (or boot faster) from the container's own C: drive. The
-    // default landing is unchanged (internal root); C: is an opt-in jump. Null for every other picker.
-    driveCPath: File? = null,
     onPick: ((File) -> Unit)? = null,
 ) {
     val context = LocalContext.current
@@ -240,23 +234,7 @@ fun FileManagerScreen(
     }
 
     var currentDir by remember { mutableStateOf(rootDir) }
-    // The up/back FLOOR — back + the up-arrow are disabled while currentDir == currentRoot. It MUST be
-    // the VOLUME ROOT of the start dir (internal /storage/emulated/0, or an SD card /storage/XXXX-XXXX),
-    // NOT the start dir itself: otherwise opening at any subfolder disables up/back and traps the user
-    // there. (Mirrors the volume-root logic in favLocationOf above.)
-    var currentRoot by remember {
-        val abs = rootDir.absolutePath
-        val internal = "/storage/emulated/0"
-        val vol = when {
-            abs == internal || abs.startsWith("$internal/") -> File(internal)
-            abs.startsWith("/storage/") -> {
-                val name = abs.removePrefix("/storage/").substringBefore('/')
-                if (name.isNotEmpty() && name != "emulated" && name != "self") File("/storage/$name") else rootDir
-            }
-            else -> rootDir
-        }
-        mutableStateOf(vol)
-    }
+    var currentRoot by remember { mutableStateOf(rootDir) }
     var entries by remember { mutableStateOf(listOf<File>()) }
     var selectedEntry by remember { mutableStateOf<File?>(null) }
     var showMenuFor by remember { mutableStateOf<File?>(null) }
@@ -666,11 +644,7 @@ fun FileManagerScreen(
                 Icon(Icons.Filled.ArrowBack, "Back", tint = MaterialTheme.colorScheme.primary)
             }
 
-            // describeLocation labels C: by matching against the container list, which is empty in the
-            // picker (FilePickerActivity has no MainActivity) — so when we were handed the C: drive
-            // directly, label it from that instead of falling through to a generic "Storage".
-            val currentDriveLabel = if (driveCPath != null && isWithin(currentDir, driveCPath)) "Drive C:"
-                else describeLocation(currentDir, containers, imagefsDir).driveLabel
+            val currentDriveLabel = describeLocation(currentDir, containers, imagefsDir).driveLabel
             // Dim the drive chip while the Favorites list is open (it's not the active context).
             val driveChipAlpha = if (showFavorites) 0.45f else 1f
             Box {
@@ -697,15 +671,10 @@ fun FileManagerScreen(
                         },
                         onClick = {
                             showDriveMenu = false
-                            // Prefer the container the picker was launched with (add-a-game flow): its
-                            // C: is known even though FilePickerActivity has no MainActivity/container
-                            // list (that's why this menu item did nothing in the picker before).
-                            val dc = driveCPath?.takeIf { it.isDirectory }
-                            if (dc != null) {
-                                openDrive(dc)
-                            } else if (containers.size == 1) {
+                            if (containers.size == 1) {
                                 openDrive(File(containers.first().rootDir, ".wine/drive_c"))
-                            } else if (containers.size > 1) {
+                            }
+                            else if (containers.size > 1) {
                                 showContainerPicker = true
                             }
                         },
@@ -822,52 +791,6 @@ fun FileManagerScreen(
             }
         }
 
-        // ── Left locations rail (mockup Option 2) + content ──
-        // Shared collapsible rail: landscape expanded by default, portrait collapsed icon-only. Not
-        // shown in pick mode (the themed picker keeps its slim layout). Built each recompose (cheap)
-        // so it tracks the current drive/favourites without stale click lambdas.
-        val fmRailState = rememberRailState("filemanager")
-        fun locItem(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, dir: File) =
-            RailItem(label, icon, !showFavorites && currentRoot.absolutePath == dir.absolutePath) {
-                showFavorites = false; openDrive(dir)
-            }
-        val storageItems = buildList {
-            add(locItem("Internal", Icons.Filled.Smartphone, File("/storage/emulated/0")))
-            drives.filter { it.removable }.forEach { d ->
-                add(RailItem(d.label, Icons.Filled.SdStorage, !showFavorites && currentRoot.absolutePath == d.dir.absolutePath) {
-                    showFavorites = false; if (d.readable) openDrive(d.dir)
-                })
-            }
-            // Add-a-game-from-C: (add-game flow only). openDrive() pins currentRoot = drive_c so
-            // up/back is bounded at C:\ and the user can't wander up into the Linux prefix. RailItem
-            // carries no per-item colour — C: gets the standard accent highlight like Internal/SD
-            // (the amber Drive C: identity lives on the Favorites badge, not the rail).
-            driveCPath?.takeIf { it.isDirectory }?.let { dc ->
-                add(locItem("Drive C:", Icons.Filled.Storage, dc))
-            }
-        }
-        val quickItems = buildList {
-            File("/storage/emulated/0/Download").takeIf { it.isDirectory }?.let { add(locItem("Downloads", Icons.Filled.Download, it)) }
-            File("/storage/emulated/0/Winlator/Games").takeIf { it.isDirectory }?.let { add(locItem("Games", Icons.Filled.SportsEsports, it)) }
-            File("/storage/emulated/0/Pictures").takeIf { it.isDirectory }?.let { add(locItem("Pictures", Icons.Filled.Image, it)) }
-        }
-        val favItems = remember(favTick) { FavoritesStore.list(context).map(::File).filter { it.exists() } }
-            .map { d -> RailItem(d.name, Icons.Filled.Star, false) { showFavorites = false; openDrive(d) } }
-        val locationSections = buildList {
-            add(RailSection("STORAGE", storageItems))
-            if (quickItems.isNotEmpty()) add(RailSection("QUICK", quickItems))
-            if (favItems.isNotEmpty()) add(RailSection("★ FAVORITES", favItems))
-        }
-
-        Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
-            // The slim picker normally hides the rail; the add-a-game-from-C: flow (driveCPath set) is
-            // the exception — it shows the rail so the "Drive C:" location item is reachable. Pickers
-            // that don't pass driveCPath keep the rail hidden exactly as before.
-            if (!pickMode || driveCPath != null) {
-                CollapsibleRail(state = fmRailState, title = "Files", sections = locationSections, outlinedItems = true)
-            }
-            Box(modifier = Modifier.weight(1f).fillMaxSize()) {
->>>>>>> upstream/main
         // ── Favorites list OR file list ──
         if (showFavorites) {
             FavoritesList(
