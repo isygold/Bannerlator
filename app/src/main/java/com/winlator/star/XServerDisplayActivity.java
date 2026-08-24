@@ -4321,6 +4321,24 @@ public class XServerDisplayActivity extends AppCompatActivity {
             dxwrapper = dxvkWrapper + ";" + vkd3dWrapper + ";" + ddrawrapper + d7vkMarker(ddrawrapper);
         }
         else if (dxwrapper.contains("vegas")) {
+            // CSV-dump ground-truth probe: VEGAS's dumpDrawCsv() writes to /sdcard root
+            // (hardcoded upstream). Scoped-storage denial there surfaces as ENOENT from
+            // bionic. Probe BOTH spellings from THIS process and log the real cause so
+            // the user-facing fix targets the actual failure layer.
+            try {
+                java.io.File p1 = new java.io.File("/sdcard/.banner_csv_probe");
+                boolean ok1 = p1.createNewFile(); if (ok1) p1.delete();
+                Log.w("VegasDump", "/sdcard probe: createNewFile=" + ok1);
+            } catch (Throwable t) {
+                Log.w("VegasDump", "/sdcard probe FAILED: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+            }
+            try {
+                java.io.File p2 = new java.io.File("/storage/emulated/0/.banner_csv_probe");
+                boolean ok2 = p2.createNewFile(); if (ok2) p2.delete();
+                Log.w("VegasDump", "/storage/emulated/0 probe: createNewFile=" + ok2);
+            } catch (Throwable t) {
+                Log.w("VegasDump", "/storage/emulated/0 probe FAILED: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+            }
             String vegasVersion = dxwrapperConfig.get("version");
             if (vegasVersion == null || vegasVersion.isEmpty())
                 vegasVersion = DefaultVersion.getVegasDefault();
