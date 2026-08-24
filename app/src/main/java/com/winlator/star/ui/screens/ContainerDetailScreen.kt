@@ -2739,6 +2739,13 @@ internal fun DxvkConfigDialog(
                 // keeps the original DXVK-first order below.
                 if (isVegas) {
                     SectionLabel("VEGAS VERSION")
+                    if (filteredDxvk.isEmpty()) {
+                        Text(
+                            "no VEGAS build installed — download one via the sheet",
+                            color = MaterialTheme.colorScheme.outline,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         LabeledDropdown(
                             "", filteredDxvk, selectedDxvk, { selectedDxvk = it },

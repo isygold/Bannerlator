@@ -60,16 +60,10 @@
         <item>2.7.1.1-sdk36-arm64ec</item>
         <item>2.3.1-arm64ec-gplasync</item>
     </string-array>
-    <string-array name="vegas_version_entries">
-        <!-- Real published vegas-releases milestones (matches vegas_knowledge.json
-             "released"). Hash-suffixed variants kept so profiles installed under
-             older asset names still exact-match the classifier. -->
-        <item>1.11.1-60383b1</item>
-        <item>1.11.2-3299d2a</item>
-        <item>2.4.1-cf04e7f</item>
-        <item>2.4.1-3137660</item>
-        <item>2.7.3</item>
-    </string-array>
+    <!-- No longer seeded: the vegas version dropdown lists installed builds only
+         (loadVegasVersionList). Static entries here used to surface as ghost
+         selections for never-installed builds. -->
+    <string-array name="vegas_version_entries" />
     <string-array name="vegas_config_source_entries">
         <item>None</item>
         <item>/storage/emulated/0/dxvk.conf</item>

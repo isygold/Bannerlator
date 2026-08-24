@@ -93,8 +93,12 @@ public class DXVKConfigDialog {
     }
 
     public static List<String> loadVegasVersionList(Context context, ContentsManager contentsManager) {
-        String[] original = context.getResources().getStringArray(R.array.vegas_version_entries);
-        List<String> list = new ArrayList<>(Arrays.asList(original));
+        // Installed builds ONLY. The dropdown used to be seeded from a static
+        // vegas_version_entries array — that made uninstalled (or never-installed)
+        // versions appear selectable, survive clear-data, and confuse delete/selection
+        // ("ghost" entries). Classifier matching doesn't need this list: the knowledge
+        // asset's released[] covers exact-string matching independently.
+        List<String> list = new ArrayList<>();
 
         // vegas WCP profiles have type CONTENT_TYPE_VEGAS, verName like "vegas-2.7.3"
         for (ContentProfile profile : contentsManager.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_VEGAS)) {
