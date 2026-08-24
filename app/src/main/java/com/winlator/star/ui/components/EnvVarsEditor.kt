@@ -185,6 +185,10 @@ internal object KnownEnvVars {
         KnownEnvVar("WRAPPER_NO_PATCH_OPCONSTCOMP", EnvVarType.CHECKBOX, listOf("0", "1")),
         KnownEnvVar("WRAPPER_DRIVER_ID", EnvVarType.NUMBER),
         KnownEnvVar("WRAPPER_VMEM_MAX_SIZE", EnvVarType.NUMBER),
+        // Wine guest VA-reservation cap in MB (default 16384). Caps heavy AAA titles that reserve
+        // hundreds of GB of address space and OOM the X server. NOTE: only honoured by a Wine build
+        // patched to read WINEVMEMMAXSIZE.
+        KnownEnvVar("WINEVMEMMAXSIZE", EnvVarType.NUMBER),
         KnownEnvVar("WRAPPER_VK_VERSION", EnvVarType.TEXT),
         KnownEnvVar("WRAPPER_EXTENSION_BLACKLIST", EnvVarType.TEXT),
         KnownEnvVar("WRAPPER_DEVICE_NAME", EnvVarType.TEXT),
@@ -293,62 +297,82 @@ internal object DllOverrides {
         }
     }
 
-    /**
-     * Turn the option on, merging into whatever the user already wrote. Entries that are
-     * already native-first are left completely alone; an entry that names the DLL with a
-     * different order is rewritten (and, if it grouped several DLLs, only this DLL is
-     * split out so the rest of the group keeps the user's order).
-     */
-    fun enable(overrides: String): String {
+    // ── Toggle helpers ───────────────────────────────────────────────────────
+    // Everything below is per-DLL. The master switch drives them over a list (the
+    // detected set, or the whole safe-list when nothing was detected); each per-DLL
+    // row drives exactly one. They share one grammar, so a folder that ships only
+    // version.dll is flipped without touching winmm, dsound, etc., and a hand-written
+    // override for a DLL we don't manage is left alone.
+
+    /** True when [dll] alone resolves native-first in [overrides]. */
+    fun isEnabled(overrides: String, dll: String): Boolean {
+        if (overrides.isBlank()) return false
+        return parse(overrides).any { it.has(dll) && isNativeFirst(it.order) }
+    }
+
+    /** True when every DLL in [dlls] resolves native-first (empty list ⇒ false). */
+    fun isEnabled(overrides: String, dlls: List<String>): Boolean =
+        dlls.isNotEmpty() && dlls.all { isEnabled(overrides, it) }
+
+    /** Turn a single [dll] native-first, splitting it out of any group it shared. */
+    fun enable(overrides: String, dll: String): String {
         val entries = parse(overrides)
-        for (dll in PREFER_GAME_FOLDER) {
-            val idx = entries.indexOfFirst { it.has(dll) }
-            if (idx < 0) {
-                entries += Entry(listOf(dll), SIGNATURE)
-                continue
-            }
+        val idx = entries.indexOfFirst { it.has(dll) }
+        if (idx < 0) {
+            entries += Entry(listOf(dll), SIGNATURE)
+        } else {
             val existing = entries[idx]
-            if (isNativeFirst(existing.order)) continue
-            if (existing.keys.size == 1) {
-                entries[idx] = Entry(listOf(dll), SIGNATURE)
-            } else {
-                entries[idx] = existing.copy(keys = existing.keys.filterNot { it.equals(dll, ignoreCase = true) })
-                entries += Entry(listOf(dll), SIGNATURE)
+            if (!isNativeFirst(existing.order)) {
+                if (existing.keys.size == 1) {
+                    entries[idx] = Entry(listOf(dll), SIGNATURE)
+                } else {
+                    entries[idx] = existing.copy(keys = existing.keys.filterNot { it.equals(dll, ignoreCase = true) })
+                    entries += Entry(listOf(dll), SIGNATURE)
+                }
             }
         }
         return render(entries)
     }
 
+    /** Enable every DLL in [dlls], folding each in over whatever the user already wrote. */
+    fun enable(overrides: String, dlls: List<String>): String =
+        dlls.fold(overrides) { acc, dll -> enable(acc, dll) }
+
     /**
-     * Turn the option off: drop only the entries that carry the toggle's own signature,
-     * then put back anything [baseline] (the value as it stood when the editor opened)
-     * had for those DLLs. A hand-written `version=b,n`, a grouped `version,winmm=n` or an
-     * entry for a DLL outside the safe list is never touched.
+     * Turn a single [dll] back off: drop it from wherever it currently resolves
+     * native-first, then put back whatever [baseline] said about it (so a hand-written
+     * `version=b,n` we split apart comes back). Only reachable when the row is on, i.e.
+     * the DLL is native-first, so a builtin-first override the user typed is never lost.
      */
-    fun disable(overrides: String, baseline: String): String {
-        val entries = parse(overrides).filterNot { isSignature(it) }.toMutableList()
-        // Put back whatever the baseline said about the safe-list DLLs we just dropped.
-        // A grouped entry is restored with only the DLLs that are actually missing, so a
-        // hand-written "version,winmm=b" comes back intact even though enabling had to
-        // split it apart.
-        for (entry in parse(baseline)) {
-            val missing = entry.keys.filter { key ->
-                PREFER_GAME_FOLDER.any { it.equals(key, ignoreCase = true) } && entries.none { it.has(key) }
-            }
-            if (missing.isNotEmpty()) entries += Entry(missing, entry.order)
+    fun disable(overrides: String, baseline: String, dll: String): String {
+        val entries = parse(overrides).mapNotNull { e ->
+            if (!e.has(dll)) e
+            else e.keys.filterNot { it.equals(dll, ignoreCase = true) }
+                .takeIf { it.isNotEmpty() }?.let { e.copy(keys = it) }
+        }.toMutableList()
+        parse(baseline).firstOrNull { it.has(dll) }?.let { b ->
+            if (entries.none { it.has(dll) }) entries += Entry(listOf(dll), b.order)
         }
         return render(entries)
     }
 
+    /** Disable every DLL in [dlls], restoring each from [baseline]. */
+    fun disable(overrides: String, baseline: String, dlls: List<String>): String =
+        dlls.fold(overrides) { acc, dll -> disable(acc, baseline, dll) }
+
     /**
-     * The value to restore to when the toggle is switched off later in this session.
-     * If the option is already on when the editor opens, a previous session wrote those
-     * signature entries, so they are stripped from the baseline — otherwise the toggle
-     * could never be switched back off. (A hand-written override that happens to be
-     * byte-identical to our signature is indistinguishable from ours and shares that fate.)
+     * The user-authored value a toggle restores to when switched off: everything the editor
+     * found EXCEPT our own signature entries. Those markers — written by a previous session
+     * or earlier in this one — are ours, not user intent, and are ALWAYS stripped. The old
+     * code only stripped them when the whole safe-list was on, so a lone `version=n,b` (the
+     * common single-proxy case) stayed in the baseline and switching it off just restored it,
+     * leaving the toggle stuck on. Now toggling a DLL off deletes its entry outright (master
+     * off deletes every entry it added), while a hand-written builtin-first or grouped entry
+     * is preserved and comes back intact. A hand-written override byte-identical to our
+     * signature is indistinguishable from ours and shares their fate.
      */
     fun baselineOf(overrides: String): String =
-        if (isEnabled(overrides)) render(parse(overrides).filterNot { isSignature(it) }) else overrides
+        render(parse(overrides).filterNot { isSignature(it) })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -451,7 +475,12 @@ internal fun EnvVarsEditor(
     }
 
     val overrides = rows.firstOrNull { it.name == DllOverrides.VAR }?.value ?: ""
-    val preferGameFolder = DllOverrides.isEnabled(overrides)
+    // The master switch governs the DLLs actually detected next to the EXE; with no detection
+    // (the container editor, or an unreadable/empty folder) it falls back to the full safe-list
+    // so its behaviour is unchanged from before per-DLL rows existed.
+    val masterScope = if (foundDlls.isNotEmpty()) foundDlls else DllOverrides.PREFER_GAME_FOLDER
+    val allPreferred = DllOverrides.isEnabled(overrides, masterScope)
+    val anyPreferred = masterScope.any { DllOverrides.isEnabled(overrides, it) }
 
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // ── Compatibility (pinned to the top) ────────────────────────────────
@@ -461,11 +490,15 @@ internal fun EnvVarsEditor(
         if (!rawMode) SectionBox(title = "Compatibility") {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Switch(
-                    checked = preferGameFolder,
+                    // Master = select-all/none over whatever is in scope. "On" only when every
+                    // scoped DLL is native-first; a partial state reads as off, and the caption
+                    // plus the per-DLL rows below make that unambiguous.
+                    checked = allPreferred,
                     onCheckedChange = { on ->
                         putVar(
                             DllOverrides.VAR,
-                            if (on) DllOverrides.enable(overrides) else DllOverrides.disable(overrides, dllBaseline)
+                            if (on) DllOverrides.enable(overrides, masterScope)
+                            else DllOverrides.disable(overrides, dllBaseline, masterScope)
                         )
                     }
                 )
@@ -479,9 +512,20 @@ internal fun EnvVarsEditor(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    // Mixed state: some but not all scoped DLLs are on. The Switch is binary to
+                    // match every other toggle in the app; this line keeps it honest at a glance.
+                    if (anyPreferred && !allPreferred) {
+                        Text(
+                            "Some game-folder DLLs on — see below.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
-            if (foundDlls.isNotEmpty() && !preferGameFolder) {
+            // One toggle per DLL actually detected in the folder. Each flips only its own
+            // entry, so a game that ships just version.dll never gets winmm/dsound forced too.
+            if (foundDlls.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
@@ -492,13 +536,27 @@ internal fun EnvVarsEditor(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        foundDlls.joinToString(", ") { "$it.dll" } +
-                            " found in the game folder. This game may need the option above.",
+                        "Detected in the game folder — toggle each individually:",
                         style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f)
                     )
-                    TextButton(onClick = { putVar(DllOverrides.VAR, DllOverrides.enable(overrides)) }) {
-                        Text("Enable")
+                }
+                foundDlls.forEach { dll ->
+                    val on = DllOverrides.isEnabled(overrides, dll)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Switch(
+                            checked = on,
+                            onCheckedChange = { checked ->
+                                putVar(
+                                    DllOverrides.VAR,
+                                    if (checked) DllOverrides.enable(overrides, dll)
+                                    else DllOverrides.disable(overrides, dllBaseline, dll)
+                                )
+                            }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("$dll.dll", modifier = Modifier.weight(1f))
                     }
                 }
             }

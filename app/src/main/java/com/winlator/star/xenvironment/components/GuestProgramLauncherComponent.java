@@ -458,9 +458,12 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
         try {
             if (fakeinputSrc.exists()) {
+                // Refresh every launch so the guest reader can never skew from the
+                // app-side ring writer (a same-size rebuild defeats length checks).
+                // Do NOT reintroduce a `!fakeinputDest.exists()` guard here.
                 FileUtils.copy(fakeinputSrc, fakeinputDest);
                 Log.d("GuestLauncher", "Copied libfakeinput.so to imagefs");
-            } else {
+            } else if (!fakeinputDest.exists()) {
                 Log.e("GuestLauncher", "libfakeinput.so NOT FOUND in APK: " + fakeinputSrc.getAbsolutePath());
             }
         } catch (Exception e) {
@@ -503,6 +506,15 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         if (this.envVars.has("MANGOHUD_CONFIG")) {
             this.envVars.remove("MANGOHUD_CONFIG");
         }
+
+        // WINEVMEMMAXSIZE (MB) caps the guest Wine VA reservation — the fix for heavy AAA titles
+        // (e.g. Deus Ex: MD on EOS) that reserve hundreds of GB of address space up-front and OOM the
+        // X server (observed ~489 GB: err:virtual:allocate_virtual_memory ... size 71f6ea0000). It is
+        // OPT-IN / default-off: set it per shortcut/container envVars only when a game needs it (it
+        // then propagates to the guest verbatim via the external-env merge below, covering both the
+        // arm64ec/WOWBox64+FEX and box64 paths). Recognized in the env-var picker (KnownEnvVars).
+        // Only effective on a Wine/Proton build patched to READ WINEVMEMMAXSIZE (coffincolors ntdll
+        // patch, not in stock Wine); inert otherwise.
 
         // Merge any additional environment variables from external sources
         if (this.envVars != null) {
