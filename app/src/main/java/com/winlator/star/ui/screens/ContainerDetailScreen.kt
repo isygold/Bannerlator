@@ -2177,6 +2177,7 @@ internal fun DxvkConfigDialog(
     // invisible to launched games when the sheet was dismissed without OK (the
     // pointer kept aiming at the old path, e.g. a legacy /sdcard/dxvk.conf).
     onLivePointerChanged: (String) -> Unit = {},
+    onOpenConfigDownload: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -2232,26 +2233,6 @@ internal fun DxvkConfigDialog(
     var notesLoading by remember { mutableStateOf(false) }
     var notesSource by remember { mutableStateOf<String?>(null) }  // "live" | "bundled" | "none"
     var showNotes by remember { mutableStateOf(false) }
-
-    // Re-sync installed versions every time this dialog is composed (it only exists while
-    // open): deletions made in the contents hub previously left ghosts in the uni-select.
-    LaunchedEffect(Unit) {
-        if (!isVegas) return@LaunchedEffect
-        withContext(Dispatchers.IO) {
-            val cm = ContentsManager(context)
-            cm.syncContents()
-            val versions = DXVKConfigDialog.loadVegasVersionList(context, cm)
-            val stock = DXVKConfigDialog.loadVegasStockSources(context, cm)
-            val installed = cm.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_VEGAS)
-                ?.mapNotNull { it.verName }?.distinct().orEmpty()
-            withContext(Dispatchers.Main) {
-                allDxvkVersions.value = versions
-                stockSources.value = stock
-                installedVegasVersions.value = installed
-                if (selectedDxvk !in versions) selectedDxvk = versions.firstOrNull() ?: selectedDxvk
-            }
-        }
-    }
 
     LaunchedEffect(refreshKey) {
         withContext(Dispatchers.IO) {
@@ -2332,6 +2313,26 @@ internal fun DxvkConfigDialog(
     var selectedDxvk by remember(allDxvkVersions.value) {
         val stored = config.get("version")
         mutableStateOf(allDxvkVersions.value.firstOrNull { it == stored } ?: allDxvkVersions.value.firstOrNull() ?: stored)
+    }
+
+    // Re-sync installed versions every time this dialog is composed (it only exists while
+    // open): deletions made in the contents hub previously left ghosts in the uni-select.
+    LaunchedEffect(Unit) {
+        if (!isVegas) return@LaunchedEffect
+        withContext(Dispatchers.IO) {
+            val cm = ContentsManager(context)
+            cm.syncContents()
+            val versions = DXVKConfigDialog.loadVegasVersionList(context, cm)
+            val stock = DXVKConfigDialog.loadVegasStockSources(context, cm)
+            val installed = cm.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_VEGAS)
+                ?.mapNotNull { it.verName }?.distinct().orEmpty()
+            withContext(Dispatchers.Main) {
+                allDxvkVersions.value = versions
+                stockSources.value = stock
+                installedVegasVersions.value = installed
+                if (selectedDxvk !in versions) selectedDxvk = versions.firstOrNull() ?: selectedDxvk
+            }
+        }
     }
 
     val dxvkType = remember(selectedDxvk) { DXVKConfigDialog.getDXVKType(selectedDxvk) }
