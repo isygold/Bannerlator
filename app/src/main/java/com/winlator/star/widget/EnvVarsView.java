@@ -38,9 +38,10 @@ public class EnvVarsView extends FrameLayout {
         {"FD_DEV_FEATURES", "SELECT_MULTIPLE", "enable_tp_ubwc_flag_hint=1", "storage_8bit=1"},
         {"TU_DEBUG", "SELECT_MULTIPLE", "forcecb", "nocb", "startup", "deck_emu", "nir", "nobin", "sysmem", "gmem", "forcebin", "layout", "noubwc", "nomultipos", "nolrz", "nolrzfc", "perf", "perfc", "flushall", "syncdraw", "push_consts_per_stage", "rast_order", "unaligned_store", "log_skip_gmem_ops", "dynamic", "bos", "3d_load", "fdm", "noconform", "rd"},
         {"IR3_SHADER_DEBUG", "SELECT_MULTIPLE", "nouboopt", "nopreamble", "noearlypreamble"},
-        {"DXVK_HUD", "SELECT_MULTIPLE", "scale=0.5", "scale=0.7", "scale=1.0", "opacity=0.5", "opacity=0.7", "devinfo", "fps", "frametimes", "submissions", "drawcalls", "pipelines", "descriptors", "memory", "gpuload", "version", "api", "cs", "compiler", "samplers"},
-        // VEGAS-only HUD extras; merged with DXVK_HUD by VEGAS builds, ignored by vanilla
-        {"VEGAS_HUD", "SELECT_MULTIPLE", "commit", "vegas"},
+        {"DXVK_HUD", "SELECT_MULTIPLE", "scale=0.5", "scale=0.7", "scale=1.0", "opacity=0.5", "opacity=0.7", "devinfo", "fps", "frametimes", "submissions", "drawcalls", "pipelines", "descriptors", "memory", "gpuload", "version", "api", "cs", "compiler", "samplers", "vegas", "commit"},
+        // VEGAS_HUD was removed: no shipped VEGAS build ever read it. Its tokens
+        // ("commit", "vegas") live in the DXVK_HUD list above — vanilla DXVK
+        // silently ignores unknown HUD tokens, so listing them is safe.
         {"MESA_EXTENSION_MAX_YEAR", "NUMBER"},
         {"WRAPPER_MAX_IMAGE_COUNT", "TEXT"},
         {"MESA_GL_VERSION_OVERRIDE", "TEXT"},

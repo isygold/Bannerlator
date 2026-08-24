@@ -110,11 +110,13 @@ internal object KnownEnvVars {
         KnownEnvVar("DXVK_HUD", EnvVarType.SELECT_MULTIPLE, listOf(
             "scale=0.5", "scale=0.7", "scale=1.0", "opacity=0.5", "opacity=0.7", "devinfo", "fps", "frametimes",
             "submissions", "drawcalls", "pipelines", "descriptors", "memory", "gpuload", "version", "api", "cs",
-            "compiler", "samplers")),
-        // VEGAS-only HUD extras — merged with DXVK_HUD at runtime by VEGAS
-        // builds; ignored (harmless) on vanilla DXVK. Kept out of the shared
-        // DXVK_HUD list so vanilla users never see VEGAS-only tokens.
-        KnownEnvVar("VEGAS_HUD", EnvVarType.SELECT_MULTIPLE, listOf("commit", "vegas")),
+            "compiler", "samplers",
+            // VEGAS-build HUD items (HudVegasItem governor line + HudCommitItem). Registered
+            // inside VEGAS DXVK builds' HudItemSet; vanilla DXVK silently ignores unknown
+            // tokens, so listing them unconditionally is safe.
+            "vegas", "commit")),
+        // NOTE: the old VEGAS_HUD env var was removed — nothing in any shipped VEGAS build
+        // ever read it (verified against cf04e7f source). Its tokens live in DXVK_HUD now.
         KnownEnvVar("MESA_EXTENSION_MAX_YEAR", EnvVarType.NUMBER),
         KnownEnvVar("WRAPPER_MAX_IMAGE_COUNT", EnvVarType.TEXT),
         KnownEnvVar("MESA_GL_VERSION_OVERRIDE", EnvVarType.TEXT),
