@@ -407,3 +407,87 @@ private fun installWcp(
         }
     }
 }
+
+/**
+ * Fetches stock VEGAS config files for ALREADY-INSTALLED builds whose release
+ * shipped a .conf asset that never got parked (older install, failed side-fetch).
+ * Same source and parking rules as the download sheet's install path: the .conf
+ * is a release asset alongside the .wcp (never inside it); it lands at
+ * <contentDir>/VEGAS/configs/<verName>.conf with provenance recorded so the
+ * stock prober resolves it exactly like a sheet-installed one.
+ */
+internal object VegasStockConfigFetcher {
+    private const val RELEASES_URL = "https://api.github.com/repos/isygold/vegas-releases/releases"
+
+    /**
+     * @return Pair(successCount, failures as "verName: reason")
+     */
+    fun fetchMissing(context: android.content.Context, verNames: List<String>): Pair<Int, List<String>> {
+        if (verNames.isEmpty()) return 0 to emptyList()
+        val wanted = verNames.toSet()
+        val body = Downloader.downloadString(RELEASES_URL)
+            ?: return 0 to verNames.map { "$it: release feed unreachable" }
+
+        // One pass over the feed: per release, collect its wcp-derived verNames and its
+        // .conf asset; first release mentioning a wanted verName wins (newest first).
+        data class Hit(val confUrl: String?, val confName: String?, val tag: String)
+        val resolved = linkedMapOf<String, Hit>()
+        runCatching {
+            val arr = org.json.JSONArray(body)
+            for (i in 0 until arr.length()) {
+                val rel = arr.optJSONObject(i) ?: continue
+                val tag = rel.optString("tag_name", "")
+                var confUrl: String? = null
+                var confName: String? = null
+                val wcps = mutableListOf<String>()
+                val assets = rel.optJSONArray("assets") ?: continue
+                for (j in 0 until assets.length()) {
+                    val a = assets.getJSONObject(j)
+                    val aname = a.optString("name")
+                    val url = a.optString("browser_download_url")
+                    if (url.isEmpty()) continue
+                    when {
+                        aname.endsWith(".conf") &&
+                            (aname.startsWith("vegas-config-") || aname == "dxvk.conf") -> {
+                            confUrl = url; confName = aname
+                        }
+                        aname.endsWith(".wcp") ->
+                            wcps += aname.removePrefix("vegas-").removeSuffix(".wcp")
+                    }
+                }
+                for (vn in wcps) if (vn in wanted && vn !in resolved) {
+                    resolved[vn] = Hit(confUrl, confName, tag)
+                }
+            }
+        }.onFailure { return 0 to verNames.map { "$it: feed parse failed" } }
+
+        if (resolved.isEmpty()) return 0 to verNames.map { "$it: no matching release" }
+
+        var ok = 0
+        val failures = mutableListOf<String>()
+        for ((verName, hit) in resolved) {
+            if (hit.confUrl == null) {
+                failures += "$verName: release ships no config asset"
+                continue
+            }
+            runCatching {
+                val vegasDir = ContentsManager.getContentTypeDir(
+                    context, ContentProfile.ContentType.CONTENT_TYPE_VEGAS)
+                val confDir = java.io.File(vegasDir, "configs")
+                if (!confDir.exists()) confDir.mkdirs()
+                val parked = java.io.File(confDir, "$verName.conf")
+                if (Downloader.downloadFile(hit.confUrl, parked, null)) {
+                    recordStockProvenance(
+                        confDir, verName, hit.tag,
+                        hit.confName ?: hit.confUrl.substringAfterLast('/', hit.confUrl),
+                        hit.confUrl,
+                    )
+                    ok++
+                } else {
+                    failures += "$verName: download failed"
+                }
+            }.onFailure { failures += "$verName: ${it.message}" }
+        }
+        return ok to failures
+    }
+}

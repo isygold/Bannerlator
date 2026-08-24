@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Help
@@ -229,6 +230,22 @@ fun ContainerDetailScreen(
             initialConfig = viewModel.dxWrapperConfig,
             onConfirm = { newConfig -> viewModel.dxWrapperConfig = newConfig; showDxvkConfig = false },
             onDismiss = { showDxvkConfig = false },
+            // Every live-file write points the container at that file immediately —
+            // launched games see toggles without needing OK, and without the full
+            // form save. Keeps viewModel state and disk in sync.
+            onLivePointerChanged = { p ->
+                val kv = DXVKConfigDialog.parseConfig(viewModel.dxWrapperConfig)
+                if (kv.get("dxvkConfigFile") != p) {
+                    kv.put("dxvkConfigFile", p)
+                    viewModel.dxWrapperConfig = kv.toString()
+                    viewModel.container?.let { c ->
+                        val ckv = DXVKConfigDialog.parseConfig(c.getDXWrapperConfig())
+                        ckv.put("dxvkConfigFile", p)
+                        c.setDXWrapperConfig(ckv.toString())
+                        c.saveData()
+                    }
+                }
+            },
             // Close the config dialog first — the download sheet is a ModalBottomSheet (activity
             // window) and would otherwise render BEHIND this AlertDialog. It reopens on sheet dismiss.
             onDownloadDxvk = { showDxvkConfig = false; if (isVegasWrapper) showVegasDownloadSheet = true else showDxvkDownloadSheet = true },
@@ -2111,6 +2128,11 @@ internal fun DxvkConfigDialog(
     onDownloadVkd3d: () -> Unit = {},
     onDownloadD7vk: () -> Unit = {},
     relaxDxvkFilter: Boolean = false,
+    // Fires after every successful live-file write with the file the game must read.
+    // The host persists dxvkConfigFile immediately — waiting for OK left toggles
+    // invisible to launched games when the sheet was dismissed without OK (the
+    // pointer kept aiming at the old path, e.g. a legacy /sdcard/dxvk.conf).
+    onLivePointerChanged: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -2131,16 +2153,22 @@ internal fun DxvkConfigDialog(
     // ---- VEGAS config source: stock/custom two-source model (Tier-2B) ----
     // Declared before LaunchedEffect: the init block below references these on first load.
     val stockSources = remember { mutableStateOf(listOf<DXVKConfigDialog.StockSource>()) }
+    // Installed VEGAS builds (verNames) — drives the inline ⬇ on the stock-config row:
+    // versions whose parked .conf is missing can be fetched straight from the releases
+    // feed without re-downloading the whole build.
+    val installedVegasVersions = remember { mutableStateOf(listOf<String>()) }
+    var fetchingConfigs by remember { mutableStateOf(false) }
     val customEntries = remember { mutableStateOf(listOf<String>()) }
     var useDefaults by remember { mutableStateOf(true) }
     var selectedStock by remember { mutableStateOf<String?>(null) }   // stock verName
     var selectedCustom by remember { mutableStateOf<String?>(null) }  // custom file path
     var stockEdited by remember { mutableStateOf(false) }
     var toggleVersion by remember { mutableStateOf(0) }               // bump after a write -> re-snapshot
-    // Option B: live files already backed up THIS session — the first write to a live file
-    // keeps a copy beside it (restore-able). Per-session so re-opening the dialog can never
-    // accumulate stale archives, and per-path so stock/custom files never mix.
-    val backedUpPaths = remember { mutableSetOf<String>() }
+    // Capture-once backups: the auto slot is the FILE <name>.bak beside the live file.
+    // It is created on the FIRST edit after a fresh selection/restore and then left
+    // alone — across edits AND sessions (no in-memory set to reset). Restore consumes
+    // it, so the next edit recaptures. Manual "Backup now" copies use .bak-manual-N
+    // and are never touched automatically.
     // §6c value editor: the row whose value picker is open + the freeform draft.
     var valuePickerRow by remember { mutableStateOf<VegasKeyKnowledge.EditRow?>(null) }
     var customValueDraft by remember { mutableStateOf("") }
@@ -2174,12 +2202,17 @@ internal fun DxvkConfigDialog(
             val d7vk = DXVKConfigDialog.loadD7vkVersionList(context, cm)
             val cfgsrc = DXVKConfigDialog.loadVegasConfigSourceList(context)
             val stock = if (isVegas) DXVKConfigDialog.loadVegasStockSources(context, cm) else listOf()
+            val installed = if (isVegas)
+                cm.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_VEGAS)
+                    ?.mapNotNull { it.verName }?.distinct().orEmpty()
+                else listOf()
             withContext(Dispatchers.Main) {
                 allDxvkVersions.value = versions
                 vkd3dVersions.value = vkd3d
                 d7vkVersions.value = d7vk
                 configSourceEntries.value = cfgsrc
                 stockSources.value = stock
+                installedVegasVersions.value = installed
                                 // Option B init: the stored dxvkConfigFile IS the live file. Restore by matching:
                 // parked stock file -> stock dropdown; sidecar of a known stock -> that stock
                 // baseline (the pointer moved when the first edit happened); anything else
@@ -2388,22 +2421,40 @@ internal fun DxvkConfigDialog(
         null -> "unknown"
     }
 
-    // Restore a .bak archive as the LIVE file: the current state is archived beside it
-    // first (nothing is lost), then the backup's content is written in place.
+    // Restore a .bak archive as the LIVE file: capture-once semantics — the backup is
+    // CONSUMED (written into the live file, then deleted if it is the auto slot), so
+    // nothing accumulates and the next edit recaptures fresh. Manual .bak-manual-N
+    // copies survive restores: they are deliberate snapshots, not rolling state.
     fun restoreBackup(backup: java.io.File) {
         val target = liveFile ?: return
         scope.launch {
             val ok = withContext(Dispatchers.IO) {
                 if (!target.isFile) return@withContext false
                 val content = runCatching { backup.readText() }.getOrNull() ?: return@withContext false
-                var bak = java.io.File(target.absolutePath + ".bak")
-                var n = 2
-                while (bak.isFile) { bak = java.io.File(target.absolutePath + ".bak-" + n); n++ }
-                runCatching { java.nio.file.Files.copy(target.toPath(), bak.toPath()) }
-                runCatching { target.writeText(content) }.isSuccess
+                if (!runCatching { target.writeText(content) }.isSuccess) return@withContext false
+                if (backup.name == target.name + ".bak") backup.delete()
+                true
             }
             if (ok) { stockEdited = true; toggleVersion++ }
             else Toast.makeText(activity, "Failed to restore backup", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    // Manual safety net for capture-once backups: an explicit user-taken snapshot.
+    // Named <name>.bak-manual (-2, -3…) so it never collides with the auto slot,
+    // shows up in the same Restore list, and survives restores and edits alike.
+    fun manualBackup() {
+        val target = liveFile ?: return
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                if (!target.isFile) return@withContext false
+                var bak = java.io.File(target.absolutePath + ".bak-manual")
+                var n = 2
+                while (bak.isFile) { bak = java.io.File(target.absolutePath + ".bak-manual-" + n); n++ }
+                runCatching { java.nio.file.Files.copy(target.toPath(), bak.toPath()) }.isSuccess
+            }
+            if (ok) toggleVersion++
+            else Toast.makeText(activity, "Failed to create backup", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -2458,6 +2509,46 @@ internal fun DxvkConfigDialog(
         }
     }
 
+    // Inline ⬇ on the stock-config row: installed builds whose parked .conf is missing.
+    val missingConfigVersions = remember(stockSources.value, installedVegasVersions.value) {
+        installedVegasVersions.value.filter { v -> stockSources.value.none { it.verName == v } }
+    }
+
+    // Fetch just the config asset(s) for those builds — same feed and parking rules as
+    // the download sheet's install path, without re-downloading the .wcp.
+    fun fetchMissingStockConfigs() {
+        if (fetchingConfigs) return
+        val targets = missingConfigVersions
+        if (targets.isEmpty()) return
+        fetchingConfigs = true
+        scope.launch {
+            val (ok, failures) = withContext(Dispatchers.IO) {
+                VegasStockConfigFetcher.fetchMissing(context, targets)
+            }
+            fetchingConfigs = false
+            val msg = when {
+                failures.isEmpty() -> "Fetched $ok stock config${if (ok == 1) "" else "s"}"
+                ok == 0 -> "Config download failed — ${failures.first()}"
+                else -> "Fetched $ok, failed ${failures.size} (${failures.first()})"
+            }
+            Toast.makeText(activity, msg, Toast.LENGTH_LONG).show()
+            if (ok > 0) {
+                // Reload sources so the dropdown picks up the newly parked configs.
+                val (s, inst) = withContext(Dispatchers.IO) {
+                    val cm = ContentsManager(context)
+                    cm.syncContents()
+                    Pair(
+                        DXVKConfigDialog.loadVegasStockSources(context, cm),
+                        cm.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_VEGAS)
+                            ?.mapNotNull { it.verName }?.distinct().orEmpty()
+                    )
+                }
+                stockSources.value = s
+                installedVegasVersions.value = inst
+            }
+        }
+    }
+
     val pickCustomConfigLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -2486,13 +2577,13 @@ internal fun DxvkConfigDialog(
                 if (!target.isFile) return@withContext false
                 val text = runCatching { target.readText() }.getOrNull() ?: return@withContext false
                 val next = transform(text) ?: return@withContext false
-                // First write to this live file THIS session keeps a copy beside it,
-                // named after the file itself: <name>.bak, <name>.bak-2, …
-                if (backedUpPaths.add(target.absolutePath)) {
-                    var bak = java.io.File(target.absolutePath + ".bak")
-                    var n = 2
-                    while (bak.isFile) { bak = java.io.File(target.absolutePath + ".bak-" + n); n++ }
-                    runCatching { java.nio.file.Files.copy(target.toPath(), bak.toPath()) }
+                // Capture-once backup: create the auto slot ONLY when it does not exist
+                // yet (first edit after a fresh selection/restore). Never .bak-2, -3…
+                // from repeat edits or new sessions — the slot persists until consumed
+                // by a restore. Manual "Backup now" copies use .bak-manual-N instead.
+                val autoBak = java.io.File(target.absolutePath + ".bak")
+                if (!autoBak.isFile) {
+                    runCatching { java.nio.file.Files.copy(target.toPath(), autoBak.toPath()) }
                 }
                 // Stock + pristine baseline: materialize the sidecar with the edited content.
                 // From then on the sidecar IS the live file (pointer saved on OK).
@@ -2505,7 +2596,15 @@ internal fun DxvkConfigDialog(
                     runCatching { target.writeText(next) }.isSuccess
                 }
             }
-            if (ok) { if (isStockPath) stockEdited = true; toggleVersion++ }
+            if (ok) {
+                if (isStockPath) stockEdited = true
+                toggleVersion++
+                // The game reads dxvkConfigFile at launch — point it at the file we just
+                // wrote NOW, not on OK. Dismissing the sheet must never orphan toggles.
+                val finalPath = if (isStockPath && !sidecarExists && sidecarPath != null) sidecarPath!!
+                                else target.absolutePath
+                onLivePointerChanged(finalPath)
+            }
             else Toast.makeText(activity, "Failed to update config file", Toast.LENGTH_SHORT).show()
         }
     }
@@ -2877,13 +2976,34 @@ internal fun DxvkConfigDialog(
                         // no seed/switch decisions. Legacy containers' parked stock files are
                         // simply live files (their content shows and applies).
                         Spacer(Modifier.height(4.dp))
-                        LabeledDropdown(
-                            "Stock config (per version)",
-                            stockSources.value.map { it.displayLabel() },
-                            selectedStock ?: "",
-                            { s -> selectedStock = s; selectedCustom = null; useDefaults = false },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                            LabeledDropdown(
+                                "Stock config (per version)",
+                                stockSources.value.map { it.displayLabel() },
+                                selectedStock ?: "",
+                                { s -> selectedStock = s; selectedCustom = null; useDefaults = false },
+                                modifier = Modifier.weight(1f)
+                            )
+                            // Inline fetch for installed builds whose parked stock config is
+                            // missing (older install / failed side-fetch): pulls just the
+                            // .conf asset from the same releases feed the download sheet uses.
+                            if (isVegas && missingConfigVersions.isNotEmpty()) {
+                                IconButton(
+                                    enabled = !fetchingConfigs,
+                                    onClick = { fetchMissingStockConfigs() }
+                                ) {
+                                    if (fetchingConfigs) {
+                                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    } else {
+                                        Icon(
+                                            Icons.Filled.Download,
+                                            contentDescription = "Download missing stock configs",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         if (stockSources.value.isEmpty()) {
                             Text(
                                 "no installed VEGAS package ships a config — install one via the sheet",
@@ -2948,6 +3068,13 @@ internal fun DxvkConfigDialog(
                                     style = MaterialTheme.typography.bodySmall,
                                     modifier = Modifier.weight(1f)
                                 )
+                                // Manual safety net for capture-once backups: an explicit
+                                // snapshot taken by the user, never overwritten automatically.
+                                if (liveFile != null && liveFile.isFile) {
+                                    TextButton(onClick = { manualBackup() }) {
+                                        Text("Backup now", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
                                 if (backupsList.isNotEmpty()) {
                                     TextButton(onClick = { showBackups = true }) { Text("Restore…", style = MaterialTheme.typography.bodySmall) }
                                 }
