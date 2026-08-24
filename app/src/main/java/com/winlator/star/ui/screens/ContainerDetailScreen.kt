@@ -363,6 +363,9 @@ internal fun VulkanSettingsDialog(
     // The config string is SEMICOLON-separated (see the confirm button below), so parse it that way.
     // (The old KeyValueSet path split on commas and silently returned every default.)
     val cfg = remember { parseVulkanConfig(initialConfig) }
+    // Per-field "?" help (upstream pattern): this dialog carries its own helpRes.
+    var helpRes by remember { mutableStateOf<Int?>(null) }
+    helpRes?.let { HelpDialog(it) { helpRes = null } }
     var nativeRender by remember { mutableStateOf(cfg["native"] == "true") }
     var presentMode by remember { mutableStateOf(cfg["presentMode"] ?: "fifo") }
     var driverId by remember { mutableStateOf(cfg["driverId"] ?: "system") }
