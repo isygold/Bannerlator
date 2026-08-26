@@ -143,6 +143,47 @@ public final class VegasKeyKnowledge {
      * Classifies a config key against the selected VEGAS version string
      * (one of {@link #released()}). A null/unknown version yields UNKNOWN.
      */
+    /**
+     * Numeric core of a version-ish string: leading int components only.
+     * "2.7.4-e90824c" -> [2,7,4]; "2.7.3" -> [2,7,3]; "unknown" -> null.
+     */
+    private static long[] parseCore(String v) {
+        if (v == null) return null;
+        java.util.regex.Matcher m = java.util.regex.Pattern
+            .compile("^(\\d+(?:\\.\\d+){0,2})").matcher(v.trim());
+        if (!m.find()) return null;
+        String[] parts = m.group(1).split("\\.");
+        long[] out = new long[3];
+        for (int i = 0; i < parts.length && i < 3; i++) out[i] = Long.parseLong(parts[i]);
+        return out;
+    }
+
+    private static int cmpCore(long[] a, long[] b) {
+        for (int i = 0; i < 3; i++) { int c = Long.compare(a[i], b[i]); if (c != 0) return c; }
+        return 0;
+    }
+
+    /**
+     * Exact match against {@link #released} first; otherwise the GREATEST known release
+     * that is still <= the requested version (forward extrapolation). Custom/unreleased
+     * builds like "2.7.4-custom" then classify against the newest real release they
+     * descend from, instead of degrading every key to UNKNOWN. Returns -1 when the
+     * version parses to nothing or sits below every known milestone.
+     */
+    private int nearestReleasedIndex(String version) {
+        int exact = released.indexOf(version);
+        if (exact >= 0) return exact;
+        long[] v = parseCore(version);
+        if (v == null) return -1;
+        int best = -1;
+        for (int i = 0; i < released.size(); i++) {
+            long[] r = parseCore(released.get(i));
+            if (r == null) continue;
+            if (cmpCore(r, v) <= 0) best = i;
+        }
+        return best;
+    }
+
     public State stateFor(String key, String version) {
         if (key == null) return State.UNKNOWN;
         // tolerate bare key forms (e.g. "enableStarProfile") emitted by older
@@ -152,8 +193,8 @@ public final class VegasKeyKnowledge {
         // env-style [other] keys always apply — independent of the config file layer
         // (verified: DXVK_FRAME_RATE is emitted regardless; see DXVKConfigDialog.setEnvVars)
         if (!norm.startsWith("vegas.") && !norm.startsWith("dxvk.")) return State.OK;
-        int vIdx = released.indexOf(version);
-        if (vIdx < 0) return State.UNKNOWN;                      // no stock template for this version
+        int vIdx = nearestReleasedIndex(version);
+        if (vIdx < 0) return State.UNKNOWN;                      // unparseable / predates all known releases
         Integer introIdx = introduced.get(norm);
         if (introIdx == null) return State.UNLISTED;             // unprovable fork/dxvk key
         Integer remIdx = removed.get(norm);

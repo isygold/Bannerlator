@@ -477,20 +477,34 @@ internal object VegasStockConfigFetcher {
     }
 
     /**
-     * Download + park one release's config. Parks under EVERY verName this release's
-     * wcps derive that is currently INSTALLED (so loadVegasStockSources pairs it);
-     * when none is installed, parks under the first derived verName anyway (harmless
-     * orphan — it starts pairing the moment that build gets installed).
+     * Download + park one release's config. Target resolution order:
+     *   1. this release's own wcp-derived verNames that are INSTALLED;
+     *   2. installed verNames sharing the release's numeric version prefix
+     *      (tag "v2.7.3-vegas" → "2.7.3", so hash-renamed installs match);
+     *   3. any installed build (single-install devices: intent is obvious);
+     *   4. fall back to derived verNames (orphan file — pairs on future install).
+     * Parking under an installed name is what makes loadVegasStockSources pair
+     * the config into the stock dropdown immediately.
      */
     fun park(context: android.content.Context, rel: ReleaseConf): ParkResult {
         if (rel.confUrl == null) return ParkResult.Fail("release ships no config asset")
         val assetName = rel.confName ?: rel.confUrl.substringAfterLast('/', rel.confUrl)
         return runCatching {
-            val vegasDir = ContentsManager.getContentTypeDir(
-                context, ContentProfile.ContentType.CONTENT_TYPE_VEGAS)
-            val confDir = java.io.File(vegasDir, "configs")
+            val cm = ContentsManager(context)
+            cm.syncContents()
+            val installed = cm.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_VEGAS)
+                ?.mapNotNull { p -> p.verName?.removePrefix("vegas-") }.orEmpty()
+
+            val prefix = rel.tag.removePrefix("v").substringBefore('-')
+            val targets = sequence {
+                yieldAll(rel.verNames.filter { it in installed })
+                yieldAll(installed.filter { it.startsWith(prefix) })
+                if (rel.verNames.isEmpty()) yieldAll(installed)
+            }.distinct().toList().ifEmpty { rel.verNames.ifEmpty { listOf(prefix) } }
+
+            val confDir = java.io.File(ContentsManager.getContentTypeDir(
+                context, ContentProfile.ContentType.CONTENT_TYPE_VEGAS), "configs")
             if (!confDir.exists()) confDir.mkdirs()
-            val targets = rel.verNames.ifEmpty { listOf(rel.tag.removePrefix("v")) }
             var last: ParkResult? = null
             for (verName in targets) {
                 val parked = java.io.File(confDir, "$verName.conf")
