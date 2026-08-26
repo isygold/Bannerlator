@@ -4,8 +4,8 @@ import android.content.Context;
 
 import com.winlator.star.R;
 import com.winlator.star.container.Container;
-import com.winlator.star.contentdialog.VegasKeyKnowledge;
 import com.winlator.star.core.DefaultVersion;
+import com.winlator.star.contents.ContentProfile;
 import com.winlator.star.contents.ContentsManager;
 import com.winlator.star.core.EnvVars;
 import com.winlator.star.core.FileUtils;
