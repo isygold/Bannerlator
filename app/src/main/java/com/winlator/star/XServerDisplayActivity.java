@@ -4339,6 +4339,18 @@ public class XServerDisplayActivity extends AppCompatActivity {
             } catch (Throwable t) {
                 Log.w("VegasDump", "/storage/emulated/0 probe FAILED: " + t.getClass().getSimpleName() + ": " + t.getMessage());
             }
+            // Read-side probe: the user's custom conf lives at shared-storage root.
+            // If reads are denied too, DXVK silently parses an empty config (same
+            // denial family as the CSV-write ENOENT).
+            try {
+                java.io.File c = new java.io.File("/storage/emulated/0/dxvk.conf");
+                Log.w("VegasDump", "dxvk.conf probe: exists=" + c.exists()
+                    + " canRead=" + c.canRead() + " len=" + c.length());
+            } catch (Throwable t) {
+                Log.w("VegasDump", "dxvk.conf probe FAILED: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+            }
+            Log.w("VegasDump", "grant state: isExternalStorageManager="
+                + (android.os.Build.VERSION.SDK_INT >= 30 && android.os.Environment.isExternalStorageManager()));
             String vegasVersion = dxwrapperConfig.get("version");
             if (vegasVersion == null || vegasVersion.isEmpty())
                 vegasVersion = DefaultVersion.getVegasDefault();
