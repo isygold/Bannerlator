@@ -4,7 +4,8 @@ import android.content.Context;
 
 import com.winlator.star.R;
 import com.winlator.star.container.Container;
-import com.winlator.star.contents.ContentProfile;
+import com.winlator.star.contentdialog.VegasKeyKnowledge;
+import com.winlator.star.core.DefaultVersion;
 import com.winlator.star.contents.ContentsManager;
 import com.winlator.star.core.EnvVars;
 import com.winlator.star.core.FileUtils;
@@ -93,12 +94,15 @@ public class DXVKConfigDialog {
     }
 
     public static List<String> loadVegasVersionList(Context context, ContentsManager contentsManager) {
-        // Installed builds ONLY. The dropdown used to be seeded from a static
-        // vegas_version_entries array — that made uninstalled (or never-installed)
-        // versions appear selectable, survive clear-data, and confuse delete/selection
-        // ("ghost" entries). Classifier matching doesn't need this list: the knowledge
-        // asset's released[] covers exact-string matching independently.
+        // Installed builds + the BUNDLED DEFAULT. vegas-2.7.3.tzst ships inside the
+        // APK and the launcher extracts it as a fallback whenever no installed wcp
+        // matches (see XServerDisplayActivity's vegas apply block), so it is always
+        // launchable regardless of clear-data — list it explicitly. Other versions
+        // appear only when actually installed (no ghost entries for builds whose
+        // payloads we don't carry).
         List<String> list = new ArrayList<>();
+        String bundled = DefaultVersion.getVegasDefault();
+        if (bundled != null && !bundled.isEmpty()) list.add(bundled);
 
         // vegas WCP profiles have type CONTENT_TYPE_VEGAS, verName like "vegas-2.7.3"
         for (ContentProfile profile : contentsManager.getProfiles(ContentProfile.ContentType.CONTENT_TYPE_VEGAS)) {
@@ -158,6 +162,22 @@ public class DXVKConfigDialog {
                 ContentsManager.getContentTypeDir(context, ContentProfile.ContentType.CONTENT_TYPE_VEGAS), "configs");
         org.json.JSONObject sidecar = loadStockProvenance(confDir);
         java.util.Set<String> seen = new java.util.HashSet<>();
+        // The BUNDLED DEFAULT build has no content profile, yet its fallback payload
+        // always launches — so a parked stock config for it is just as valid. Surface
+        // it before the profile loop; `seen` keeps the profile loop from duplicating
+        // it if a matching wcp is also installed.
+        String bundledDefault = DefaultVersion.getVegasDefault();
+        if (bundledDefault != null && !bundledDefault.isEmpty()) {
+            java.io.File builtinConf = new java.io.File(confDir, bundledDefault + ".conf");
+            if (builtinConf.isFile()) {
+                org.json.JSONObject entry = sidecar != null ? sidecar.optJSONObject(bundledDefault) : null;
+                out.add(new StockSource(bundledDefault,
+                    entry != null ? entry.optString("tag", null) : null,
+                    entry != null ? entry.optString("assetName", null) : null,
+                    builtinConf));
+                seen.add(bundledDefault);
+            }
+        }
         for (ContentProfile profile : profiles) {
             if (profile.verName == null) continue;
             // verName is NOT unique across releases (community vs stable tags share it) — dedupe per profile.
