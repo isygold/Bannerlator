@@ -2357,7 +2357,14 @@ internal fun DxvkConfigDialog(
     var asyncCacheEnabled    by remember { mutableStateOf(config.get("asyncCache") == "1") }
 
     // VEGAS knowledge layer: bundled asset or null (null -> unclassified fallback).
-    val vegasKnowledge = remember { DXVKConfigDialog.loadVegasKeyKnowledge(context) }
+    val vegasKnowledge = remember {
+        val k = DXVKConfigDialog.loadVegasKeyKnowledge(context)
+        // Autonomy: re-apply feed-discovered version tail persisted from prior sessions.
+        val saved = context.getSharedPreferences("vegas_config_ui", Context.MODE_PRIVATE)
+            .getString("released_tail", null)?.split("|")?.filter { it.isNotBlank() }
+        if (!saved.isNullOrEmpty()) k.mergeReleasedTail(saved)
+        k
+    }
     // VEGAS key catalog (classifier ground truth, §6b): null -> classifier off, rows unverified.
     val vegasCatalog = remember { DXVKConfigDialog.loadVegasKeyCatalog(context) }
     val activeStockTag = remember(selectedStock, stockSources.value) {
@@ -3007,6 +3014,16 @@ internal fun DxvkConfigDialog(
                 if (isVegas) {
                     Spacer(Modifier.height(8.dp))
                     SectionLabel("CONFIG")
+                    // Guidance for the three config audiences (new / customizer / file-savvy).
+                    Text(
+                        "New to configs? Grab a Stock config via ⬇, then pick it below. " +
+                        "Want it your way? Edit anything in a stock config — changes auto-save as your own copy, the original stays untouched. " +
+                        "Prefer managing files yourself? \"Custom config file\" points at any .conf (the built-in way of doing DXVK_CONFIG_FILE). " +
+                        "Heads-up: builds SILENTLY IGNORE keys they don't recognise — if an added key does nothing, it's either not supported by that build or has a typo.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Spacer(Modifier.height(4.dp))
                     // ---- config source: two-source model (stock/custom), one ACTIVE ----
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Switch(checked = useDefaults, onCheckedChange = { useDefaults = it }, modifier = Modifier.height(32.dp))
@@ -3912,6 +3929,19 @@ private fun StockConfigDownloadSheet(
     LaunchedEffect(Unit) {
         rows = withContext(Dispatchers.IO) { VegasStockConfigFetcher.listReleaseConfigs() }
         loading = false
+        // Autonomy: persist any newly seen release versions so the classifier's
+        // known list grows by itself — no bundled-asset regeneration ever needed.
+        val prefs = context.getSharedPreferences("vegas_config_ui", Context.MODE_PRIVATE)
+        val existing = prefs.getString("released_tail", "")?.split('|')
+            ?.filter { it.isNotBlank() }?.toMutableSet() ?: mutableSetOf()
+        var added = false
+        for (rel in rows) {
+            val prefix = rel.tag.removePrefix("v").substringBefore('-')
+            for (c in rel.verNames + prefix) {
+                if (c.isNotBlank() && existing.add(c)) added = true
+            }
+        }
+        if (added) prefs.edit().putString("released_tail", existing.joinToString("|")).apply()
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -3951,8 +3981,13 @@ private fun StockConfigDownloadSheet(
                                     val res = withContext(Dispatchers.IO) { VegasStockConfigFetcher.park(context, rel) }
                                     parkedTag = null
                                     when (res) {
-                                        is VegasStockConfigFetcher.ParkResult.Ok ->
-                                            activity?.let { Toast.makeText(it, "Parked as ${res.parkedAs}.conf", Toast.LENGTH_SHORT).show() }
+                                        is VegasStockConfigFetcher.ParkResult.Ok -> {
+                                            activity?.let {
+                                                Toast.makeText(it,
+                                                    "Parked as ${res.parkedAs}.conf — now select \"${res.parkedAs}\" under Stock config",
+                                                    Toast.LENGTH_LONG).show()
+                                            }
+                                        }
                                         is VegasStockConfigFetcher.ParkResult.Fail ->
                                             activity?.let { Toast.makeText(it, "Failed: ${res.reason}", Toast.LENGTH_LONG).show() }
                                     }

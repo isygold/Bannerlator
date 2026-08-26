@@ -41,6 +41,7 @@ public final class VegasKeyKnowledge {
     private final String forkBuild;
     private final String generated;
     private final List<String> released;
+    private final List<String> dynamicTail = new ArrayList<>();  // feed-discovered versions, chronological after released
     private final Map<String, String> vanilla;      // key -> key (set semantics, indexed)
     private final Map<String, Integer> introduced;  // key -> index into released
     private final Map<String, Integer> removed;     // key -> index into released (absent = never)
@@ -144,6 +145,51 @@ public final class VegasKeyKnowledge {
      * (one of {@link #released()}). A null/unknown version yields UNKNOWN.
      */
     /**
+     * Feed-driven autonomy: absorb newly discovered release version strings
+     * (e.g. from the vegas-releases feed) so classification stays current
+     * without rebuilding the bundled asset. Guards: dedupe by string, skip
+     * anything already known or older than the newest known milestone, cap
+     * at 32 entries. Returns the count actually added.
+     */
+    public int mergeReleasedTail(java.util.List<String> candidates) {
+        if (candidates == null || candidates.isEmpty()) return 0;
+        long[] last = lastKnownCore();
+        int added = 0;
+        for (String c : candidates) {
+            if (c == null || c.trim().isEmpty()) continue;
+            String v = c.trim();
+            if (released.contains(v) || dynamicTail.contains(v)) continue;
+            long[] core = parseCore(v);
+            if (core == null || cmpCore(core, last) < 0) continue;
+            dynamicTail.add(v);
+            last = core;
+            added++;
+            if (dynamicTail.size() >= 32) break;
+        }
+        return added;
+    }
+
+    /** Combined known-version list (bundled milestones + feed-discovered tail). */
+    public List<String> knownVersions() {
+        List<String> out = new ArrayList<>(released);
+        out.addAll(dynamicTail);
+        return out;
+    }
+
+    private long[] lastKnownCore() {
+        String lastStr = !dynamicTail.isEmpty() ? dynamicTail.get(dynamicTail.size() - 1)
+                                                : released.get(released.size() - 1);
+        long[] c = parseCore(lastStr);
+        return c != null ? c : new long[]{0, 0, 0};
+    }
+
+    /** Safe name lookup across bundled + tail (badgeFor uses indexes that may reach the tail). */
+    private String nameAt(int idx) {
+        return idx < released.size() ? released.get(idx)
+                                      : dynamicTail.get(idx - released.size());
+    }
+
+    /**
      * Numeric core of a version-ish string: leading int components only.
      * "2.7.4-e90824c" -> [2,7,4]; "2.7.3" -> [2,7,3]; "unknown" -> null.
      */
@@ -176,8 +222,9 @@ public final class VegasKeyKnowledge {
         long[] v = parseCore(version);
         if (v == null) return -1;
         int best = -1;
-        for (int i = 0; i < released.size(); i++) {
-            long[] r = parseCore(released.get(i));
+        java.util.List<String> all = knownVersions();
+        for (int i = 0; i < all.size(); i++) {
+            long[] r = parseCore(all.get(i));
             if (r == null) continue;
             if (cmpCore(r, v) <= 0) best = i;
         }
@@ -457,9 +504,9 @@ public final class VegasKeyKnowledge {
                 if (!norm.startsWith("vegas.") && !norm.startsWith("dxvk.")) return "[other] · always applies";
                 return "fork · applies to v" + version;
             case LATE:
-                return "needs " + released.get(introduced.get(norm)) + "+";
+                return "needs " + nameAt(introduced.get(norm)) + "+";
             case REMOVED:
-                return "removed in " + released.get(removed.get(norm));
+                return "removed in " + nameAt(removed.get(norm));
             case UNLISTED:
                 // Namespace-aware honesty: a vegas.* key the manifest can't prove is a
                 // FORK feature by construction — claiming "DXVK still reads it" is true
