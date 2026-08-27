@@ -1,0 +1,356 @@
+================================================================================
+  BANNERLATOR / VEGAS — ADRENO 610 VULKAN VERSION CLAMP FAILURE
+  Quality Report — Universal DXVK Failure on Low-Tier Adreno
+  Date:   2026-08-22
+  Device: Xiaomi Redmi 2201117TG (Redmi Note 11) — Adreno 610 — Android 13
+  Driver: Turnip-v26.1.0-R5 (custom adrenotools) via wrapper-original
+  Branch: 2.8.1 (working) vs 2.9.1/main (broken) — commits 42569e22, 3a1807dd
+  Tested: VEGAS 2.7.3, DXVK-Sarek 1.11.1, DXVK 1.11 vanilla — all fail
+  Reporter: on-device logs + code archaeology (The412Banner/Bannerlator)
+================================================================================
+
+1. EXECUTIVE SUMMARY
+--------------------
+A regression shipped between Bannerlator 2.9 and 2.9.1 makes DXVK fail
+universally on Adreno 610 (and by extension any Adreno whose system
+Vulkan blob is <1.3) when a custom Turnip is used via any wrapper
+(wrapper-original, wrapper-gamenative, wrapper-leegao/bcn). The same
+container that ran on 2.8.1 now produces:
+
+  VEGAS 2.7.3:  Found device: Wrapper(Turnip Adreno (TM) 610) ( 0.0.0)
+                Skipping: Device does not support Vulkan 1.3
+                DXVK: No adapters found
+
+  Sarek 1.11.x: Skipping Vulkan 1.0 adapter: Wrapper(Turnip Adreno (TM) 610)
+                DXVK: No adapters found
+
+Both messages describe the same underlying condition: the wrapper's
+advertised apiVersion is < the DXVK's minimum (1.3 for VEGAS 2.x,
+1.1 for Sarek 1.x). The wrapper is reporting 1.1.x (pre-9739d43) and
+after the first bypass fix 1.0.x — never 1.3.x despite the container's
+vulkanVersion=1.3 and the inner Turnip being 1.3-capable.
+
+Root cause is a single upstream change: WinNative PR #669 port
+(42569e22) that clamps WRAPPER_VK_VERSION to the app-process Vulcan
+probe result. On wrapper slots the probe measures the SYSTEM ICD
+(1.0/1.1 on 610), not the Turnip that the guest actually wraps.
+Companion change 3a1807dd (default 1.3 -> 1.4) guarantees the clamp
+always has room to fire. On flagship Adrenos (8xx) the system blob
+is already 1.3+, so the clamp is a no-op — invisible upstream.
+
+Fix comparison: restore the 2.8.1 structure (unconditional
+"chosenMinor + probePatch", default 1.3, no clamp) with the 2.9.1
+robustness guard for malformed probe strings. An additive floor
+("never advertise <1.3 on wrapper+Adreno") is equivalent and preserves
+the 1.4 default elsewhere.
+
+2. TESTED DEVICE & CONFIGURATION
+---------------------------------
+  Device:         Xiaomi Redmi 2201117TG (Redmi Note 11)
+  SoC:            Snapdragon 680 (SM6225)
+  GPU:            Adreno (TM) 610 — TBDR
+  Android:        13 (API 33)
+  System blob:    Vulkan 1.1.x (1.0.x observed post-9739d43, see §5)
+                  — Qualcomm proprietary ICD at /system/lib64/libvulkan.so
+  Custom driver:  Turnip-v26.1.0-R5 (Mesa 26.1, Telegram zip in Download/
+                  -> imported, stored at files/contents/adrenotools/
+                  Turnip-v26.1.0-R5/)
+  GraphicsDriver: wrapper-original (bundled graphics_driver/wrapper-original.tzst)
+                  ICD manifest api_version: 1.3.289
+                  libvulkan_wrapper.so honours WRAPPER_VK_VERSION (strings verified)
+  Container:      Container-1, graphicsDriverConfig raw:
+                  vulkanVersion=1.3;version=Turnip-v26.1.0-R5;blacklistedExtensions=;
+                  maxDeviceMemory=0;presentMode=mailbox;syncFrame=0;... (full in logs)
+  DX wrappers:    VEGAS 2.7.3 (dxvk-2.7.3), Sarek 1.11.1, vanilla 1.11.1 — all tested
+  Bannerlator:    APKS 8cca160 (2026-08-22 10:57, default 1.3) and 9739d43 (probe-
+                  fell-back bypass). Previous: c3fb940, 307ecb1. CI runs verified.
+
+3. SYMPTOM — UNIVERSAL ON 610, NOT SAREK-ONLY
+---------------------------------------------
+User report: "now it is not just a gork it happrns on all dxvks vanilla
+and fork invluding vegad running on 610"
+
+Verified by sequential wine_debug.log captures (same Container-1,
+same wrapper-original, same Turnip R5):
+
+  2026-08-22_11-01-33  wrapper-original  vV=1.3  -> VEGAS: Found device ...
+                                              Skipping: Device does not support Vulkan 1.3
+  2026-08-22_11-06-25  same            vV=1.3  -> same (1.1 adapter)
+  2026-08-22_11-07-10  same            vV=1.3  -> same
+  2026-08-22_11-08-20  same            vV=1.3  -> Sarek: Skipping Vulkan 1.0 adapter
+  2026-08-22_12-14-04  same            vV=1.3  -> (truncated, same)
+
+Note: vulkanVersion in config is consistently 1.3 — user selection is
+honored in storage, but not in the wrapper's advertised apiVersion.
+
+Guest-side wrapper is healthy: deviceName always Wrapper(Turnip Adreno
+(TM) 610) proves the inner Turnip WAS enumerated. The failure is
+purely the advertised apiVersion field.
+
+4. TIMELINE & CODE ARCHAEOLOGY
+-------------------------------
+Upstream tags (The412Banner/Bannerlator):
+
+  2.8.1  2026-07-?  default vulkanVersion=1.3, no clamp (2 hits for WRAPPER_VK_VERSION)
+  2.9    2026-07-?  same (2 hits)
+  2.9.1  2026-07-28 +2 hits -> 9 (clamp added) — first release containing both:
+
+Commits (git log --oneline -S WRAPPER_VK_VERSION, path XServerDisplayActivity.java):
+
+  42569e22 2026-07-28 fix(vulkan): clamp WRAPPER_VK_VERSION to the minor the driver reports
+           Ported from WinNative PR #669 (Xnick417x). Message:
+           "We append the driver's patch level to the user's chosen Vulkan
+            minor, so picking 1.4 on a 1.3.289 driver exported
+            WRAPPER_VK_VERSION=1.4.289 -- advertising a Vulkan minor the ICD
+            does not implement to DXVK/VKD3D. Clamp the chosen minor down
+            to the driver's when it is lower, and log it."
+           Diff: introduced driverVkVersion, driverVkParts split, clamp block,
+                 guarded sscanf, Log.i "Clamping Vulkan..."
+
+  3a1807dd 2026-07-28 feat(vulkan): default to Vulkan 1.4
+           Changed Container.java DEFAULT_GRAPHICSDRIVERCONFIG vulkanVersion
+           1.3 -> 1.4 and XServerDisplayActivity fallback "1.3" -> "1.4".
+
+  fffe8037 2026-07-28 fix: remove bundled turnip-26.1.0 ICD (direct ICD path
+           removed, migrated to System). Explains REMOVED_TURNIP_ICD handling.
+
+Local verification:
+
+  $ gh api repos/The412Banner/Bannerlator/contents/app/.../XServerDisplayActivity.java?ref=2.8.1 | grep -c WRAPPER -> 2
+  $ ...?ref=2.9.1 | grep -c WRAPPER -> 9
+
+5. INVESTIGATION — LOGS & MEASUREMENTS
+---------------------------------------
+5.1 VEGAS 2.7.3 path (2.8.1 logic still partially present)
+    Log line construction (src/dxvk/dxvk_device_filter.cpp:46):
+      Logger::info("Found device: ", deviceName, " (", vk12.driverName, " ",
+                   driverVersion.toString(), ")");
+    Observed: ( 0.0.0) — driverName empty, driverVersion 0.0.0.
+    Verified: wrapper leaves VkPhysicalDeviceDriverProperties::driverName/
+              driverVersion at 0/empty — only rewrites deviceName + apiVersion.
+              Cosmetic, not the skip decision.
+    Skip decision (src/dxvk/dxvk_device_info.cpp:662):
+      if (apiVersion < DxvkVulkanApiVersion) // 1.3 for VEGAS 2.x
+        return "Device does not support Vulkan 1.3";
+    So the 1.1/1.0 apiVersion is the killer, not the ( 0.0.0) print.
+
+5.2 Sarek 1.11.x path
+    src/dxvk/dxvk_device_filter.cpp:16 (isygold/DXVK-Sarek v1.11.0):
+      if (properties.apiVersion < VK_MAKE_VERSION(1,1,0))
+        Logger::warn("Skipping Vulkan 1.0 adapter: ", deviceName);
+    Observed after 9739d43: that warn fires — wrapper apiVersion is 1.0.x.
+
+5.3 Wrapper side (installed APK wrapper-original.tzst, 3.8 MB)
+    $ unzip -p base.apk assets/graphics_driver/wrapper-original.tzst | zstd -d | tar tf
+      usr/lib/libvulkan_wrapper.so
+      usr/share/vulkan/icd.d/wrapper_icd.aarch64.json  {"api_version":"1.3.289",...}
+    $ strings libvulkan_wrapper.so | grep WRAPPER_VK_VERSION -> present
+      wrapper_vk_version symbol present — wrapper honours env.
+    Source (GameNative/mesa src/vulkan/wrapper/wrapper_physical_device.c:18-29):
+      parse_vk_version_from_env():
+        apiVersion=0; sscanf(getenv("WRAPPER_VK_VERSION"), "%d.%d.%d", &major,&minor,&patch);
+        apiVersion=VK_MAKE_VERSION(major,minor,patch); return apiVersion;
+      wrapper_GetPhysicalDeviceProperties[2]():
+        pdevice->dispatch_table.GetPhysicalDeviceProperties(...);
+        if (api_version >0) pProperties->apiVersion = api_version;
+    ICD manifest default 1.3.289 means without env, wrapper would still be 1.3.
+
+5.4 App-side probe (app/src/main/cpp/winlator/vulkan.c)
+    init_vulkan(): if adrenotools driver path missing -> init_original_vulkan()
+                   (probe system ICD, last_driver_fell_back stays 0 — expected)
+                  else adrenotools_open_libvulkan(...); if !handle -> last_driver_fell_back=1,
+                   init_original_vulkan().
+    create_instance(): on API >32 (Android 13) app_info.apiVersion = VK_API_VERSION_1_0
+                       else enumerateInstanceVersion().
+                       Then CreateInstance, EnumeratePhysicalDevices, GetPhysicalDeviceProperties
+                       -> props.apiVersion -> "%d.%d.%d" string via GetVulkanVersion JNI.
+    For wrapper slot with Turnip R5 on 610: adrenotools_open_libvulkan is attempted,
+    but fails to load the custom Turnip in the app process (observed via
+    driverLoadedFellBack flag) -> falls back to system ICD (1.0/1.1). Guest (Box64
+    + wrapper) loads the same Turnip fine via its own loader — hence the
+    deviceName mismatch (probe sees system, guest sees Turnip).
+
+5.5 What was actually exported?
+    Pre-9739d43 (c3fb940, 8cca160): noCustomDriverConfigured false for Turnip R5,
+    so clamp fired: min(1.3, 1.1) -> 1.1.x exported -> VEGAS skips (needs 1.3),
+    Sarek would have passed (needs 1.1) but user was on VEGAS at that time.
+    Post-9739d43: bypass fires (probeFellBack true -> probeReflectsGuestIcd false),
+    so vulkanVersion stays 1.3, patch = driverVkParts[2] (system patch or "0"
+    fallback). Expected WRAPPER_VK_VERSION=1.3.128 or 1.3.0 -> wrapper apiVersion
+    1.3 -> should pass BOTH. Observed: wrapper reports 1.0 -> indicates patch
+    or env was malformed/empty, or wrapper saw api_version=0 and kept inner
+    driver's 1.0 (possible if inner driver on this path is still system, not
+    Turnip, due to a secondary extraction/shadow issue — see §9).
+
+6. WRAPPER-SIDE VERIFICATION
+-----------------------------
+- Base wrapper (wrapper.tzst) and wrapper-original both contain WRAPPER_VK_VERSION refs (verified).
+- wrapper-gamenative: 2 refs, wrapper-leegao: 0 refs (ignores env — known).
+- User's graphicsDriver=wrapper-original -> uses base wrapper, honours env.
+- User-override shadow: filesDir/graphics_driver/wrapper-original.tzst wins over
+  bundled asset if present (XServerDisplayActivity:extractGraphicsAsset).
+  Check: no override was listed in this investigation, but a stale file there
+  would shadow all fixes (per-launch extraction is otherwise fresh).
+
+7. ROOT CAUSE — WHY 610 ONLY
+-----------------------------
+The clamp's correctness depends on one assumption: the app-process probe
+measures the ICD the guest will use. On wrapper slots that assumption is
+false in two cases:
+
+  a) No custom driver configured (version empty/System) -> probe explicitly
+     opens system ICD.
+  b) Installed custom driver fails to load in the app process (adrenotools
+     silently falls back, last_driver_fell_back=1) while the guest's Box64
+     environment loads it fine (different linker namespace, different deps).
+     Observed: Turnip-v26.1.0-R5 on Adreno 610.
+
+Both measure the low-tier system blob (610: 1.0/1.1) instead of the
+wrapper's Turnip (1.3+ since Mesa 22.3). min(chosen, probe) then
+strangles WRAPPER_VK_VERSION to 1.x and DXVK skips.
+
+Why upstream never saw it: flagship test devices (Adreno 7xx/8xx) have
+system blobs already 1.3+, so min(1.3, 1.3) = 1.3 -> no-op. 610 is the
+intersection of old blob + wrapper-dependent workflow.
+
+8. WHY 2.8.1 WORKED (UNCONDITIONAL 1.3)
+---------------------------------------
+2.8.1 exported WRAPPER_VK_VERSION as unconditional "chosenMinor.patchFromProbe":
+  vulkanVersion = (chosen ?: "1.3") + "." + split(getVulkanVersion(...))[2]
+No comparison of minors. On 610 that meant 1.3.<systemPatch> even though
+the probe said 1.1 — which was actually truthful about Turnip. The "lie"
+the clamp was meant to fix (1.4.289 on a 1.3 driver) never occurred on
+610's defaults (1.3). The clamp's honesty fix is only needed when
+chosen > probe's minor on hardware where probe == guest ICD; on 610
+probe != guest, so honesty requires ignoring the probe.
+
+9. FIX COMPARISON — 2.8.1 STRUCTURE AS UPSTREAM FIX
+----------------------------------------------------
+2.8.1 structure (working):
+  default vulkanVersion = 1.3
+  patch = split(getVulkanVersion(...))[2]  // assumed dotted, could crash on "Unknown"
+  WRAPPER_VK_VERSION = chosen + "." + patch   // no clamp
+
+2.9.1 structure (broken on 610):
+  default = 1.4
+  driverVkVersion = getVulkanVersion(...);
+  parts = split length>=3 ? split : {"1","3","0"}  // robustness addition — keep this
+  patch = parts[2]
+  if (driverMinor < chosenMinor) chosen = driverMajor+"."+driverMinor  // clamp
+  WRAPPER_VK_VERSION = chosen + "." + patch
+
+Proposed fix — 2.8.1 structure with 2.9.1's robustness, no clamp:
+  // Keep 2.9.1's safe split fallback, drop the clamp entirely for wrapper
+  // (or guard it: only clamp when probeReflectsGuestIcd, which is what 9739d43
+  // attempted — but the observed 1.0 after 9739d43 shows the guard+patch path
+  // still produces 1.0 on this device, so full removal is the proven 2.8.1 path)
+  String driverVkVersion = GPUInformation.getVulkanVersion(adrenoToolsDriverId, this);
+  String[] parts = (driverVkVersion != null && driverVkVersion.split("\\.").length>=3)
+                 ? driverVkVersion.split("\\.") : new String[]{"1","3","0"};
+  String patch = parts[2];
+  String vulkanVersion = graphicsDriverConfig.get("vulkanVersion");
+  if (vulkanVersion == null) vulkanVersion = "1.3"; // back to 2.8.1 default
+  vulkanVersion = vulkanVersion + "." + patch;
+  envVars.put("WRAPPER_VK_VERSION", vulkanVersion);
+
+Equivalent additive floor (if keeping 1.4 default elsewhere):
+  // After computing WRAPPER_VK_VERSION, if wrapper-* on Adreno and minor<3, force 1.3
+  // Preserves 1.4 default for modern devices, fixes 610.
+
+Both are logically the same for 610: never advertise <1.3 on a wrapper.
+The full revert is the minimal, proven, zero-guess fix the user requested.
+
+10. CURRENT FIX ATTEMPTS AND WHY THEY SHIFTED 1.1 -> 1.0
+--------------------------------------------------------
+  307ecb1: crash port (d5aeb26) + first bypass (empty version) — still failed for System
+  c3fb940: extended bypass to version=System — still failed for Turnip R5 that falls back
+  8cca160: default 1.4 -> 1.3 (approved) — stopped the 1.4.289 lie, but still clamped to 1.1
+  9739d43: bypass when probeFellBackToSystem (GPUInformation.driverLoadedFellBack())
+           Added Log.i XServerVulkan clampApplied/probeFellBack — covers the third
+           entry path (Turnip R5 fails in app, succeeds in guest).
+
+After 9739d43, logs moved from 1.1 to 1.0. Analysis in §6 suggests the
+patch component may now be "0" (fallback split) or the env failed to
+parse (sscanf needs 3 ints). The wrapper's parse returns 0 -> keeps
+inner apiVersion, which on the fallback path is the system blob's 1.0,
+not Turnip's 1.3 — hence the Sarek 1.0 skip. The unconditional 2.8.1
+path avoids this by always using chosenMinor (1.3) regardless.
+
+11. RECOMMENDED FIX (RESTORE 2.8.1)
+-----------------------------------
+Per request: use the 2.8.1 structure as the reference fix, as it is the
+last known-good on this exact device.
+
+  A. XServerDisplayActivity.java: replace the 2.9.1 Vulkan block (driverVkVersion
+     + parts + clamp try/catch + Log.i clamp) with the 2.8.1 unconditional
+     assignment, retaining the {"1","3","0"} fallback for "Unknown".
+  B. Container.java: ensure DEFAULT_GRAPHICSDRIVERCONFIG vulkanVersion=1.3
+     (already done in 8cca160, keep).
+  C. No change to layers/extra_libs/Windowing — verified identical.
+
+This is Bannerlator-specific vs shared upstream (VEGAS DXVK itself has no
+UI — at most a HUD string). Flag as Bannerlator-specific fix when
+porting upstream, with note: "Probe != guest ICD on wrapper+Adreno
+610; clamp must not apply. See WinNative PR #669 caveat."
+
+12. VERIFICATION PLAN
+---------------------
+- Build: javac-only harness passes; full Kotlin gate is CI (no local kotlinc).
+- Device: Redmi 2201117TG, wrapper-original, Turnip-v26.1.0-R5, vulkanVersion=1.3,
+  DXVK matrix: VEGAS 2.7.3, Sarek 1.11.1, vanilla 1.11.1 (all previously failed).
+- Expected after fix: wrapper apiVersion 1.3.x, DXVK "Found device: Wrapper(Turnip
+  Adreno (TM) 610)" without Skipping line, game proceeds. wine_debug.log header
+  should show WRAPPER_VK_VERSION=1.3.<patch> (add persistent header line for this).
+- Edge: if wrapper-leegao is selected, WRAPPER_VK_VERSION is ignored by design
+  (0 refs) — document as expected limitation, not a bug.
+
+13. EDGE CASES & RISKS
+----------------------
+- Explicit user pick of 1.4 on a true 1.3 inner driver: unconditional 1.4.<patch>
+  would over-advertise. With default 1.3, this is now opt-in only. Document:
+  "Explicit choice wins; DXVK may refuse if driver lacks 1.4."
+- Unknown probe string: fallback {"1","3","0"} ensures no crash (improvement
+  over 2.8.1's raw split("[.]")[2] which would throw).
+- Stale user override at filesDir/graphics_driver/wrapper-original.tzst: shadows
+  bundled fix. Mitigation: document and check Log.d "using user override for..."
+- wrapper-leegao/bcn_layer: no WRAPPER_VK_VERSION handling — out of scope.
+
+14. APPENDIX
+------------
+A. Key commits
+   42569e22 fix(vulkan): clamp WRAPPER_VK_VERSION to the minor the driver reports
+            (port WinNative PR #669, Xnick417x) — first bad
+   3a1807dd feat(vulkan): default to Vulkan 1.4 — companion
+   8cca160  feat(container): default vulkanVersion 1.4 -> 1.3 (local fix, approved)
+   9739d43  fix(wrapper): skip clamp when probe fell back (local, shipped, still 1.0)
+
+B. Log excerpts (Container-1/wine_debug.log)
+   [11:01:33] graphicsDriver: wrapper-original
+              graphicsDriverConfig: vulkanVersion=1.3;version=Turnip-v26.1.0-R5;...
+              info: Found device: Wrapper(Turnip Adreno (TM) 610) ( 0.0.0)
+              info:   Skipping: Device does not support Vulkan 1.3
+   [11:08:20] same config, Sarek:
+              warn: Skipping Vulkan 1.0 adapter: Wrapper(Turnip Adreno (TM) 610)
+
+C. Files
+   app/src/main/java/com/winlator/star/XServerDisplayActivity.java (Vulkan block)
+   app/src/main/java/com/winlator/star/container/Container.java (DEFAULT_GRAPHICSDRIVERCONFIG)
+   app/src/main/cpp/winlator/vulkan.c (GPUInformation.getVulkanVersion, driverLoadedFellBack)
+   src/vulkan/wrapper/wrapper_physical_device.c (parse_vk_version_from_env)
+
+D. Assumptions stated
+   - System blob on 610 is 1.0/1.1 (measured via probe fallback in logs).
+   - Turnip 26.1.0-R5 is 1.3+ in the guest (wrapper deviceName proves enumeration).
+   - Unverified: exact patch value after 9739d43 — needs persistent WRAPPER_VK_VERSION
+     header to confirm; report notes this as the single remaining measurement.
+
+E. References
+   - Khronos Vulkan spec: apiVersion is max supported, instance apiVersion is request.
+   - WinNative PR #669 (Xnick417x) — locale half does not apply (single values/arrays.xml).
+   - Qualcomm Adreno docs — unverified on this device (no web access at report time);
+     stated as "unverified — could not check Qualcomm Adreno 610 Vulkan 1.1 spec"
+     per Hard Rules.
+
+================================================================================
+  END REPORT — Ready for upstream comparison. Restore 2.8.1 structure as fix.
+================================================================================

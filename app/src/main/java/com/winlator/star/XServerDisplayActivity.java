@@ -4325,32 +4325,53 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // (hardcoded upstream). Scoped-storage denial there surfaces as ENOENT from
             // bionic. Probe BOTH spellings from THIS process and log the real cause so
             // the user-facing fix targets the actual failure layer.
+            // Probes write to BOTH logcat and a durable file so 256 KiB rotation can't hide them.
+            // CSV-family: VEGAS dumpDrawCsv() writes to /sdcard root; config-family: DXVK
+            // Config reads /storage/emulated/0/dxvk.conf — probe both spellings + grant.
+            String probeLog = "";
             try {
                 java.io.File p1 = new java.io.File("/sdcard/.banner_csv_probe");
                 boolean ok1 = p1.createNewFile(); if (ok1) p1.delete();
-                Log.w("VegasDump", "/sdcard probe: createNewFile=" + ok1);
+                String m1 = "/sdcard probe: createNewFile=" + ok1;
+                Log.w("VegasDump", m1); probeLog += m1 + "\n";
             } catch (Throwable t) {
-                Log.w("VegasDump", "/sdcard probe FAILED: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+                String m1 = "/sdcard probe FAILED: " + t.getClass().getSimpleName() + ": " + t.getMessage();
+                Log.w("VegasDump", m1); probeLog += m1 + "\n";
             }
             try {
                 java.io.File p2 = new java.io.File("/storage/emulated/0/.banner_csv_probe");
                 boolean ok2 = p2.createNewFile(); if (ok2) p2.delete();
-                Log.w("VegasDump", "/storage/emulated/0 probe: createNewFile=" + ok2);
+                String m2 = "/storage/emulated/0 probe: createNewFile=" + ok2;
+                Log.w("VegasDump", m2); probeLog += m2 + "\n";
             } catch (Throwable t) {
-                Log.w("VegasDump", "/storage/emulated/0 probe FAILED: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+                String m2 = "/storage/emulated/0 probe FAILED: " + t.getClass().getSimpleName() + ": " + t.getMessage();
+                Log.w("VegasDump", m2); probeLog += m2 + "\n";
             }
-            // Read-side probe: the user's custom conf lives at shared-storage root.
-            // If reads are denied too, DXVK silently parses an empty config (same
-            // denial family as the CSV-write ENOENT).
             try {
                 java.io.File c = new java.io.File("/storage/emulated/0/dxvk.conf");
-                Log.w("VegasDump", "dxvk.conf probe: exists=" + c.exists()
-                    + " canRead=" + c.canRead() + " len=" + c.length());
+                String m3 = "dxvk.conf probe: exists=" + c.exists() + " canRead=" + c.canRead() + " len=" + c.length();
+                Log.w("VegasDump", m3); probeLog += m3 + "\n";
             } catch (Throwable t) {
-                Log.w("VegasDump", "dxvk.conf probe FAILED: " + t.getClass().getSimpleName() + ": " + t.getMessage());
+                String m3 = "dxvk.conf probe FAILED: " + t.getClass().getSimpleName() + ": " + t.getMessage();
+                Log.w("VegasDump", m3); probeLog += m3 + "\n";
             }
-            Log.w("VegasDump", "grant state: isExternalStorageManager="
-                + (android.os.Build.VERSION.SDK_INT >= 30 && android.os.Environment.isExternalStorageManager()));
+            try {
+                java.io.File c2 = new java.io.File("/sdcard/dxvk.conf");
+                String m4 = "/sdcard/dxvk.conf probe: exists=" + c2.exists() + " canRead=" + c2.canRead() + " len=" + c2.length();
+                Log.w("VegasDump", m4); probeLog += m4 + "\n";
+            } catch (Throwable t) {
+                String m4 = "/sdcard/dxvk.conf probe FAILED: " + t.getClass().getSimpleName() + ": " + t.getMessage();
+                Log.w("VegasDump", m4); probeLog += m4 + "\n";
+            }
+            String m5 = "grant state: isExternalStorageManager="
+                + (android.os.Build.VERSION.SDK_INT >= 30 && android.os.Environment.isExternalStorageManager());
+            Log.w("VegasDump", m5); probeLog += m5 + "\n";
+            // Durable copy — survives logcat rotation; check with: cat /storage/emulated/0/.banner_probe.txt
+            try {
+                for (String pp : new String[]{"/storage/emulated/0/.banner_probe.txt", "/sdcard/.banner_probe.txt"}) {
+                    try { java.io.FileWriter w = new java.io.FileWriter(pp, false); w.write(probeLog); w.close(); } catch (Throwable ignored) {}
+                }
+            } catch (Throwable ignored) {}
             String vegasVersion = dxwrapperConfig.get("version");
             if (vegasVersion == null || vegasVersion.isEmpty())
                 vegasVersion = DefaultVersion.getVegasDefault();

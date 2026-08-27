@@ -2907,7 +2907,11 @@ internal fun DxvkConfigDialog(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
-                            val tier = tierChoice
+                            // effectiveTier = staged choice if present, else persisted value (0/null → Auto). Fixes
+                            // "blue stays on Auto after reopen" — chips now reflect what is actually applied.
+                            val staged = tierChoice
+                            val effectiveTier: Int? = staged ?: activeForceTier?.let { if (it == 0) null else it }
+                            val tierForPreview = staged
                             Text(
                                 when {
                                     gpuModel == null -> "GPU model unreadable — tier is manual"
@@ -2920,20 +2924,20 @@ internal fun DxvkConfigDialog(
                             Spacer(Modifier.height(4.dp))
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 FilterChip(
-                                    selected = tier == null,
+                                    selected = effectiveTier == null,
                                     onClick = { tierChoice = null },
                                     label = { Text("Auto${if (detectedTier != null) " · T$detectedTier" else ""}") }
                                 )
                                 VegasTierPresets.TIERS.forEach { t ->
                                     FilterChip(
-                                        selected = tier == t.number,
+                                        selected = effectiveTier == t.number,
                                         onClick = { tierChoice = t.number },
                                         label = { Text(t.label) }
                                     )
                                 }
                             }
-                            val p = tier?.let { VegasTierPresets.PARAMS[it] }
-                            if (tier != null && p != null) {
+                            val p = tierForPreview?.let { VegasTierPresets.PARAMS[it] }
+                            if (tierForPreview != null && p != null) {
                                 Spacer(Modifier.height(4.dp))
                                 Text(
                                     "Draw threshold ${p.drawThreshold} (D3D9 ${p.drawThresholdD3D9}) · HAAE pacing ${p.haaePacing}ms · governor cap ${p.governorCap} · shader zero-init ${p.shaderZeroInit} · frame-gen ${p.frameGen}",
@@ -2941,14 +2945,14 @@ internal fun DxvkConfigDialog(
                                 )
                                 Spacer(Modifier.height(2.dp))
                                 Text(
-                                    "will write: vegas.forceTier = $tier",
+                                    "will write: vegas.forceTier = $tierForPreview",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.primary
                                 )
                                 Row(modifier = Modifier.padding(top = 4.dp)) {
                                     TextButton(
                                         enabled = !useDefaults,
-                                        onClick = { applyValue("vegas.forceTier", tier.toString()); tierChoice = null }
+                                        onClick = { applyValue("vegas.forceTier", tierForPreview.toString()); tierChoice = null }
                                     ) { Text("Apply tier", style = MaterialTheme.typography.bodySmall) }
                                     if (useDefaults) {
                                         Spacer(Modifier.width(8.dp))
