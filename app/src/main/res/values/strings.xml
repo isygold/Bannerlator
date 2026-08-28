@@ -460,6 +460,7 @@
     <string name="max_device_memory">Max Device Memory</string>
     <string name="frame_rate">Frame Rate</string>
     <string name="configuration">Configuration</string>
+    <string name="vegas_config_loglevel_envvar_note">Log level (DXVK_LOG_LEVEL) must be set as a container environment variable — VEGAS ignores the config-file key (dxvk.logLevel / DXVK_LOG_LEVEL).</string>
     <string name="browse">Browse</string>
     <string name="magnifier">Magnifier</string>
     <string name="bring_to_front">Bring to Front</string>

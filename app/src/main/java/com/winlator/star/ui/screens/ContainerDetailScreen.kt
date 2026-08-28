@@ -231,7 +231,25 @@ fun ContainerDetailScreen(
             containerRootDir = viewModel.container?.rootDir,
             refreshKey = dxvkRefreshKey,
             initialConfig = viewModel.dxWrapperConfig,
-            onConfirm = { newConfig -> viewModel.dxWrapperConfig = newConfig; showDxvkConfig = false },
+            onConfirm = { newConfig ->
+                viewModel.dxWrapperConfig = newConfig
+                // Persist the config-file pointer to the container immediately — OK alone (no
+                // live key toggle) must not leave the launched game reading a stale container
+                // config without dxvkConfigFile. Mirrors onLivePointerChanged below: the launch
+                // path (XServerDisplayActivity) reads container.getDXWrapperConfig(), NOT the
+                // in-memory viewModel, so the pointer has to land on disk here or VEGAS gets
+                // no DXVK_CONFIG_FILE -> tier 1.
+                viewModel.container?.let { c ->
+                    val file = DXVKConfigDialog.parseConfig(newConfig).get("dxvkConfigFile")
+                    val ckv = DXVKConfigDialog.parseConfig(c.getDXWrapperConfig())
+                    if (ckv.get("dxvkConfigFile") != file) {
+                        ckv.put("dxvkConfigFile", file)
+                        c.setDXWrapperConfig(ckv.toString())
+                        c.saveData()
+                    }
+                }
+                showDxvkConfig = false
+            },
             onDismiss = { showDxvkConfig = false },
             // Every live-file write points the container at that file immediately —
             // launched games see toggles without needing OK, and without the full
@@ -2744,6 +2762,13 @@ internal fun DxvkConfigDialog(
                 // §VEGAS version management (VEGAS mode): top section, inline action cluster
                 // at the right edge — download gear, delete, install-from-file. Non-VEGAS
                 // keeps the original DXVK-first order below.
+                // §loglevel: VEGAS ignores the config-file log-level key; it must be an env var.
+                Text(
+                    stringResource(R.string.vegas_config_loglevel_envvar_note),
+                    color = MaterialTheme.colorScheme.outline,
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(8.dp))
                 if (isVegas) {
                     SectionLabel("VEGAS VERSION")
                     if (filteredDxvk.isEmpty()) {
