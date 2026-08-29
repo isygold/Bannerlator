@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Help
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Book
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -42,6 +43,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -2234,6 +2236,7 @@ internal fun DxvkConfigDialog(
     // §6c value editor: the row whose value picker is open + the freeform draft.
     var valuePickerRow by remember { mutableStateOf<VegasKeyKnowledge.EditRow?>(null) }
     var customValueDraft by remember { mutableStateOf("") }
+    var pendingDeleteKey by remember { mutableStateOf<String?>(null) }
     // (+) add-key editor: freeform key/value appended to the live file (stock OR custom).
     var showAddKey by remember { mutableStateOf(false) }
     var addKeyDraft by remember { mutableStateOf("") }
@@ -2395,6 +2398,7 @@ internal fun DxvkConfigDialog(
         vegasCatalog != null && selectedStock != null && (activeStockTag == null || !vegasCatalog.isCovered(activeStockTag))
     }
     var showCatalogDialog by remember { mutableStateOf(false) }
+    var showKeyDocSheet by remember { mutableStateOf(false) }
     // Fork-Feature filter persists across dialog opens (user request: toggle → OK → reopen
     // must stay filtered). Written through on every flip — cheap pref, no OK gate needed.
     val forkFilterPrefs = remember { context.getSharedPreferences("vegas_config_ui", Context.MODE_PRIVATE) }
@@ -2724,6 +2728,25 @@ internal fun DxvkConfigDialog(
         }
     }
 
+    // Per-key delete: drops the key's line entirely from the live file (stock sidecar
+    // OR custom — both plain live files under Option B). Same guards as applyValue so a
+    // gated (wrong-schema) key can't be silently dropped without the user seeing why.
+    fun applyDeleteKey(key: String) {
+        if (useDefaults || liveFile == null) return
+        val isStockPath = selectedStock != null
+        if (isStockPath && containerRootDir == null) {
+            Toast.makeText(activity, "No container context — baseline configs are read-only", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (isStockPath && activeStockTag != null && vegasCatalog != null && vegasCatalog.isWrongFamily(key, activeStockTag)) {
+            pendingSchemaBlock = key
+            return
+        }
+        commitConfigWrite(isStockPath) { text ->
+            VegasKeyKnowledge.removeLine(text, key)
+        }
+    }
+
     val pickVegasLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -2816,9 +2839,9 @@ internal fun DxvkConfigDialog(
                                             } else {
                                                 withContext(Dispatchers.Main) {
                                                     Toast.makeText(activity, "No installed VEGAS version to delete", Toast.LENGTH_SHORT).show()
-                                                }
-                                            }
-                                        }
+        }
+    }
+}
                                     } catch (e: Exception) {
                                         withContext(Dispatchers.Main) {
                                             Toast.makeText(activity, "ERROR: Failed to delete — ${e.message}", Toast.LENGTH_LONG).show()
@@ -3258,6 +3281,16 @@ internal fun DxvkConfigDialog(
                                             )
                                         }
                                     }
+                                    if (!gated) IconButton(
+                                        onClick = { pendingDeleteKey = row.key },
+                                        modifier = Modifier.size(40.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.Delete,
+                                            contentDescription = "Delete key ${row.key}",
+                                            tint = MaterialTheme.colorScheme.error
+                                        )
+                                    }
                                 }
                                 Text(badge, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                             }
@@ -3324,7 +3357,12 @@ internal fun DxvkConfigDialog(
                         else -> "catalog: covered · newest ${vegasCatalog.newestTag()} · ${vegasCatalog.generatedAt()}"
                     }
                     Text(catalogFooter, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = { showCatalogDialog = true }) { Text("Check catalog", style = MaterialTheme.typography.bodySmall) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { showKeyDocSheet = true }) {
+                            Icon(Icons.Filled.Book, contentDescription = "Config key reference", tint = MaterialTheme.colorScheme.primary)
+                        }
+                        TextButton(onClick = { showCatalogDialog = true }) { Text("Check catalog", style = MaterialTheme.typography.bodySmall) }
+                    }
                     if (showCatalogDialog) {
                         AlertDialog(
                             onDismissRequest = { showCatalogDialog = false },
@@ -3346,6 +3384,13 @@ internal fun DxvkConfigDialog(
                                 }
                             },
                             confirmButton = { TextButton(onClick = { showCatalogDialog = false }) { Text("OK") } }
+                        )
+                    }
+                    if (showKeyDocSheet) {
+                        VGlossarySheet(
+                            onDismiss = { showKeyDocSheet = false },
+                            vegasCatalog = vegasCatalog,
+                            installedTag = activeStockTag,
                         )
                     }
                     // §6b.1 report dialog: observation only, zero writes. Shown regardless of
@@ -3486,7 +3531,7 @@ internal fun DxvkConfigDialog(
                             onDismissRequest = { valuePickerRow = null },
                             title = { Text(row.key) },
                             confirmButton = {
-                                TextButton(onClick = { valuePickerRow = null }) { Text("Done") }
+                                TextButton(onClick = { if (customValueDraft.isNotBlank()) applyValue(row.key, customValueDraft.trim()); valuePickerRow = null }) { Text("Done") }
                             },
                             text = {
                                 Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
@@ -3501,13 +3546,13 @@ internal fun DxvkConfigDialog(
                                     stockBaselineKeyValues[row.key].orEmpty().forEach { opts.add(it) }
                                     opts.forEach { v ->
                                         TextButton(
-                                            onClick = { applyValue(row.key, v); valuePickerRow = null },
+                                            onClick = { applyValue(row.key, v); customValueDraft = v },
                                             modifier = Modifier.fillMaxWidth()
                                         ) { Text(v, style = MaterialTheme.typography.bodySmall) }
                                     }
                                     if (baseline != null && (baseline.value != row.value || baseline.enabled != row.enabled)) {
                                         TextButton(
-                                            onClick = { applyValue(row.key, baseline.value); valuePickerRow = null },
+                                            onClick = { applyValue(row.key, baseline.value); customValueDraft = baseline.value },
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
                                             Text("Reset to stock (${baseline.value})", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
@@ -3524,13 +3569,64 @@ internal fun DxvkConfigDialog(
                                     Row(modifier = Modifier.padding(top = 6.dp)) {
                                         TextButton(
                                             enabled = customValueDraft.isNotBlank(),
-                                            onClick = { applyValue(row.key, customValueDraft.trim()); valuePickerRow = null }
+                                            onClick = { applyValue(row.key, customValueDraft.trim()) }
                                         ) { Text("Apply") }
                                     }
                                 }
                             },
                             dismissButton = { TextButton(onClick = { valuePickerRow = null }) { Text(stringResource(android.R.string.cancel)) } }
                         )
+                    }
+                    // glass delete confirmation: translucent card over a light scrim (config dialog shows through)
+                    pendingDeleteKey?.let { delKey ->
+                        Dialog(onDismissRequest = { pendingDeleteKey = null }) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.25f))
+                            ) {
+                                Card(
+                                    modifier = Modifier
+                                        .align(Alignment.Center)
+                                        .padding(24.dp)
+                                        .fillMaxWidth(0.92f),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f)
+                                    ),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(20.dp)) {
+                                        Text(
+                                            "Remove key?",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(Modifier.height(8.dp))
+                                        Text(
+                                            "Are you sure you want '$delKey' removed from this config? This can't be undone from the UI.",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(Modifier.height(16.dp))
+                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                            TextButton(onClick = { pendingDeleteKey = null }) {
+                                                Text("Cancel")
+                                            }
+                                            Button(
+                                                onClick = {
+                                                    applyDeleteKey(delKey)
+                                                    pendingDeleteKey = null
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                                            ) {
+                                                Text("Remove")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     // §6a.6 schema block: the key belongs to the OTHER line's schema. Nothing
                     // is written — no decision row, no backup, just the explanation.
@@ -4047,6 +4143,220 @@ private fun StockConfigDownloadSheet(
                     }
                 }
             }
+        }
+    }
+}
+
+// ===== V-Glossary (VEGAS config-key dictionary) =====
+// Curated one-line definitions. Keys absent here render with "—".
+// VEGAS-specific entries are best-effort; verify against internal docs.
+private val KEY_DEFINITIONS: Map<String, String> = mapOf(
+    // --- environment / DXVK core ---
+    "DXVK_CONFIG_FILE" to "Inert / stale — ignored by the current VEGAS build (legacy key).",
+    "DXVK_FILTER_DEVICE_NAME" to "Substring filter to force or avoid a GPU by name.",
+    "DXVK_LOG_LEVEL" to "Sets DXVK log verbosity (none/info/warn/error).",
+    "GPU" to "Legacy environment hint; verify before use.",
+    // --- dxvk.* core ---
+    "dxvk.enableAsync" to "Enables async shader compilation (legacy; superseded by GPL).",
+    "dxvk.gplAsyncCache" to "Caches pipeline state for fast GPU link (GPL async).",
+    "dxvk.enableStarProfile" to "Enables the Star Engine tuning profile.",
+    "dxvk.hud" to "Configures the DXVK on-screen HUD (e.g. 'devinfo,fps').",
+    "dxvk.numCompilerThreads" to "Number of threads used for shader compilation.",
+    "dxvk.tearFree" to "Enables tear-free presentation.",
+    "dxvk.latencySleep" to "Inserts a sleep to reduce input latency (experimental).",
+    "dxvk.maxFrameLatency" to "Caps the number of frames queued for presentation.",
+    "dxvk.enableDebugUtils" to "Enables Vulkan debug-utils instrumentation.",
+    "dxvk.numAsyncThreads" to "Legacy async compile thread count.",
+    "dxvk.shrinkNvidiaHvvHeap" to "Reduces NV host-visible heap usage.",
+    "dxvk.useRawSsbo" to "Uses raw SSBO bindings (compat workaround).",
+    // --- dxvk.vegas.* (Sarek) / vegas.* (Star) — best-effort ---
+    "dxvk.vegas.enable" to "Master switch for VEGAS / DXVK-VEGAS extensions.", // ⚠ best-effort
+    "dxvk.vegas.gpuMask" to "Restricts rendering to a subset of GPUs (mask).", // ⚠ best-effort
+    "dxvk.vegas.tbdr" to "Enables TBDR (tile-based) optimizations for Adreno.", // ⚠ best-effort
+    "dxvk.vegas.threshold" to "Sets internal VEGAS quality / skip thresholds.", // ⚠ best-effort
+    "dxvk.vegas.vramSwap" to "Controls VEGAS VRAM swap-to-storage behavior.", // ⚠ best-effort
+    "vegas.enableUpscaler" to "Enables the VEGAS upscaler.",
+    "vegas.forceTier" to "Selects a fixed VEGAS performance tier.", // ⚠ best-effort
+    "vegas.profileDraws" to "Enables VEGAS draw-call profiling.", // ⚠ best-effort
+    "vegas.telemetry" to "Enables VEGAS telemetry collection.", // ⚠ best-effort
+    "VEGAS_GAME_CONFIG" to "Selects a per-game VEGAS config profile.", // ⚠ best-effort
+    "VEGAS_THRESHOLDS" to "VEGAS internal tuning thresholds.", // ⚠ best-effort
+    // --- d3d11.* ---
+    "d3d11.samplerAnisotropy" to "Caps the max anisotropy for samplers.",
+    "d3d11.maxFeatureLevel" to "Caps the reported D3D feature level.",
+    "d3d11.maxTessFactor" to "Caps the tessellation factor.",
+    "d3d11.ignoreGraphicsBarriers" to "Relaxes barrier insertion (compat).",
+    "d3d11.invariantPosition" to "Forces invariant position math (strict).",
+    "d3d11.enableDepthPrePass" to "Enables a depth pre-pass.",
+    "d3d11.disableMsaa" to "Disables MSAA.",
+    "d3d11.maxImplicitDiscardSize" to "Threshold for implicit resource discards.",
+    "d3d11.relaxedBarriers" to "Relaxes resource barriers (compat).",
+    "d3d11.cachedDynamicResources" to "Caches dynamic resource uploads.",
+    "d3d11.constantBufferRangeCheck" to "Validates CB range access.",
+    "d3d11.dcSingleUseMode" to "Uses single-use deferred contexts.",
+    "d3d11.maxDynamicImageBufferSize" to "Caps dynamic image buffer size.",
+    "d3d11.zeroWorkgroupMemory" to "Zeroes workgroup memory (compat).",
+    // --- d3d9.* ---
+    "d3d9.samplerAnisotropy" to "Caps anisotropy (D3D9).",
+    "d3d9.maxFrameRate" to "Caps presentation rate (D3D9).",
+    "d3d9.maxFrameLatency" to "Caps queued frames (D3D9).",
+    "d3d9.disableMsaa" to "Disables MSAA (D3D9).",
+    "d3d9.tearFree" to "Tear-free presentation (D3D9).",
+    "d3d9.invariantPosition" to "Invariant position (D3D9).",
+    "d3d9.forceAspectRatio" to "Forces a fixed aspect ratio.",
+    "d3d9.shaderModel" to "Caps the D3D9 shader model.",
+    "d3d9.enableDepthPrePass" to "Depth pre-pass (D3D9).",
+    "d3d9.enableDialogMode" to "Dialog-mode tweaks.",
+    "d3d9.evictManagedOnUnlock" to "Evicts managed textures on unlock.",
+    "d3d9.deferSurfaceCreation" to "Defers swapchain surface creation.",
+    "d3d9.customDeviceId" to "Spoofs the GPU device id.",
+    "d3d9.customVendorId" to "Spoof the GPU vendor id.",
+    "d3d9.customDeviceDesc" to "Spoofs the GPU description string.",
+    "d3d9.supportD32" to "Enables D3D9 D32 depth format support.",
+    "d3d9.supportDFFormats" to "Enables D3D9 float formats support.",
+    "d3d9.supportVCache" to "Enables D3D9 vertex-cache support.",
+    "d3d9.supportX4R4G4B4" to "Enables D3D9 X4R4G4B4 format support.",
+    "d3d9.seamlessCubes" to "Fixes cube-map seam sampling.",
+    "d3d9.strictConstantCopies" to "Stricter constant-buffer copies (compat).",
+    "d3d9.strictPow" to "Stricter pow() math (compat).",
+    "d3d9.floatEmulation" to "Controls float emulation mode.",
+    "d3d9.lenientClear" to "Lenient clear behavior.",
+    "d3d9.longMad" to "Uses long MAD (compat).",
+    "d3d9.memoryTrackTest" to "Memory-tracking test hook.",
+    "d3d9.noExplicitFrontBuffer" to "Avoids an explicit front buffer.",
+    "d3d9.numBackBuffers" to "Sets back-buffer count.",
+    "d3d9.presentInterval" to "Sets presentation interval.",
+    "d3d9.allowDiscard" to "Allows discard usage flags.",
+    "d3d9.allowDoNotWait" to "Allows do-not-wait usage flags.",
+    "d3d9.alphaTestWiggleRoom" to "Alpha-test tolerance (compat).",
+    "d3d9.cachedDynamicBuffers" to "Caches dynamic vertex/index buffers.",
+    "d3d9.forceSwapchainMSAA" to "Forces MSAA on the swapchain.",
+    "d3d9.maxAvailableMemory" to "Caps reported available memory.",
+    "d3d9.enumerateByDisplays" to "Enumerates adapters by display.",
+    "d3d9.dpiAware" to "Marks the app DPI-aware.",
+    // --- d3d8.* ---
+    "d3d8.batching" to "D3D8-era batching tweak (compat).", // ⚠ best-effort
+    "d3d8.drefScaling" to "D3D8 depth-reference scaling (compat).", // ⚠ best-effort
+    "d3d8.forceLegacyDiscard" to "Forces legacy discard behavior.", // ⚠ best-effort
+    "d3d8.forceVsDecl" to "Forces a specific vertex declaration.", // ⚠ best-effort
+    "d3d8.placeP8InScratch" to "Places P8 textures in scratch (compat).", // ⚠ best-effort
+    "d3d8.shadowPerspectiveDivide" to "Shadow perspective-divide fix (compat).", // ⚠ best-effort
+    // --- dxgi.* ---
+    "dxgi.maxFrameRate" to "Caps presentation frame rate.",
+    "dxgi.maxFrameLatency" to "Caps queued frames.",
+    "dxgi.maxDeviceMemory" to "Caps reported GPU memory.",
+    "dxgi.maxSharedMemory" to "Caps reported shared memory.",
+    "dxgi.syncInterval" to "Sets vsync interval (0 = disabled).",
+    "dxgi.tearFree" to "Tear-free presentation.",
+    "dxgi.numBackBuffers" to "Sets back-buffer count.",
+    "dxgi.customDeviceId" to "Spoofs the GPU device id.",
+    "dxgi.customVendorId" to "Spoof the GPU vendor id.",
+    "dxgi.customDeviceDesc" to "Spoofs the GPU description string.",
+    "dxgi.deferSurfaceCreation" to "Defers surface creation.",
+    "dxgi.emulateUMA" to "Emulates a UMA memory model.",
+    "dxgi.enableDummyCompositionSwapchain" to "Creates a dummy composition swapchain.",
+    "dxgi.hideAmdGpu" to "Hides the AMD GPU from the app.",
+    "dxgi.hideIntelGpu" to "Hides the Intel GPU from the app.",
+    "dxgi.hideNvidiaGpu" to "Hides the Nvidia GPU from the app.",
+)
+
+@Composable
+private fun VGlossarySheet(
+    onDismiss: () -> Unit,
+    vegasCatalog: VegasKeyCatalog?,
+    installedTag: String?,
+) {
+    val bucketOrder = listOf(
+        VegasKeyCatalog.Bucket.IN_BUILD,
+        VegasKeyCatalog.Bucket.UPSTREAM,
+        VegasKeyCatalog.Bucket.OTHER_BUILD,
+        VegasKeyCatalog.Bucket.NOWHERE,
+    )
+    val bucketLabel: (VegasKeyCatalog.Bucket) -> String = { b ->
+        when (b) {
+            VegasKeyCatalog.Bucket.IN_BUILD -> "Documented by this build"
+            VegasKeyCatalog.Bucket.UPSTREAM -> "Upstream only"
+            VegasKeyCatalog.Bucket.OTHER_BUILD -> "Other build"
+            VegasKeyCatalog.Bucket.NOWHERE -> "Not in catalog"
+        }
+    }
+    Dialog(onDismissRequest = onDismiss) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.25f))
+        ) {
+        Card(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .padding(24.dp)
+                .fillMaxWidth(0.96f)
+                .fillMaxHeight(0.86f),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f)
+            ),
+            border = androidx.compose.foundation.BorderStroke(
+                1.dp,
+                MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+            ),
+            elevation = CardDefaults.cardElevation(defaultElevation = 10.dp)
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text("V-Glossary", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    buildString {
+                        append(if (installedTag != null) "Build: $installedTag" else "No build selected")
+                        append("  ·  catalog ${vegasCatalog?.generatedAt() ?: "n/a"}")
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (vegasCatalog == null) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Catalog offline — provenance hidden, definitions still shown.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                Spacer(Modifier.height(10.dp))
+                val keys = if (vegasCatalog != null) vegasCatalog.allKeys() else KEY_DEFINITIONS.keys.toList()
+                val grouped = keys.groupBy { key ->
+                    if (vegasCatalog != null) vegasCatalog.classify(key, installedTag) else VegasKeyCatalog.Bucket.NOWHERE
+                }
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    bucketOrder.filter { grouped.containsKey(it) }.forEach { bucket ->
+                        item {
+                            Text(
+                                bucketLabel(bucket),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        items(grouped.getValue(bucket).sorted()) { key ->
+                            Column(modifier = Modifier.padding(vertical = 5.dp)) {
+                                Text(
+                                    key,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val fam = vegasCatalog?.familyOf(key)?.name ?: "—"
+                                    Text("[$fam]", style = MaterialTheme.typography.labelSmall)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        KEY_DEFINITIONS[key] ?: "—",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+                        }
+                    }
+                }
+            }
+        }
         }
     }
 }

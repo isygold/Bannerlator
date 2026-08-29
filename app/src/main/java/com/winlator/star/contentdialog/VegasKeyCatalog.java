@@ -187,6 +187,13 @@ public final class VegasKeyCatalog {
     public String upstreamFetchedAt() { return upstreamFetchedAt; }
     public int buildCount() { return builds.size(); }
     public int upstreamKeyCount() { return upstreamKeys.size(); }
+    /** Union of every key documented across all builds and upstream (deduped; build order then upstream). */
+    public List<String> allKeys() {
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (Build b : builds) out.addAll(b.keys);
+        out.addAll(upstreamKeys);
+        return new ArrayList<>(out);
+    }
     public List<String> knownTags() {
         List<String> out = new ArrayList<>();
         for (Build b : builds) out.add(b.tag);

@@ -424,6 +424,28 @@ public final class VegasKeyKnowledge {
         return configText + (configText.endsWith("\n") ? "" : "\n") + line;
     }
 
+    /**
+     * Removes the LAST occurrence of {@code key} entirely (both enabled and commented
+     * variants), preserving all other lines. Used by the per-key delete action in the
+     * config editor. Returns the new text, or the original when the key has no line.
+     */
+    public static String removeLine(String configText, String key) {
+        if (configText == null || key == null) return null;
+        String[] lines = configText.split("\n", -1);
+        int target = -1;
+        for (int i = lines.length - 1; i >= 0; i--) {
+            Line l = Line.parse(lines[i]);
+            if (l != null && l.key.equals(key)) { target = i; break; }
+        }
+        if (target < 0) return configText;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < lines.length; i++) {
+            if (i > 0) sb.append('\n');
+            if (i != target) sb.append(lines[i]);
+        }
+        return sb.toString();
+    }
+
     /** Parsed config line: key, value, and whether the line is uncommented. */
     private static final class Line {
         final String key;
