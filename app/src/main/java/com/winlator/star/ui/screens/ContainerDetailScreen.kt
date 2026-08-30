@@ -2420,15 +2420,42 @@ internal fun DxvkConfigDialog(
         }
     }
     // Sidecar lives inside the container so it survives WCP updates of the parked file.
-    val sidecarPath = remember(containerRootDir, activeStockTag) {
-        if (containerRootDir == null || activeStockTag == null) null
-        else java.io.File(java.io.File(java.io.File(containerRootDir, "vegas"), "configs"), activeStockTag + ".user.conf").absolutePath
+    // Fix blue-button-not-staying: tag may be null when .provenance.json is missing (older installs).
+    // Fall back to the stock verName (stripped) so the sidecar is always resolvable.
+    val sidecarFallback = remember(selectedStock, stockSources.value) {
+        stockSources.value.firstOrNull { it.verName == selectedStock || it.displayLabel() == selectedStock }
+            ?.verName?.removePrefix("vegas-")?.substringBefore(" ·")
+            ?: selectedStock?.removePrefix("vegas-")?.substringBefore(" ·")
     }
-    val sidecarExists = remember(toggleVersion, sidecarPath) { sidecarPath != null && java.io.File(sidecarPath!!).isFile }
-    val liveFile = remember(useDefaults, selectedStock, selectedCustom, stockPathForSelected, sidecarPath, sidecarExists) {
+    val sidecarBase = remember(activeStockTag, sidecarFallback) {
+        (activeStockTag?.takeIf { it.isNotBlank() } ?: sidecarFallback)?.replace(Regex("[^A-Za-z0-9._-]"), "_")
+    }
+    val sidecarPath = remember(containerRootDir, sidecarBase) {
+        if (containerRootDir == null || sidecarBase == null) null
+        else java.io.File(java.io.File(java.io.File(containerRootDir, "vegas"), "configs"), sidecarBase + ".user.conf").absolutePath
+    }
+    // Probe both tag-based and verName-based sidecar names so an older tag-sidecar is still found
+    val sidecarExists = remember(toggleVersion, sidecarPath, containerRootDir, sidecarFallback, activeStockTag) {
+        if (sidecarPath != null && java.io.File(sidecarPath).isFile) true
+        else if (containerRootDir != null && sidecarFallback != null) {
+            // legacy fallback: check the alternative naming
+            val altBase = sidecarFallback.replace(Regex("[^A-Za-z0-9._-]"), "_")
+            if (altBase != sidecarBase) java.io.File(java.io.File(java.io.File(containerRootDir, "vegas"), "configs"), altBase + ".user.conf").isFile
+            else false
+        } else false
+    }
+    // Resolve the actual existing sidecar file (prefer tag-based, fallback to verName-based)
+    val resolvedSidecarPath = remember(sidecarPath, containerRootDir, sidecarFallback, toggleVersion) {
+        if (sidecarPath != null && java.io.File(sidecarPath).isFile) sidecarPath
+        else if (containerRootDir != null && sidecarFallback != null) {
+            val alt = java.io.File(java.io.File(java.io.File(containerRootDir, "vegas"), "configs"), sidecarFallback.replace(Regex("[^A-Za-z0-9._-]"), "_") + ".user.conf").absolutePath
+            if (java.io.File(alt).isFile) alt else sidecarPath
+        } else sidecarPath
+    }
+    val liveFile = remember(useDefaults, selectedStock, selectedCustom, stockPathForSelected, resolvedSidecarPath, sidecarExists) {
         when {
             useDefaults -> null
-            selectedStock != null && sidecarExists && sidecarPath != null -> java.io.File(sidecarPath!!)
+            selectedStock != null && sidecarExists && resolvedSidecarPath != null -> java.io.File(resolvedSidecarPath!!)
             selectedStock != null -> stockPathForSelected?.let { java.io.File(it) }
             selectedCustom != null -> java.io.File(selectedCustom!!)
             else -> null
@@ -2628,6 +2655,9 @@ internal fun DxvkConfigDialog(
     // with an explanation before anything else (stock rows only — custom is user-owned).
     fun commitConfigWrite(isStockPath: Boolean, transform: (String) -> String?) {
         val target = liveFile ?: return
+        // Use the resolved sidecar path (existing file) for final pointer; fall back to intended new sidecar
+        val intendedSidecar = sidecarPath
+        val effectiveSidecar = resolvedSidecarPath ?: intendedSidecar
         scope.launch {
             val ok = withContext(Dispatchers.IO) {
                 if (isStockPath && containerRootDir == null) return@withContext false
@@ -2644,8 +2674,8 @@ internal fun DxvkConfigDialog(
                 }
                 // Stock + pristine baseline: materialize the sidecar with the edited content.
                 // From then on the sidecar IS the live file (pointer saved on OK).
-                if (isStockPath && !sidecarExists && sidecarPath != null) {
-                    val s = java.io.File(sidecarPath!!)
+                if (isStockPath && !sidecarExists && effectiveSidecar != null) {
+                    val s = java.io.File(effectiveSidecar!!)
                     if (!s.parentFile.exists() && !s.parentFile.mkdirs()) return@withContext false
                     if (!s.parentFile.isDirectory) return@withContext false
                     runCatching { s.writeText(next) }.isSuccess
@@ -2658,7 +2688,7 @@ internal fun DxvkConfigDialog(
                 toggleVersion++
                 // The game reads dxvkConfigFile at launch — point it at the file we just
                 // wrote NOW, not on OK. Dismissing the sheet must never orphan toggles.
-                val finalPath = if (isStockPath && !sidecarExists && sidecarPath != null) sidecarPath!!
+                val finalPath = if (isStockPath && !sidecarExists && effectiveSidecar != null) effectiveSidecar!!
                                 else target.absolutePath
                 onLivePointerChanged(finalPath)
             }
@@ -3156,6 +3186,14 @@ internal fun DxvkConfigDialog(
                         if (configSourceMissing) {
                             Spacer(Modifier.height(4.dp))
                             Text("not found: $livePath", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                            // #5 ghost → one-tap remove from dropdown
+                            if (selectedCustom != null) {
+                                TextButton(onClick = {
+                                    customEntries.value = customEntries.value.filter { it != selectedCustom }
+                                    selectedCustom = null
+                                    if (selectedStock == null) useDefaults = true
+                                }) { Text("Remove from list", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                            }
                         }
                         // Option B backups: .bak-* beside the CURRENT live file. Always visible
                         // once a live file exists — an empty list reads as "no backups yet" —
@@ -3212,26 +3250,66 @@ internal fun DxvkConfigDialog(
                                 }
                             }
                             Spacer(Modifier.height(2.dp))
-                            configRows.forEach { row ->
-                                // Filter ON = fork-only view: VEGAS-fork keys (vegas.* and the
-                                // gated manifest, e.g. dxvk.enableStarProfile), with keys
-                                // unavailable on this build (LATE/REMOVED) hidden as before.
-                                if (forkFilter && vegasKnowledge?.isForkKey(row.key) != true) return@forEach
+                            // #7 & #10 helpers: pre-filter + typo suggestion (conflict-free, no LazyColumn nesting)
+                            val visibleRows = remember(configRows, forkFilter, selectedDxvk, vegasKnowledge) {
+                                configRows.filter { r ->
+                                    if (forkFilter && vegasKnowledge?.isForkKey(r.key) != true) false
+                                    else if (forkFilter && vegasKnowledge != null && vegasKnowledge.isGated(r.key, selectedDxvk)) false
+                                    else true
+                                }
+                            }
+                            fun levenshtein(a: String, b: String): Int {
+                                val dp = Array(a.length + 1) { IntArray(b.length + 1) }
+                                for (i in 0..a.length) dp[i][0] = i
+                                for (j in 0..b.length) dp[0][j] = j
+                                for (i in 1..a.length) for (j in 1..b.length) {
+                                    val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                                    dp[i][j] = minOf(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost)
+                                }
+                                return dp[a.length][b.length]
+                            }
+                            fun typoFor(key: String): String? {
+                                if (vegasCatalog == null) return null
+                                val bucket = vegasCatalog.classify(key, activeStockTag)
+                                if (bucket != VegasKeyCatalog.Bucket.NOWHERE) return null
+                                var best: String? = null
+                                var bestDist = 3
+                                for (cand in vegasCatalog.allKeys()) {
+                                    val d = levenshtein(key, cand)
+                                    if (d < bestDist) { bestDist = d; best = cand }
+                                }
+                                return if (bestDist in 1..2) best else null
+                            }
+                            // Auto-off gated keys: if a key is LATE/REMOVED for this build, it does nothing — toggle off + one-line toast.
+                            // Guarded by remember so it fires once per dxvk change (not on every recomposition of configRows).
+                            val lastGatedKeys = remember(selectedDxvk) { mutableStateOf(emptySet<String>()) }
+                            LaunchedEffect(selectedDxvk, vegasKnowledge) {
+                                val toOff = configRows.filter { it.enabled && vegasKnowledge != null && vegasKnowledge.isGated(it.key, selectedDxvk) }
+                                val keys = toOff.map { it.key }.toSet()
+                                if (keys.any { it !in lastGatedKeys.value }) {
+                                    lastGatedKeys.value = keys
+                                    for (r in toOff) applyToggle(r.key, r.value, false)
+                                    Toast.makeText(activity, "${toOff.size} gated keys auto-disabled — ineffective on $selectedDxvk", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            visibleRows.forEach { row ->
                                 val gated = vegasKnowledge != null && vegasKnowledge.isGated(row.key, selectedDxvk)
-                                if (forkFilter && gated) return@forEach
                                 val baseBadge = vegasKnowledge?.badgeFor(row.key, selectedDxvk) ?: "unclassified"
                                 // Bucket vocabulary describes VEGAS stock configs; a custom (user-owned) file is
                                 // by definition not a VEGAS build — suffixes would read as warnings
                                 // about something the user did deliberately. Stock-only.
+                                // #1 fix: shorten chain so badge doesn't overflow on small screens
                                 val bucketPart = if (vegasCatalog != null && selectedStock != null)
                                     when (vegasCatalog.classify(row.key, activeStockTag)) {
                                         VegasKeyCatalog.Bucket.IN_BUILD -> ""
-                                        VegasKeyCatalog.Bucket.OTHER_BUILD -> " · another VEGAS build"
-                                        VegasKeyCatalog.Bucket.UPSTREAM -> " · upstream DXVK"
-                                        VegasKeyCatalog.Bucket.NOWHERE -> " · not in baseline template"
+                                        VegasKeyCatalog.Bucket.OTHER_BUILD -> if (catalogBehind) "" else " · other"
+                                        VegasKeyCatalog.Bucket.UPSTREAM -> " · upstream"
+                                        VegasKeyCatalog.Bucket.NOWHERE -> " · new"
                                     }
                                 else ""
-                                val badge = baseBadge + bucketPart + if (catalogBehind) " · unverified" else ""
+                                // cap length so 90-key screens don't wrap badly; UNKNOWN already user-friendly
+                                val badgeRaw = baseBadge + bucketPart + if (catalogBehind) " · unverified" else ""
+                                val badge = if (badgeRaw.length > 48) badgeRaw.take(45) + "…" else badgeRaw
                                 val changed = selectedStock != null && row.key in changedKeys
                                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                                     Switch(
@@ -3292,21 +3370,34 @@ internal fun DxvkConfigDialog(
                                         )
                                     }
                                 }
+                                // #10 typo inline suggestion (only for NOWHERE bucket, distance ≤2)
+                                typoFor(row.key)?.let { sug ->
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(start = 48.dp)) {
+                                        Text("Typo? Did you mean $sug", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.weight(1f))
+                                        TextButton(onClick = {
+                                            // Fix: write correct key with same value, then delete typo key
+                                            applyValue(sug, row.value)
+                                            // delete old typo after a short delay so sidecar write settles
+                                            scope.launch { kotlinx.coroutines.delay(300); applyDeleteKey(row.key) }
+                                        }) { Text("Fix", style = MaterialTheme.typography.bodySmall) }
+                                    }
+                                }
                                 Text(badge, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                             }
                             // §6c pending rows (stock editor only): baseline keys ABSENT from the
-                            // active config — switch OFF, appended with the picked/stock value on enable.
+                            // active config — #4 fix: Add button not inverted Switch OFF.
                             if (selectedStock != null && pendingRows.isNotEmpty()) {
                                 Spacer(Modifier.height(8.dp))
-                                Text("New in this baseline — add them or ignore", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                                Text("New in this baseline — tap Add to insert", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                                 pendingRows.forEach { row ->
                                     val gated = vegasKnowledge != null && vegasKnowledge.isGated(row.key, selectedDxvk)
                                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                        Switch(
-                                            checked = false,
-                                            onCheckedChange = { applyToggle(row.key, row.value, it) },
-                                            modifier = Modifier.height(32.dp).width(48.dp)
-                                        )
+                                        TextButton(
+                                            enabled = !gated,
+                                            onClick = { applyToggle(row.key, row.value, true) },
+                                            modifier = Modifier.height(32.dp)
+                                        ) { Text("Add", style = MaterialTheme.typography.bodySmall) }
+                                        Spacer(Modifier.width(6.dp))
                                         Text(
                                             row.key,
                                             style = MaterialTheme.typography.bodySmall,
@@ -3337,7 +3428,7 @@ internal fun DxvkConfigDialog(
                                             }
                                         }
                                     }
-                                    Text("not in file — added on save", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("missing — will be added as ${row.key} = ${row.value}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             }
                         }
@@ -3604,7 +3695,7 @@ internal fun DxvkConfigDialog(
                                         )
                                         Spacer(Modifier.height(8.dp))
                                         Text(
-                                            "Are you sure you want '$delKey' removed from this config? This can't be undone from the UI.",
+                                            "Are you sure you want '$delKey' removed? You can get it back via Backup → Restore or Add key.",
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -3617,6 +3708,7 @@ internal fun DxvkConfigDialog(
                                                 onClick = {
                                                     applyDeleteKey(delKey)
                                                     pendingDeleteKey = null
+                                                    Toast.makeText(activity, "Removed $delKey — Restore to undo", Toast.LENGTH_SHORT).show()
                                                 },
                                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                                             ) {
@@ -4050,8 +4142,10 @@ private fun StockConfigDownloadSheet(
     var loading by remember { mutableStateOf(true) }
     var rows by remember { mutableStateOf(listOf<VegasStockConfigFetcher.ReleaseConf>()) }
     var parkedTag by remember { mutableStateOf<String?>(null) }
+    var retryKey by remember { mutableStateOf(0) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(retryKey) {
+        loading = true
         rows = withContext(Dispatchers.IO) { VegasStockConfigFetcher.listReleaseConfigs() }
         loading = false
         // Autonomy: persist any newly seen release versions so the classifier's
@@ -4084,12 +4178,15 @@ private fun StockConfigDownloadSheet(
                 CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
             }
         } else if (rows.isEmpty()) {
-            Text(
-                "Couldn't reach the releases feed — check connection and retry.",
-                Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                color = MaterialTheme.colorScheme.error,
-                style = MaterialTheme.typography.bodySmall
-            )
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text(
+                    "Couldn't reach the releases feed — check connection and retry. (GitHub limit 60/h)",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = { retryKey++ }) { Text("Retry") }
+            }
         } else {
             androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
                 items(rows.size) { idx ->

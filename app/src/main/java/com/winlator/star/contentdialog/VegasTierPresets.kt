@@ -55,7 +55,9 @@ object VegasTierPresets {
      */
     fun readGpuModel(): String? = runCatching {
         val f = File("/sys/class/kgsl/kgsl-3d0/gpu_model")
-        if (f.isFile) f.readText().trim().ifEmpty { null } else null
+        if (!f.isFile) return@runCatching null
+        val t = f.readText().trim()
+        if (t.isEmpty()) null else t
     }.getOrNull()
 
     /**

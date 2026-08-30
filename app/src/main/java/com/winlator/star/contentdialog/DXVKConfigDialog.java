@@ -180,16 +180,28 @@ public class DXVKConfigDialog {
         }
         for (ContentProfile profile : profiles) {
             if (profile.verName == null) continue;
-            // verName is NOT unique across releases (community vs stable tags share it) — dedupe per profile.
-            if (!seen.add(profile.verName)) continue;
-            java.io.File conf = new java.io.File(confDir, profile.verName + ".conf");
-            if (!conf.isFile()) continue;
+            // Fix #2: verName alone is not unique (v2.7.3-vegas vs v2.7.3-vegas-stable share it).
+            // Dedupe by verName + verCode so both builds can surface as distinct StockSources.
+            String dedupeKey = profile.verName + "#" + profile.verCode;
+            if (!seen.add(dedupeKey)) continue;
+            // Probe both naming variants: legacy parks used "vegas-2.7.3.conf" (with prefix) while
+            // StockConfigFetcher parks as "2.7.3.conf" (stripped). Accept either so a download
+            // always surfaces (fixes #2 "downloaded but not in dropdown").
+            java.io.File conf1 = new java.io.File(confDir, profile.verName + ".conf");
+            String stripped = profile.verName.startsWith("vegas-") ? profile.verName.substring("vegas-".length()) : profile.verName;
+            java.io.File conf2 = new java.io.File(confDir, stripped + ".conf");
+            java.io.File conf = conf1.isFile() ? conf1 : (conf2.isFile() ? conf2 : null);
+            if (conf == null) continue;
             String tag = null, assetName = null;
-            if (sidecar != null && sidecar.has(profile.verName)) {
-                org.json.JSONObject entry = sidecar.optJSONObject(profile.verName);
-                if (entry != null) {
-                    tag = entry.optString("tag", null);
-                    assetName = entry.optString("assetName", null);
+            if (sidecar != null) {
+                // provenance key may be with or without prefix depending on which sheet parked it
+                String key = sidecar.has(profile.verName) ? profile.verName : (sidecar.has(stripped) ? stripped : null);
+                if (key != null) {
+                    org.json.JSONObject entry = sidecar.optJSONObject(key);
+                    if (entry != null) {
+                        tag = entry.optString("tag", null);
+                        assetName = entry.optString("assetName", null);
+                    }
                 }
             }
             out.add(new StockSource(profile.verName, tag, assetName, conf));

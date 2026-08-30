@@ -64,9 +64,13 @@ fun VegasDownloadSheet(
     var downloadProgress by remember { mutableStateOf(0f) }
     var installing by remember { mutableStateOf(false) }
     var notesDialogTag by remember { mutableStateOf<String?>(null) }
+    var retryKey by remember { mutableStateOf(0) }
 
-    // Fetch releases from GitHub API
-    LaunchedEffect(Unit) {
+    // Fetch releases from GitHub API — #9 retryable popup
+    LaunchedEffect(retryKey) {
+        isLoading = true
+        errorMsg = null
+        releases = emptyList()
         val json = withContext(Dispatchers.IO) {
             Downloader.downloadString("https://api.github.com/repos/isygold/vegas-releases/releases")
         }
@@ -103,11 +107,12 @@ fun VegasDownloadSheet(
                     }
                 }
                 releases = list
+                if (list.isEmpty()) errorMsg = "No releases found — check GitHub status or retry."
             } catch (e: Exception) {
-                errorMsg = "Failed to parse releases: ${e.message}"
+                errorMsg = "Failed to parse releases: ${e.message} — tap Retry."
             }
         } else {
-            errorMsg = "Failed to fetch releases from GitHub"
+            errorMsg = "Failed to fetch releases from GitHub (rate limit 60/h or no network) — tap Retry."
         }
         isLoading = false
     }
@@ -129,13 +134,14 @@ fun VegasDownloadSheet(
         }
     }
 
-    // Error dialog
+    // Error dialog — #9 popup with Retry
     errorMsg?.let { msg ->
         AlertDialog(
             onDismissRequest = { errorMsg = null },
-            title = { Text("Error", color = MaterialTheme.colorScheme.onSurface) },
+            title = { Text("Download failed", color = MaterialTheme.colorScheme.onSurface) },
             text = { Text(msg, color = MaterialTheme.colorScheme.onSurface) },
-            confirmButton = { TextButton(onClick = { errorMsg = null }) { Text("OK") } }
+            confirmButton = { TextButton(onClick = { errorMsg = null }) { Text("OK") } },
+            dismissButton = { TextButton(onClick = { errorMsg = null; retryKey++ }) { Text("Retry") } }
         )
     }
 

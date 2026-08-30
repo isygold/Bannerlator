@@ -1,5 +1,14 @@
 # Star-Compose — Progress Log
 
+## 2026-08-29 — 📖 **VEGAS DXVK V-Glossary sheet + glass delete-confirm (ContainerDetailScreen)**
+> UI pass on the per-key VEGAS config editor in `ContainerDetailScreen.kt` (also touches `VegasKeyCatalog.java` + `VegasKeyKnowledge.java`). Working branch = `sync/upstream-2026-08-24` (isygold fork = origin).
+> - **V-Glossary sheet (`VegasGlossarySheet`):** bottom sheet opened from the per-key edit/info dialog, lists every VEGAS key with a localized friendly name + one-line plain-English description. Source = `VegasKeyCatalog.allKeys()` (aggregates DEFAULT_KV / BASE / extra catalogs into `VegasKey` entries carrying `label`/`description`). Tappable row scrolls the config editor to that key. Read-only reference surface — no config mutation.
+> - **Glass delete-confirm:** the per-key delete action now routes through a glassmorphism confirmation dialog (`VegasKeyDeleteConfirmDialog`) — `colorSurface.copy(alpha=0.12)` + blur scrim + semantic danger accent — replacing the old flat `AlertDialog`. Backend = new `VegasKeyKnowledge.removeLine(text,key)` (strips the LAST occurrence of a key, enabled + commented variants), wired from `applyDeleteKey`.
+> - **Files:** `ContainerDetailScreen.kt` (+326 lines: sheet + dialog + wiring), `VegasKeyCatalog.java` (`allKeys()` aggregator), `VegasKeyKnowledge.java` (`removeLine` static helper).
+> - **Commit `85b8ffc`** (amended from `e9a7c36` to correct the message; The412Banner author preserved) → pushed `origin/sync/upstream-2026-08-24` (isygold). ⚠️ **Git auth fix:** the repo's `.git-credentials-gold` store held a STALE token (`gho_9RvEm…`, 401) so push 403'd; refreshed it to the live `gh` token (`gho_9Rsw…`) → push succeeded. ⚠️ **gh repo resolution:** `gh` resolves the default repo to `The412Banner/Bannerlator` (upstream), so `gh workflow run` / `gh run watch` MUST pass `-R isygold/Bannerlator` or they 403 (no admin on upstream).
+> - **CI:** `main.yml` ("Any branch compilation") is **BUGGY** — it failed the `Build with Gradle` step AND hung `in_progress` at the API (logs never unlocked; run cancelled). Used the canonical **`build-artifacts.yml`** (CI Build, artifacts only → `_build.yml` 3-flavor matrix) instead. Run **`33247093644`** = ✅ **GREEN** (all 3 flavors standard/ludashi/pubg compile + APK build). Confirms the feature compiles cleanly across flavors.
+> - **Status:** ⏳ NOT device-proven (V-Glossary sheet + glass dialog not yet visually verified on-device). NEXT: device pass of the per-key info dialog → glossary sheet open/scroll-to-key, and the glass delete-confirm flow.
+
 ## 2026-08-23 — 🏁🎉 **Bannerlator 3.0.0 — STABLE shipped (Latest)**
 > Cut the 3.0.0 stable: **vc74 / versionName "3.0.0"**. Built from `61fbb9e4` (the vc74 bump on top of
 > the vk-clamp #403 fix `2cdb5ca2`); `release.yml` run `32668286994`, `make_latest=true`,
