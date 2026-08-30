@@ -187,6 +187,46 @@ public final class VegasKeyCatalog {
     public String upstreamFetchedAt() { return upstreamFetchedAt; }
     public int buildCount() { return builds.size(); }
     public int upstreamKeyCount() { return upstreamKeys.size(); }
+
+    // Live tail — tags seen via GitHub feed that are newer than bundled catalog (heals "catalog behind").
+    private static final int MAX_CATALOG_TAIL = 200;
+    private final Set<String> tailTags = new LinkedHashSet<>();
+    public int mergeTailTags(java.util.Collection<String> tags) {
+        int added = 0;
+        if (tags == null) return 0;
+        for (String t : tags) {
+            if (t == null) continue;
+            String v = t.trim();
+            if (v.isEmpty()) continue;
+            if (hasTag(v) || tailTags.contains(v)) continue;
+            String stripped = v.startsWith("v") ? v.substring(1) : v;
+            String prefixed = v.startsWith("v") ? v : "v" + v;
+            if (hasTag(stripped) || hasTag(prefixed) || tailTags.contains(stripped) || tailTags.contains(prefixed)) continue;
+            tailTags.add(v);
+            added++;
+        }
+        return added;
+    }
+    /** Trim a tag set to MAX_CATALOG_TAIL entries, keeping the newest (last) ones. */
+    public static void capToMax(Set<String> set) {
+        if (set.size() > MAX_CATALOG_TAIL) {
+            set.removeAll(new ArrayList<>(set).subList(0, set.size() - MAX_CATALOG_TAIL));
+        }
+    }
+    /** Covered by bundled catalog OR by the live tail (tags the user has seen).
+     *  Intentionally relaxed: tail-healed tags are treated as covered because the
+     *  user has observed this live release, so its keys should not be flagged
+     *  "catalog behind build — unverified". */
+    public boolean isCoveredOrTail(String tag) {
+        if (tag == null) return false;
+        if (isCovered(tag)) return true;
+        String v = tag.trim();
+        if (tailTags.contains(v)) return true;
+        if (v.startsWith("v") && tailTags.contains(v.substring(1))) return true;
+        if (!v.startsWith("v") && tailTags.contains("v" + v)) return true;
+        return false;
+    }
+    public java.util.Set<String> tailTags() { return new LinkedHashSet<>(tailTags); }
     /** Union of every key documented across all builds and upstream (deduped; build order then upstream). */
     public List<String> allKeys() {
         LinkedHashSet<String> out = new LinkedHashSet<>();
@@ -262,7 +302,7 @@ public final class VegasKeyCatalog {
         return idx >= 0 ? builds.get(idx).publishedAt : "";
     }
 
-    /** Normalize "v2.7.3-vegas" vs naked "2.7.3-vegas" — accept either, prefer exact. */
+    /** Pass-through; callers normalize variants explicitly (see mergeTailTags). */
     private static String tagOf(String tag) {
         if (tag == null) return null;
         return tag;

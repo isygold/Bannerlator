@@ -2387,15 +2387,23 @@ internal fun DxvkConfigDialog(
         k
     }
     // VEGAS key catalog (classifier ground truth, §6b): null -> classifier off, rows unverified.
-    val vegasCatalog = remember { DXVKConfigDialog.loadVegasKeyCatalog(context) }
+    // Heal with live tail — tags seen via GitHub feed that are newer than bundled catalog (heals "catalog behind").
+    val vegasCatalog = remember {
+        val cat = DXVKConfigDialog.loadVegasKeyCatalog(context)
+        if (cat != null) {
+            val tail = context.getSharedPreferences("vegas_config_ui", Context.MODE_PRIVATE)
+                .getString("catalog_tail", null)?.split("|")?.filter { it.isNotBlank() }
+            if (!tail.isNullOrEmpty()) cat.mergeTailTags(tail)
+        }
+        cat
+    }
     val activeStockTag = remember(selectedStock, stockSources.value) {
         stockSources.value.firstOrNull { it.verName == selectedStock || it.displayLabel() == selectedStock }?.tag
     }
     // Coverage rule (STOCK rows only): installed tag missing from catalog (or no tag
-    // recorded) -> "catalog behind build". Custom files are user-owned — classifier
-    // vocabulary (including "unverified") never annotates them.
+    // recorded) -> "catalog behind build". Tail-healed tags count as covered.
     val catalogBehind = remember(vegasCatalog, selectedStock, activeStockTag) {
-        vegasCatalog != null && selectedStock != null && (activeStockTag == null || !vegasCatalog.isCovered(activeStockTag))
+        vegasCatalog != null && selectedStock != null && (activeStockTag == null || !vegasCatalog.isCoveredOrTail(activeStockTag))
     }
     var showCatalogDialog by remember { mutableStateOf(false) }
     var showKeyDocSheet by remember { mutableStateOf(false) }
@@ -2618,16 +2626,36 @@ internal fun DxvkConfigDialog(
         }
     }
 
-    // §6b.1 user-initiated "Check for new builds" — report only, never writes.
+    // §6b.1 user-initiated "Check for new builds" — report + heal catalog tail (so next open isn't "unverified").
     fun runLiveCheck() {
         if (liveChecking) return
         liveChecking = true
         HttpUtils.download("https://api.github.com/repos/isygold/vegas-releases/releases") { body ->
-            scope.launch {
-                val catalogNewest = vegasCatalog?.newestTag()
-                val newestAt = catalogNewest?.let { vegasCatalog?.publishedAtOf(it) }
-                liveReport = VegasLiveCheck.check(body, activeStockTag, catalogNewest, newestAt)
-                liveChecking = false
+            try {
+                scope.launch {
+                    val catalogNewest = vegasCatalog?.newestTag()
+                    val newestAt = catalogNewest?.let { vegasCatalog?.publishedAtOf(it) }
+                    val report = VegasLiveCheck.check(body, activeStockTag, catalogNewest, newestAt)
+                    liveReport = report
+                    // heal: any newer tags seen live become covered
+                    if (report.feedOk && report.newerTags.isNotEmpty()) {
+                        val prefs = context.getSharedPreferences("vegas_config_ui", Context.MODE_PRIVATE)
+                        val cur = prefs.getString("catalog_tail", "")?.split('|')?.filter { it.isNotBlank() }?.toMutableSet() ?: mutableSetOf()
+                        var added = false
+                        for (t in report.newerTags) if (t.isNotBlank() && cur.add(t)) added = true
+                        // also ensure installed tag itself is considered seen (covers hash-renamed installs)
+                        if (report.installedTag != null && report.installedTag.isNotBlank() && cur.add(report.installedTag!!)) added = true
+                        // cap growth so the persisted tail stays bounded
+                        VegasKeyCatalog.capToMax(cur)
+                        if (added) {
+                            prefs.edit().putString("catalog_tail", cur.joinToString("|")).apply()
+                            vegasCatalog?.mergeTailTags(cur.toList())
+                        }
+                    }
+                    liveChecking = false
+                }
+            } catch (_: IllegalStateException) {
+                // coroutine scope already disposed (user navigated away) — ignore
             }
         }
     }
@@ -4161,6 +4189,13 @@ private fun StockConfigDownloadSheet(
             }
         }
         if (added) prefs.edit().putString("released_tail", existing.joinToString("|")).apply()
+        // Heal catalog tail too — tags seen live become "covered" so "unverified" doesn't stick forever
+        val catExisting = prefs.getString("catalog_tail", "")?.split('|')
+            ?.filter { it.isNotBlank() }?.toMutableSet() ?: mutableSetOf()
+        var catAdded = false
+        for (rel in rows) if (rel.tag.isNotBlank() && catExisting.add(rel.tag)) catAdded = true
+        VegasKeyCatalog.capToMax(catExisting)
+        if (catAdded) prefs.edit().putString("catalog_tail", catExisting.joinToString("|")).apply()
     }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
