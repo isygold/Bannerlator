@@ -3308,18 +3308,9 @@ internal fun DxvkConfigDialog(
                                 }
                                 return if (bestDist in 1..2) best else null
                             }
-                            // Auto-off gated keys: if a key is LATE/REMOVED for this build, it does nothing — toggle off + one-line toast.
-                            // Guarded by remember so it fires once per dxvk change (not on every recomposition of configRows).
-                            val lastGatedKeys = remember(selectedDxvk) { mutableStateOf(emptySet<String>()) }
-                            LaunchedEffect(selectedDxvk, vegasKnowledge) {
-                                val toOff = configRows.filter { it.enabled && vegasKnowledge != null && vegasKnowledge.isGated(it.key, selectedDxvk) }
-                                val keys = toOff.map { it.key }.toSet()
-                                if (keys.any { it !in lastGatedKeys.value }) {
-                                    lastGatedKeys.value = keys
-                                    for (r in toOff) applyToggle(r.key, r.value, false)
-                                    Toast.makeText(activity, "${toOff.size} gated keys auto-disabled — ineffective on $selectedDxvk", Toast.LENGTH_SHORT).show()
-                                }
-                            }
+                            // Gated keys are now *shown* as ineffective — no auto-off (per your "stop").
+                            // They appear grey `needs 2.8.0+ · ineffective` with ○──, you decide to Add/Remove.
+                            // No LaunchedEffect auto-mutation, Custom and Stock both stay as you left them.
                             visibleRows.forEach { row ->
                                 val gated = vegasKnowledge != null && vegasKnowledge.isGated(row.key, selectedDxvk)
                                 val baseBadge = vegasKnowledge?.badgeFor(row.key, selectedDxvk) ?: "unclassified"

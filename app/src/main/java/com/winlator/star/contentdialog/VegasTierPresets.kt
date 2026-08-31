@@ -91,13 +91,13 @@ object VegasTierPresets {
             "Stable · frame pacing fixes",
             "dxvk.enableStarProfile, vegas.enableUpscaler ship commented"
         ),
-        "2.7.4-beta" to listOf(
+        "2.7.4" to listOf(
             "GPL dither warm-up",
             "Adds vegas.telemetry"
         ),
-        "2.8.0" to listOf(
+        "3.0" to listOf(
             "TBDR batch tuning · tile-reuse pass",
-            "vegas.telemetry now stock (was 2.7.4-beta only)"
+            "vegas.telemetry now stock (was 2.7.4 only)"
         )
     )
 }

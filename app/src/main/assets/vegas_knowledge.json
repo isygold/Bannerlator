@@ -1,13 +1,15 @@
 {
   "schemaVersion": 1,
-  "forkBuild": "87b0866",
-  "generated": "2026-08-24",
+  "forkBuild": "3.0",
+  "generated": "2026-08-31",
   "released": [
     "1.11.1-60383b1",
     "1.11.2-3299d2a",
     "2.4.1-cf04e7f",
     "2.4.1-3137660",
-    "2.7.3"
+    "2.7.3",
+    "2.7.4",
+    "3.0"
   ],
   "vanilla": [
     "dxvk.numCompilerThreads",

@@ -337,14 +337,16 @@ public class DXVKConfigDialog {
             // "info" is deliberate: VKD3D_DEBUG=info emits vkd3d-proton's "Program name" identity line and
             // device init; DXVK_LOG_LEVEL=info emits DXVK's per-API <app>_d3dNN.log files with their
             // header. These are startup-level logs (no per-frame spam) written to a per-launch private dir.
+            // Respect a user-set DXVK_LOG_LEVEL (e.g. debug for vegas csv at root) — only set if not already present.
             envVars.put("DXVK_LOG_PATH", logDirOverride.getAbsolutePath());
-            envVars.put("DXVK_LOG_LEVEL", "info");
+            if (!envVars.has("DXVK_LOG_LEVEL")) envVars.put("DXVK_LOG_LEVEL", "info");
             envVars.put("VKD3D_LOG_FILE", new java.io.File(logDirOverride, "vkd3d-proton.log").getAbsolutePath());
-            envVars.put("VKD3D_DEBUG", "info");
+            if (!envVars.has("VKD3D_DEBUG")) envVars.put("VKD3D_DEBUG", "info");
         } else {
-            // Logging OFF and no dir supplied (config previews) — keep the wrappers fully silent.
-            envVars.put("DXVK_LOG_LEVEL", "none");
-            envVars.put("VKD3D_DEBUG", "none");
+            // Logging OFF and no dir supplied (config previews) — keep the wrappers fully silent
+            // — but respect an explicit user override (e.g. DXVK_LOG_LEVEL=debug to get vegas csv at root).
+            if (!envVars.has("DXVK_LOG_LEVEL")) envVars.put("DXVK_LOG_LEVEL", "none");
+            if (!envVars.has("VKD3D_DEBUG")) envVars.put("VKD3D_DEBUG", "none");
         }
 
         // DXVK_CONFIG_FILE (config source path, e.g. /storage/emulated/0/dxvk.conf)

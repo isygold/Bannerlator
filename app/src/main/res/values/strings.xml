@@ -372,8 +372,6 @@
         <b>Gyro Target</b><br /><br />
         What the phone\'s tilt actually controls. <b>Right stick</b> (the usual choice) aims like the right analog stick; <b>Left stick</b> moves like the left stick; <b>Mouse</b> drives the pointer for mouse-aim games. The Mouse target always uses Rate mode.
     ]]></string>
-
->>>>>>> upstream/main
     <string name="box64_env_var_help__dynarec_safeflags"><![CDATA[
         Handling of flags on CALL/RET opcodes<br /><br />
         <b>0</b> : Treats CALL/RET as if it never needed flags (faster, unstable)<br />
