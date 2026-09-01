@@ -338,6 +338,11 @@ public class DXVKConfigDialog {
                 }
                 if (!content.isEmpty()) {
                     envVars.put("DXVK_CONFIG", content);
+                    // Also pass the file path via DXVK_CONFIG_FILE so VEGAS (a DXVK fork)
+                    // can read it natively. DXVK_CONFIG (inline) takes precedence for
+                    // overlapping keys, but DXVK_CONFIG_FILE is still processed for
+                    // the file path — the native DLL searches it first per the FAQ.
+                    envVars.put("DXVK_CONFIG_FILE", configFile);
                     if (com.winlator.star.BuildConfig.DEBUG) {
                         Log.d(TAG, "Custom DXVK_CONFIG=[" + content + "] from " + configFile);
                     }

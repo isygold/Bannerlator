@@ -4268,7 +4268,7 @@ private fun StockConfigDownloadSheet(
 // VEGAS-specific entries are best-effort; verify against internal docs.
 private val KEY_DEFINITIONS: Map<String, String> = mapOf(
     // --- environment / DXVK core ---
-    "DXVK_CONFIG_FILE" to "Ignored by current VEGAS build — config is passed via DXVK_CONFIG inline.",
+    "DXVK_CONFIG_FILE" to "Native DXVK config-file path. Set automatically when a custom .conf is selected.",
     "DXVK_FILTER_DEVICE_NAME" to "Substring filter to force or avoid a GPU by name.",
     "DXVK_LOG_LEVEL" to "Sets DXVK log verbosity (none/info/warn/error).",
     "GPU" to "Legacy environment hint; verify before use.",
