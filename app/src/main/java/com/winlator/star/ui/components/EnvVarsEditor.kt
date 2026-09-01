@@ -152,6 +152,7 @@ internal object KnownEnvVars {
         KnownEnvVar("DXVK_ASYNC", EnvVarType.CHECKBOX, listOf("0", "1")),
         KnownEnvVar("DXVK_GPLASYNCCACHE", EnvVarType.CHECKBOX, listOf("0", "1")),
         KnownEnvVar("DXVK_CONFIG", EnvVarType.TEXT),
+        KnownEnvVar("DXVK_CONFIG_FILE", EnvVarType.TEXT),
         // Wine extras
         KnownEnvVar("WINE_DISABLE_FULLSCREEN_HACK", EnvVarType.CHECKBOX, listOf("0", "1")),
         KnownEnvVar("WINE_X11FORCEGLX", EnvVarType.CHECKBOX, listOf("0", "1")),

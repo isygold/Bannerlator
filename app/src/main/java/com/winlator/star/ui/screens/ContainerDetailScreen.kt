@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -2439,8 +2440,14 @@ internal fun DxvkConfigDialog(
         (activeStockTag?.takeIf { it.isNotBlank() } ?: sidecarFallback)?.replace(Regex("[^A-Za-z0-9._-]"), "_")
     }
     val sidecarPath = remember(containerRootDir, sidecarBase) {
-        if (containerRootDir == null || sidecarBase == null) null
-        else java.io.File(java.io.File(java.io.File(containerRootDir, "vegas"), "configs"), sidecarBase + ".user.conf").absolutePath
+        if (sidecarBase == null) null
+        else {
+            val dir = if (containerRootDir != null)
+                java.io.File(java.io.File(java.io.File(containerRootDir, "vegas"), "configs"))
+            else
+                java.io.File(context.filesDir, "vegas-defaults/configs")
+            java.io.File(dir, sidecarBase + ".user.conf").absolutePath
+        }
     }
     // Probe both tag-based and verName-based sidecar names so an older tag-sidecar is still found
     val sidecarExists = remember(toggleVersion, sidecarPath, containerRootDir, sidecarFallback, activeStockTag) {
@@ -2688,7 +2695,6 @@ internal fun DxvkConfigDialog(
         val effectiveSidecar = resolvedSidecarPath ?: intendedSidecar
         scope.launch {
             val ok = withContext(Dispatchers.IO) {
-                if (isStockPath && containerRootDir == null) return@withContext false
                 if (!target.isFile) return@withContext false
                 val text = runCatching { target.readText() }.getOrNull() ?: return@withContext false
                 val next = transform(text) ?: return@withContext false
@@ -2700,6 +2706,8 @@ internal fun DxvkConfigDialog(
                 if (!autoBak.isFile) {
                     runCatching { java.nio.file.Files.copy(target.toPath(), autoBak.toPath()) }
                 }
+                // Ensure the target's parent directory exists (fallback sidecar or custom path).
+                if (!target.parentFile.isDirectory) target.parentFile.mkdirs()
                 // Stock + pristine baseline: materialize the sidecar with the edited content.
                 // From then on the sidecar IS the live file (pointer saved on OK).
                 if (isStockPath && !sidecarExists && effectiveSidecar != null) {
@@ -2730,12 +2738,6 @@ internal fun DxvkConfigDialog(
     fun applyToggle(key: String, value: String, enable: Boolean) {
         if (useDefaults || liveFile == null) return
         val isStockPath = selectedStock != null
-        if (isStockPath && containerRootDir == null) {
-            // Structural guard: without a container there is no sidecar target,
-            // and parked baseline files are never written in place.
-            Toast.makeText(activity, "No container context — baseline configs are read-only", Toast.LENGTH_SHORT).show()
-            return
-        }
         // §6a.6 schema-aware editor: block BEFORE the write — a wrong-family key can never
         // be meaningfully applied to this build's schema. Stock rows only.
         if (isStockPath && activeStockTag != null && vegasCatalog != null && vegasCatalog.isWrongFamily(key, activeStockTag)) {
@@ -2753,10 +2755,6 @@ internal fun DxvkConfigDialog(
     fun applyValue(key: String, value: String) {
         if (useDefaults || liveFile == null) return
         val isStockPath = selectedStock != null
-        if (isStockPath && containerRootDir == null) {
-            Toast.makeText(activity, "No container context — baseline configs are read-only", Toast.LENGTH_SHORT).show()
-            return
-        }
         if (isStockPath && activeStockTag != null && vegasCatalog != null && vegasCatalog.isWrongFamily(key, activeStockTag)) {
             pendingSchemaBlock = key
             return
@@ -2773,10 +2771,6 @@ internal fun DxvkConfigDialog(
     fun applyAddKey(key: String, value: String) {
         if (useDefaults || liveFile == null) return
         val isStockPath = selectedStock != null
-        if (isStockPath && containerRootDir == null) {
-            Toast.makeText(activity, "No container context — baseline configs are read-only", Toast.LENGTH_SHORT).show()
-            return
-        }
         if (isStockPath && activeStockTag != null && vegasCatalog != null && vegasCatalog.isWrongFamily(key, activeStockTag)) {
             pendingSchemaBlock = key
             return
@@ -2792,10 +2786,6 @@ internal fun DxvkConfigDialog(
     fun applyDeleteKey(key: String) {
         if (useDefaults || liveFile == null) return
         val isStockPath = selectedStock != null
-        if (isStockPath && containerRootDir == null) {
-            Toast.makeText(activity, "No container context — baseline configs are read-only", Toast.LENGTH_SHORT).show()
-            return
-        }
         if (isStockPath && activeStockTag != null && vegasCatalog != null && vegasCatalog.isWrongFamily(key, activeStockTag)) {
             pendingSchemaBlock = key
             return
@@ -3311,6 +3301,9 @@ internal fun DxvkConfigDialog(
                             // Gated keys are now *shown* as ineffective — no auto-off (per your "stop").
                             // They appear grey `needs 2.8.0+ · ineffective` with ○──, you decide to Add/Remove.
                             // No LaunchedEffect auto-mutation, Custom and Stock both stay as you left them.
+                            // Brighten primary 40% toward white so changed-value text is readable on
+                            // dark surfaces (AMOLED pure-black gives ~4.6:1 for #0055FF at bodySmall).
+                            val changedTextColor = lerp(MaterialTheme.colorScheme.primary, Color.White, 0.40f)
                             visibleRows.forEach { row ->
                                 val gated = vegasKnowledge != null && vegasKnowledge.isGated(row.key, selectedDxvk)
                                 val baseBadge = vegasKnowledge?.badgeFor(row.key, selectedDxvk) ?: "unclassified"
@@ -3348,7 +3341,7 @@ internal fun DxvkConfigDialog(
                                         Text(
                                             row.value,
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = if (changed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            color = if (changed) changedTextColor else MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     } else {
                                         // Non-boolean keys open the value picker (stock vocabulary + custom).
@@ -3365,7 +3358,7 @@ internal fun DxvkConfigDialog(
                                             Text(
                                                 row.value,
                                                 style = MaterialTheme.typography.bodySmall,
-                                                color = if (changed) MaterialTheme.colorScheme.primary
+                                                color = if (changed) changedTextColor
                                                         else if (gated) MaterialTheme.colorScheme.outline.copy(alpha = 0.7f)
                                                         else MaterialTheme.colorScheme.onSurfaceVariant,
                                                 maxLines = 1
@@ -4275,7 +4268,7 @@ private fun StockConfigDownloadSheet(
 // VEGAS-specific entries are best-effort; verify against internal docs.
 private val KEY_DEFINITIONS: Map<String, String> = mapOf(
     // --- environment / DXVK core ---
-    "DXVK_CONFIG_FILE" to "Inert / stale — ignored by the current VEGAS build (legacy key).",
+    "DXVK_CONFIG_FILE" to "Ignored by current VEGAS build — config is passed via DXVK_CONFIG inline.",
     "DXVK_FILTER_DEVICE_NAME" to "Substring filter to force or avoid a GPU by name.",
     "DXVK_LOG_LEVEL" to "Sets DXVK log verbosity (none/info/warn/error).",
     "GPU" to "Legacy environment hint; verify before use.",
@@ -4476,6 +4469,15 @@ private fun VGlossarySheet(
                             }
                             HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
                         }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("OK")
                     }
                 }
             }

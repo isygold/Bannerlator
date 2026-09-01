@@ -1,6 +1,7 @@
 package com.winlator.star.contentdialog;
 
 import android.content.Context;
+import android.util.Log;
 
 import com.winlator.star.R;
 import com.winlator.star.container.Container;
@@ -21,6 +22,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class DXVKConfigDialog {
+    private static final String TAG = "DXVKConfigDialog";
     public static final String DEFAULT_CONFIG = Container.DEFAULT_DXWRAPPERCONFIG;
     public static final int DXVK_TYPE_NONE = 0;
     public static final int DXVK_TYPE_ASYNC = 1;
@@ -274,16 +276,24 @@ public class DXVKConfigDialog {
                                   java.io.File logDirOverride) {
         String configFile = config.get("dxvkConfigFile");
         boolean hasConfigFile = configFile != null && !configFile.isEmpty() && !configFile.equals("0") && !configFile.equals("None");
+        if (com.winlator.star.BuildConfig.DEBUG) {
+            Log.d(TAG, "setEnvVars: hasConfigFile=" + hasConfigFile + " configFile=" + configFile);
+        }
 
-        // DXVK_FRAME_RATE is a standalone env var, independent of DXVK_CONFIG / DXVK_CONFIG_FILE.
+        // DXVK_FRAME_RATE is a standalone env var, independent of DXVK_CONFIG.
         String framerate = config.get("framerate");
         if (!framerate.isEmpty() && !framerate.equals("0")) {
             envVars.put("DXVK_FRAME_RATE", framerate);
         }
 
-        // When a custom DXVK_CONFIG_FILE is selected, skip DXVK_CONFIG entirely
-        // so the user's config file has full control (DXVK_CONFIG would override it).
+        // VEGAS 2.4.x only reads DXVK_CONFIG (inline key=value string).
+        // DXVK_CONFIG_FILE is IGNORED by the current native DLL — evidence:
+        //   - No "Found config file" in any captured wine_debug.log
+        //   - File-based config values are never applied (e.g. vegas.forceTier)
+        //   - Every working reference log shows "Found config env" (inline only)
+        // Both Stock and Custom therefore pass config via DXVK_CONFIG.
         if (!hasConfigFile) {
+            // Stock: build inline defaults
             StringBuilder contentBuilder = new StringBuilder();
             if (!framerate.isEmpty() && !framerate.equals("0")) {
                 contentBuilder.append("dxgi.maxFrameRate = ").append(framerate).append("; ");
@@ -298,8 +308,45 @@ public class DXVKConfigDialog {
             }
 
             String content = contentBuilder.toString();
-            if (!content.isEmpty())
+            if (!content.isEmpty()) {
                 envVars.put("DXVK_CONFIG", content);
+                if (com.winlator.star.BuildConfig.DEBUG) {
+                    Log.d(TAG, "Stock DXVK_CONFIG=[" + content + "]");
+                }
+            }
+        } else {
+            // Custom: read the user's .conf file and pass its content inline.
+            // semicolon-delimited key=value pairs — same format DXVK_CONFIG expects.
+            java.io.File confFile = new java.io.File(configFile);
+            if (confFile.isFile()) {
+                String content;
+                try {
+                    StringBuilder sb = new StringBuilder();
+                    try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(confFile))) {
+                        String line;
+                        while ((line = br.readLine()) != null) {
+                            line = line.trim();
+                            // Skip comments and blank lines
+                            if (line.isEmpty() || line.startsWith("#") || line.startsWith("//")) continue;
+                            if (sb.length() > 0) sb.append("; ");
+                            sb.append(line);
+                        }
+                    }
+                    content = sb.toString();
+                } catch (java.io.IOException e) {
+                    content = "";
+                }
+                if (!content.isEmpty()) {
+                    envVars.put("DXVK_CONFIG", content);
+                    if (com.winlator.star.BuildConfig.DEBUG) {
+                        Log.d(TAG, "Custom DXVK_CONFIG=[" + content + "] from " + configFile);
+                    }
+                } else {
+                    Log.w(TAG, "Custom config file empty or unreadable: " + configFile);
+                }
+            } else {
+                Log.w(TAG, "Custom config file not found: " + configFile);
+            }
         }
 
         if (!config.get("async").isEmpty() && !config.get("async").equals("0"))
@@ -347,11 +394,6 @@ public class DXVKConfigDialog {
             // — but respect an explicit user override (e.g. DXVK_LOG_LEVEL=debug to get vegas csv at root).
             if (!envVars.has("DXVK_LOG_LEVEL")) envVars.put("DXVK_LOG_LEVEL", "none");
             if (!envVars.has("VKD3D_DEBUG")) envVars.put("VKD3D_DEBUG", "none");
-        }
-
-        // DXVK_CONFIG_FILE (config source path, e.g. /storage/emulated/0/dxvk.conf)
-        if (hasConfigFile) {
-            envVars.put("DXVK_CONFIG_FILE", configFile);
         }
     }
 }
