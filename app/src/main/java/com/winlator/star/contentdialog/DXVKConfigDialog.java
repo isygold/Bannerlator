@@ -286,12 +286,8 @@ public class DXVKConfigDialog {
             envVars.put("DXVK_FRAME_RATE", framerate);
         }
 
-        // VEGAS 2.4.x only reads DXVK_CONFIG (inline key=value string).
-        // DXVK_CONFIG_FILE is IGNORED by the current native DLL — evidence:
-        //   - No "Found config file" in any captured wine_debug.log
-        //   - File-based config values are never applied (e.g. vegas.forceTier)
-        //   - Every working reference log shows "Found config env" (inline only)
-        // Both Stock and Custom therefore pass config via DXVK_CONFIG.
+        // When a custom DXVK_CONFIG_FILE is selected, skip DXVK_CONFIG entirely
+        // so the user's config file has full control (DXVK_CONFIG would override it).
         if (!hasConfigFile) {
             // Stock: build inline defaults
             StringBuilder contentBuilder = new StringBuilder();
@@ -314,43 +310,13 @@ public class DXVKConfigDialog {
                     Log.d(TAG, "Stock DXVK_CONFIG=[" + content + "]");
                 }
             }
-        } else {
-            // Custom: read the user's .conf file and pass its content inline.
-            // semicolon-delimited key=value pairs — same format DXVK_CONFIG expects.
-            java.io.File confFile = new java.io.File(configFile);
-            if (confFile.isFile()) {
-                String content;
-                try {
-                    StringBuilder sb = new StringBuilder();
-                    try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(confFile))) {
-                        String line;
-                        while ((line = br.readLine()) != null) {
-                            line = line.trim();
-                            // Skip comments and blank lines
-                            if (line.isEmpty() || line.startsWith("#") || line.startsWith("//")) continue;
-                            if (sb.length() > 0) sb.append("; ");
-                            sb.append(line);
-                        }
-                    }
-                    content = sb.toString();
-                } catch (java.io.IOException e) {
-                    content = "";
-                }
-                if (!content.isEmpty()) {
-                    envVars.put("DXVK_CONFIG", content);
-                    // Also pass the file path via DXVK_CONFIG_FILE so VEGAS (a DXVK fork)
-                    // can read it natively. DXVK_CONFIG (inline) takes precedence for
-                    // overlapping keys, but DXVK_CONFIG_FILE is still processed for
-                    // the file path — the native DLL searches it first per the FAQ.
-                    envVars.put("DXVK_CONFIG_FILE", configFile);
-                    if (com.winlator.star.BuildConfig.DEBUG) {
-                        Log.d(TAG, "Custom DXVK_CONFIG=[" + content + "] from " + configFile);
-                    }
-                } else {
-                    Log.w(TAG, "Custom config file empty or unreadable: " + configFile);
-                }
-            } else {
-                Log.w(TAG, "Custom config file not found: " + configFile);
+        }
+
+        // DXVK_CONFIG_FILE (config source path, e.g. /storage/emulated/0/dxvk.conf)
+        if (hasConfigFile) {
+            envVars.put("DXVK_CONFIG_FILE", configFile);
+            if (com.winlator.star.BuildConfig.DEBUG) {
+                Log.d(TAG, "Custom DXVK_CONFIG_FILE=" + configFile);
             }
         }
 
