@@ -2443,7 +2443,7 @@ internal fun DxvkConfigDialog(
         if (sidecarBase == null) null
         else {
             val dir = if (containerRootDir != null)
-                java.io.File(java.io.File(java.io.File(containerRootDir, "vegas"), "configs"))
+                java.io.File(java.io.File(containerRootDir, "vegas"), "configs")
             else
                 java.io.File(context.filesDir, "vegas-defaults/configs")
             java.io.File(dir, sidecarBase + ".user.conf").absolutePath
