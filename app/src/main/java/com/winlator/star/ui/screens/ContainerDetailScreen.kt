@@ -45,6 +45,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -2836,8 +2838,8 @@ internal fun DxvkConfigDialog(
                 // §loglevel: VEGAS ignores the config-file log-level key; it must be an env var.
                 Text(
                     stringResource(R.string.vegas_config_loglevel_envvar_note),
-                    color = MaterialTheme.colorScheme.outline,
-                    style = MaterialTheme.typography.bodySmall
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall.merge(TextStyle(fontWeight = FontWeight.Bold))
                 )
                 Spacer(Modifier.height(8.dp))
                 if (isVegas) {
