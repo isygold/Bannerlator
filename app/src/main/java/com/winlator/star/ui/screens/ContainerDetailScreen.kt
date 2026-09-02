@@ -4374,6 +4374,73 @@ private val KEY_DEFINITIONS: Map<String, String> = mapOf(
     "dxgi.hideAmdGpu" to "Hides the AMD GPU from the app.",
     "dxgi.hideIntelGpu" to "Hides the Intel GPU from the app.",
     "dxgi.hideNvidiaGpu" to "Hides the Nvidia GPU from the app.",
+    "dxgi.enableHDR" to "Enables HDR output when supported by the display.",
+    "dxgi.enableUe4Workarounds" to "Enables workarounds for Unreal Engine 4 rendering quirks.",
+    "dxgi.forceRefreshRate" to "Forces a specific display refresh rate (Hz). 0 = auto.",
+    "dxgi.hideNvkGpu" to "Hides the NVK (open-source NVIDIA) GPU from the app.",
+    // --- dxvk.* extended ---
+    "dxvk.allowFse" to "Allows fullscreen exclusive mode transitions.",
+    "dxvk.deviceFilter" to "Substring filter to restrict Vulkan device selection by name.",
+    "dxvk.disableNvLowLatency2" to "Disables the VK_NV_low_latency2 extension.",
+    "dxvk.enableDescriptorBuffer" to "Enables VK_EXT_descriptor_buffer for faster descriptor access.",
+    "dxvk.enableDescriptorHeap" to "Enables pooled descriptor heap allocation.",
+    "dxvk.enableGraphicsPipelineLibrary" to "Enables VK_EXT_graphics_pipeline_library for faster pipeline creation.",
+    "dxvk.enableImplicitResolves" to "Enables implicit MSAA/resolve transitions.",
+    "dxvk.enableMemoryDefrag" to "Enables automatic Vulkan memory defragmentation.",
+    "dxvk.enableNvRawAccessChains" to "Enables VK_NV_raw_access_chains for raw buffer access.",
+    "dxvk.enableUnifiedImageLayouts" to "Uses unified image layout tracking.",
+    "dxvk.hideIntegratedGraphics" to "Hides integrated GPUs from the app (discrete only).",
+    "dxvk.latencyTolerance" to "Latency tolerance in microseconds for sleep decisions.",
+    "dxvk.lowerSinCos" to "Uses lower-precision sin/cos for performance.",
+    "dxvk.maxFrameRate" to "Caps presentation frame rate at the DXVK layer.",
+    "dxvk.maxMemoryBudget" to "Overrides the Vulkan memory budget in MB.",
+    "dxvk.tilerMode" to "Controls TBDR tiler behavior (Adreno-specific).",
+    "dxvk.trackPipelineLifetime" to "Tracks pipeline object lifecycle for cache management.",
+    "dxvk.zeroMappedMemory" to "Zeroes memory on allocation (debug / leak detection).",
+    // --- d3d11.* extended ---
+    "d3d11.clampNegativeLodBias" to "Clamps negative LOD bias to 0.",
+    "d3d11.disableDirectImageMapping" to "Disables direct image-to-host mapping.",
+    "d3d11.enableContextLock" to "Serializes D3D11 device context access (compat).",
+    "d3d11.exposeDriverCommandLists" to "Exposes driver-level command list support.",
+    "d3d11.forceComputeLdsBarriers" to "Forces barriers between compute LDS accesses.",
+    "d3d11.forceComputeUavBarriers" to "Forces barriers between compute UAV accesses.",
+    "d3d11.forceSampleRateShading" to "Forces sample-rate shading for all materials.",
+    "d3d11.relaxedGraphicsBarriers" to "Relaxes barriers on graphics pipeline resources.",
+    "d3d11.reproducibleCommandStream" to "Produces deterministic command streams (debug).",
+    "d3d11.samplerLodBias" to "Global LOD bias applied to all samplers.",
+    // --- d3d8.* extended ---
+    "d3d8.scaleDref" to "Scales depth-reference values for D3D8 compat.",
+    // --- d3d9.* extended ---
+    "d3d9.cachedWriteOnlyBuffers" to "Caches write-only buffer data in system memory.",
+    "d3d9.clampNegativeLodBias" to "Clamps negative LOD bias to 0 (D3D9).",
+    "d3d9.countLosableResources" to "Counts resources that can be evicted (memory tracking).",
+    "d3d9.deviceLocalConstantBuffers" to "Places constant buffers in device-local memory.",
+    "d3d9.deviceLossOnFocusLoss" to "Reports device loss when the app loses focus.",
+    "d3d9.disableA8RT" to "Disables A8 render-target format support.",
+    "d3d9.extraFrontbuffer" to "Allocates an extra front buffer for compat.",
+    "d3d9.forceRefreshRate" to "Forces a specific display refresh rate for D3D9 (Hz).",
+    "d3d9.forceSampleRateShading" to "Forces sample-rate shading for D3D9 materials.",
+    "d3d9.forceSamplerTypeSpecConstants" to "Uses spec constants to control sampler types.",
+    "d3d9.hideAmdGpu" to "Hides the AMD GPU from D3D9 enumeration.",
+    "d3d9.hideIntelGpu" to "Hides the Intel GPU from D3D9 enumeration.",
+    "d3d9.hideNvidiaGpu" to "Hides the NVIDIA GPU from D3D9 enumeration.",
+    "d3d9.hideNvkGpu" to "Hides the NVK GPU from D3D9 enumeration.",
+    "d3d9.ignoreDefaultBufferLockRange" to "Ignores the default lock range on buffers.",
+    "d3d9.modeCountCompatibility" to "Reports a compatible display mode count.",
+    "d3d9.reproducibleCommandStream" to "Produces deterministic D3D9 command streams (debug).",
+    "d3d9.samplerLodBias" to "Global LOD bias applied to D3D9 samplers.",
+    "d3d9.supportCubeDepthFormats" to "Enables depth format support on cube textures.",
+    "d3d9.textureMemory" to "Caps total D3D9 texture memory pool in MB.",
+    "d3d9.useD32forD24" to "Uses D32 format where D24 would be used.",
+    "d3d9.useFP16" to "Uses half-precision float where full precision is not required.",
+    // --- HUD labels (VEGAS governor internal — not user-configurable) ---
+    "cap" to "HUD: Maximum draw-batch size before forced flush (governor internal).",
+    "draw" to "HUD: Draw calls per millisecond — game rendering workload.",
+    "flush" to "HUD: Number of GPU flushes per frame (auto-tuned by governor).",
+    "key" to "HUD/Sarek: Internal key identifier (not user-configurable).",
+    "thr" to "HUD: Draw-batch threshold — triggers flush when reached.",
+    // --- vegas.* extended ---
+    "vegas.enableHud" to "Enables the VEGAS governor HUD overlay.",
 )
 
 @Composable
@@ -4440,7 +4507,7 @@ private fun VGlossarySheet(
                 val grouped = keys.groupBy { key ->
                     if (vegasCatalog != null) vegasCatalog.classify(key, installedTag) else VegasKeyCatalog.Bucket.NOWHERE
                 }
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(modifier = Modifier.weight(1f)) {
                     bucketOrder.filter { grouped.containsKey(it) }.forEach { bucket ->
                         item {
                             Text(
