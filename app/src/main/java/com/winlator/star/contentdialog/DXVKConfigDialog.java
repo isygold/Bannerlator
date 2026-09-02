@@ -313,14 +313,12 @@ public class DXVKConfigDialog {
         }
 
         // DXVK_CONFIG_FILE (config source path, e.g. /storage/emulated/0/dxvk.conf)
-        // DXVK is a Windows PE running inside Wine — it resolves this path through the
-        // DOS path namespace. A raw Android path (/storage/emulated/0/X) is invalid there;
-        // external storage is only reachable as F: or D: drives. Translate before setting.
+        // The VEGAS DXVK binary resolves raw Android paths natively — no drive-letter
+        // translation needed. Verified on-device: Found config file: /storage/emulated/0/...
         if (hasConfigFile) {
-            String winePath = toWinePath(configFile);
-            envVars.put("DXVK_CONFIG_FILE", winePath);
+            envVars.put("DXVK_CONFIG_FILE", configFile);
             if (com.winlator.star.BuildConfig.DEBUG) {
-                Log.d(TAG, "Custom DXVK_CONFIG_FILE: " + configFile + " -> " + winePath);
+                Log.d(TAG, "Custom DXVK_CONFIG_FILE=" + configFile);
             }
         }
 
@@ -370,30 +368,5 @@ public class DXVKConfigDialog {
             if (!envVars.has("DXVK_LOG_LEVEL")) envVars.put("DXVK_LOG_LEVEL", "none");
             if (!envVars.has("VKD3D_DEBUG")) envVars.put("VKD3D_DEBUG", "none");
         }
-    }
-
-    /**
-     * Translates an absolute Android path to a Wine DOS path using the standard drive mapping:
-     *   F: → /storage/emulated/0  (external storage root)
-     *   D: → /storage/emulated/0/Download
-     * If the path doesn't match either prefix, it is returned unchanged (already a Wine path,
-     * or an unexpected location). Forward slashes become backslashes per DOS convention.
-     *
-     * e.g. /storage/emulated/0/dxvk.conf → F:\dxvk.conf
-     */
-    static String toWinePath(String androidPath) {
-        if (androidPath == null) return null;
-        String downloads = android.os.Environment.getExternalStoragePublicDirectory(
-                android.os.Environment.DIRECTORY_DOWNLOADS).getAbsolutePath();
-        String extStorage = android.os.Environment.getExternalStorageDirectory().getAbsolutePath();
-
-        if (androidPath.startsWith(downloads + "/")) {
-            return "D:\\" + androidPath.substring(downloads.length() + 1).replace("/", "\\");
-        }
-        if (androidPath.startsWith(extStorage + "/")) {
-            return "F:\\" + androidPath.substring(extStorage.length() + 1).replace("/", "\\");
-        }
-        // Already a Wine path or unexpected — pass through
-        return androidPath;
     }
 }
