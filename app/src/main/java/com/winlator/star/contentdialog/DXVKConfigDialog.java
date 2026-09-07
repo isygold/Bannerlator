@@ -286,8 +286,6 @@ public class DXVKConfigDialog {
             envVars.put("DXVK_FRAME_RATE", framerate);
         }
 
-        // When a custom DXVK_CONFIG_FILE is selected, skip DXVK_CONFIG entirely
-        // so the user's config file has full control (DXVK_CONFIG would override it).
         if (!hasConfigFile) {
             // Stock: build inline defaults
             StringBuilder contentBuilder = new StringBuilder();
@@ -310,15 +308,94 @@ public class DXVKConfigDialog {
                     Log.d(TAG, "Stock DXVK_CONFIG=[" + content + "]");
                 }
             }
-        }
-
-        // DXVK_CONFIG_FILE (config source path, e.g. /storage/emulated/0/dxvk.conf)
-        // The VEGAS DXVK binary resolves raw Android paths natively — no drive-letter
-        // translation needed. Verified on-device: Found config file: /storage/emulated/0/...
-        if (hasConfigFile) {
-            envVars.put("DXVK_CONFIG_FILE", configFile);
-            if (com.winlator.star.BuildConfig.DEBUG) {
-                Log.d(TAG, "Custom DXVK_CONFIG_FILE=" + configFile);
+        } else {
+            // Custom config file: read content in Java and pass via DXVK_CONFIG (inline).
+            // Wine's NT syscall layer mangles POSIX paths through its internal VFS when
+            // opening files on /storage/emulated/0/ — the same UID can fopen("/sdcard/...")
+            // successfully but ifstream("/storage/emulated/0/...") fails silently on some
+            // devices. We bridge the gap by reading the file here (Java uses the native
+            // Storage Access Framework) and injecting it as a semicolon-delimited inline
+            // string. The DXVK/Vegas binary's config parser splits DXVK_CONFIG by ";"
+            // and parses each segment as a line.
+            try {
+                java.io.File file = new java.io.File(configFile);
+                if (file.isFile() && file.length() <= 8192) {
+                    StringBuilder inlineBuilder = new StringBuilder();
+                    try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                            new java.io.FileReader(file))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            String trimmed = line.trim();
+                            // Skip blanks and # comments — the parser would ignore
+                            // them anyway, but stripping keeps the env var compact.
+                            if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                                continue;
+                            }
+                            if (inlineBuilder.length() > 0) inlineBuilder.append("; ");
+                            inlineBuilder.append(trimmed);
+                        }
+                    }
+                    String content = inlineBuilder.toString();
+                    if (!content.isEmpty()) {
+                        envVars.put("DXVK_CONFIG", content);
+                    }
+                    // Also set DXVK_CONFIG_FILE as a fallback in case the binary
+                    // CAN access the path (e.g. future Wine builds with FUSE mount).
+                    envVars.put("DXVK_CONFIG_FILE", configFile);
+                    if (com.winlator.star.BuildConfig.DEBUG) {
+                        String preview = content.length() > 200
+                                ? content.substring(0, 200) + "…" : content;
+                        Log.d(TAG, "Custom DXVK_CONFIG (inline from " + configFile + ")=" + preview);
+                    }
+                } else if (file.isFile()) {
+                    // File too large for env var — fall back to file path only
+                    envVars.put("DXVK_CONFIG_FILE", configFile);
+                    if (com.winlator.star.BuildConfig.DEBUG) {
+                        Log.w(TAG, "Config file too large for inline (" + file.length()
+                                + " bytes), using DXVK_CONFIG_FILE path only");
+                    }
+                } else {
+                    // Config file not found at the chosen path — fall back to stock inline
+                    // defaults so VEGAS/DXVK still gets its base config (enableStarProfile,
+                    // enableUpscaler, framerate, etc.) instead of running with zero config.
+                    Log.w(TAG, "Custom config file not found: " + configFile + " — falling back to stock inline");
+                    StringBuilder fallbackBuilder = new StringBuilder();
+                    if (!framerate.isEmpty() && !framerate.equals("0")) {
+                        fallbackBuilder.append("dxgi.maxFrameRate = ").append(framerate).append("; ");
+                        fallbackBuilder.append("d3d9.maxFrameRate = ").append(framerate);
+                    }
+                    {
+                        if (fallbackBuilder.length() > 0) fallbackBuilder.append("; ");
+                        fallbackBuilder.append("dxvk.enableStarProfile = Auto; ");
+                        fallbackBuilder.append("vegas.enableUpscaler = Auto");
+                    }
+                    String fallbackContent = fallbackBuilder.toString();
+                    if (!fallbackContent.isEmpty()) {
+                        envVars.put("DXVK_CONFIG", fallbackContent);
+                        if (com.winlator.star.BuildConfig.DEBUG) {
+                            Log.d(TAG, "Fallback DXVK_CONFIG=[" + fallbackContent + "]");
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to read custom config file: " + configFile, e);
+                // Fallback: try the path in case the binary can read it, AND set inline
+                // so the binary has at least its base config if the file read fails.
+                envVars.put("DXVK_CONFIG_FILE", configFile);
+                StringBuilder exBuilder = new StringBuilder();
+                if (!framerate.isEmpty() && !framerate.equals("0")) {
+                    exBuilder.append("dxgi.maxFrameRate = ").append(framerate).append("; ");
+                    exBuilder.append("d3d9.maxFrameRate = ").append(framerate);
+                }
+                {
+                    if (exBuilder.length() > 0) exBuilder.append("; ");
+                    exBuilder.append("dxvk.enableStarProfile = Auto; ");
+                    exBuilder.append("vegas.enableUpscaler = Auto");
+                }
+                String exContent = exBuilder.toString();
+                if (!exContent.isEmpty()) {
+                    envVars.put("DXVK_CONFIG", exContent);
+                }
             }
         }
 
@@ -347,8 +424,13 @@ public class DXVKConfigDialog {
                     ? logDirOverride
                     : com.winlator.star.core.LogLocation.resolveLogDir(context);
             if (logDir != null) {
-                envVars.put("DXVK_LOG_PATH", logDir.getAbsolutePath());
-                envVars.put("VKD3D_LOG_FILE", new java.io.File(logDir, "vkd3d-proton.log").getAbsolutePath());
+                // The DXVK/VEGAS binary runs inside Wine — raw Android paths (/sdcard/...) are
+                // readable via Z: but the FUSE VFS layer silently rejects writes. Translate to
+                // Wine DOS paths so ofstream succeeds.  (ifstream for DXVK_CONFIG_FILE works
+                // natively, but ofstream for log files does not — different VFS code path.)
+                envVars.put("DXVK_LOG_PATH", toWinePath(logDir.getAbsolutePath()));
+                envVars.put("VKD3D_LOG_FILE", toWinePath(
+                        new java.io.File(logDir, "vkd3d-proton.log").getAbsolutePath()));
             }
         } else if (logDirOverride != null) {
             // Logging OFF but a private HUD dir was supplied: instead of silencing the wrappers, write a
@@ -358,9 +440,10 @@ public class DXVKConfigDialog {
             // device init; DXVK_LOG_LEVEL=info emits DXVK's per-API <app>_d3dNN.log files with their
             // header. These are startup-level logs (no per-frame spam) written to a per-launch private dir.
             // Respect a user-set DXVK_LOG_LEVEL (e.g. debug for vegas csv at root) — only set if not already present.
-            envVars.put("DXVK_LOG_PATH", logDirOverride.getAbsolutePath());
+            envVars.put("DXVK_LOG_PATH", toWinePath(logDirOverride.getAbsolutePath()));
             if (!envVars.has("DXVK_LOG_LEVEL")) envVars.put("DXVK_LOG_LEVEL", "info");
-            envVars.put("VKD3D_LOG_FILE", new java.io.File(logDirOverride, "vkd3d-proton.log").getAbsolutePath());
+            envVars.put("VKD3D_LOG_FILE", toWinePath(
+                    new java.io.File(logDirOverride, "vkd3d-proton.log").getAbsolutePath()));
             if (!envVars.has("VKD3D_DEBUG")) envVars.put("VKD3D_DEBUG", "info");
         } else {
             // Logging OFF and no dir supplied (config previews) — keep the wrappers fully silent
@@ -368,5 +451,34 @@ public class DXVKConfigDialog {
             if (!envVars.has("DXVK_LOG_LEVEL")) envVars.put("DXVK_LOG_LEVEL", "none");
             if (!envVars.has("VKD3D_DEBUG")) envVars.put("VKD3D_DEBUG", "none");
         }
+    }
+
+    /**
+     * Translates an absolute Android path to a Wine DOS path using the standard drive mapping:
+     *   F: → /storage/emulated/0  (external storage root)
+     *   D: → /storage/emulated/0/Download
+     * If the path doesn't match either prefix, it is returned unchanged (already a Wine path,
+     * or an unexpected location). Forward slashes become backslashes per DOS convention.
+     *
+     * Needed because std::ofstream (write) fails silently on raw Android paths through Wine's
+     * FUSE VFS layer, while std::ifstream (read) works natively. The DXVK/VEGAS binary uses
+     * ofstream for DXVK_LOG_PATH / VKD3D_LOG_FILE.
+     *
+     * e.g. /sdcard/Documents/bannerlator/Container-1 → F:\Documents\bannerlator\Container-1
+     */
+    static String toWinePath(String androidPath) {
+        if (androidPath == null) return null;
+        String downloads = android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOWNLOADS).getAbsolutePath();
+        String extStorage = android.os.Environment.getExternalStorageDirectory().getAbsolutePath();
+
+        if (androidPath.startsWith(downloads + "/")) {
+            return "D:\\" + androidPath.substring(downloads.length() + 1).replace("/", "\\");
+        }
+        if (androidPath.startsWith(extStorage + "/")) {
+            return "F:\\" + androidPath.substring(extStorage.length() + 1).replace("/", "\\");
+        }
+        // Already a Wine path or unexpected — pass through
+        return androidPath;
     }
 }
