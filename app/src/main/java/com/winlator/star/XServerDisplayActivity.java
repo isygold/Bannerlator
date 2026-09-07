@@ -8009,7 +8009,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
     // Original logic for DXWrapper and environment variables
     if (dxwrapper.contains("dxvk")) {
-        DXVKConfigDialog.setEnvVars(this, dxwrapperConfig, envVars, dxvkLogDir());
+        DXVKConfigDialog.setEnvVars(this, dxwrapperConfig, envVars);
         String version = dxwrapperConfig.get("version");
         if (version != null && version.equals("1.11.1-sarek")) {
             Log.d("GraphicsDriverExtraction", "Disabling Wrapper PATCH_OPCONSTCOMP SPIR-V pass");
@@ -8017,7 +8017,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
     }
     else if (dxwrapper.contains("vegas")) {
-        DXVKConfigDialog.setEnvVars(this, dxwrapperConfig, envVars, dxvkLogDir());
+        DXVKConfigDialog.setEnvVars(this, dxwrapperConfig, envVars);
     }
     else {
         WineD3DConfigDialog.setEnvVars(this, dxwrapperConfig, envVars);
