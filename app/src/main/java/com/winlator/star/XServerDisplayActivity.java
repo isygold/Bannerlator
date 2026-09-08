@@ -298,6 +298,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // getWineStartCommand() to rewrite the launch target to run our agent (steam.exe) with the per-game
     // spec. Null ⇒ every non-RealSteam (or failed-prep) launch is byte-for-byte unchanged.
     private RealSteamLauncher.Plan realSteamPlan;
+    /** EA launcher-chain title (EA Desktop) — set by maybeStageRealSteam(); drives the FEX preset clamp + overlay hints. */
+    private boolean realSteamEaChain = false;
     // True while THIS activity has the app's own Steam CM session suspended for the in-container
     // real-Steam session (set right after realSteamPlan is armed, cleared by releaseRealSteamSession).
     // Separate from realSteamPlan so the release is idempotent across exit() and onDestroy().
@@ -735,6 +737,48 @@ public class XServerDisplayActivity extends AppCompatActivity {
             "wineboot.exe", "conhost.exe", "start.exe", "cmd.exe", "rundll32.exe", "tabtip.exe",
             "winedbg.exe", "wineconsole.exe", "regsvr32.exe", "msiexec.exe", "wscript.exe", "cscript.exe"));
 
+    // Processes that render through the DX wrappers WITHOUT being the game: store clients, their overlay
+    // proxies and launcher-chain helpers. EA Desktop's CEF/Qt front end and its in-game overlay proxy
+    // (IGOProxy32/64) create real D3D12 swapchains on VKD3D, so their vkd3d-proton.log ranked above the
+    // game's DXVK D3D11 log and every EA title read "D3D12 · VKD3D" (device-seen: Need for Speed Payback
+    // and Most Wanted, both D3D11 on DXVK). Wrapper logs written by these exes never label the game.
+    private static final java.util.Set<String> HELPER_RENDERER_EXES = new java.util.HashSet<>(java.util.Arrays.asList(
+            "steam.exe", "steamwebhelper.exe", "gameoverlayui.exe",
+            "eadesktop.exe", "eacefsubprocess.exe", "ealauncher.exe", "ealaunchhelper.exe", "easteamproxy.exe",
+            "easteamlauncher.exe", "eaepiclauncher.exe", "link2ea.exe", "igoproxy32.exe", "igoproxy64.exe",
+            "activationui.exe", "eabackgroundservice.exe", "ealocalhostsvc.exe", "eaanticheat.gameservicelauncher.exe",
+            "origin.exe", "originwebhelperservice.exe", "originclientservice.exe",
+            "upc.exe", "uplay.exe", "ubisoftconnect.exe", "ubisoftgamelauncher.exe", "uplaywebcore.exe",
+            "epicgameslauncher.exe", "epicwebhelper.exe", "eossdk-win64-shipping.exe",
+            "galaxyclient.exe", "galaxyclient helper.exe", "gog galaxy notifications renderer.exe"));
+
+    /** Program name recorded in a vkd3d-proton.log header ({@code Program name: "<exe>"}), lowercased, or null. */
+    private static String vkd3dLogProgramName(File log) {
+        try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(log))) {
+            String line;
+            int n = 0;
+            while ((line = r.readLine()) != null && n++ < 60) {
+                int i = line.indexOf("Program name: \"");
+                if (i < 0) continue;
+                int start = i + "Program name: \"".length();
+                int end = line.indexOf('"', start);
+                if (end > start) return line.substring(start, end).toLowerCase();
+            }
+        } catch (Exception ignore) {}
+        return null;
+    }
+
+    /** Stem of a DXVK per-API log name ({@code <stem>_d3d11.log} -> {@code <stem>}), lowercased. */
+    private static String dxvkLogStem(File log) {
+        String n = log.getName().toLowerCase();
+        int i = n.lastIndexOf("_d3d");
+        return i > 0 ? n.substring(0, i) : n;
+    }
+
+    private static boolean isHelperRendererExe(String exeLower) {
+        return exeLower != null && HELPER_RENDERER_EXES.contains(exeLower.endsWith(".exe") ? exeLower : exeLower + ".exe");
+    }
+
     /**
      * Disambiguate a dual-API build (BOTH d3d11 and d3d12 mapped) by asking the game engine which
      * graphics device it ACTUALLY created — ground truth that module presence cannot provide.
@@ -897,15 +941,26 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // per-game folder + freshness. DXVK per-API files are matched by suffix (any renderer stem).
             File[] files = dir.listFiles();
             if (files == null) return null;
+            // Two tiers per API: logs written by a process that could be the game, and logs written by a
+            // known helper (store client / overlay proxy / launcher chain — HELPER_RENDERER_EXES). A helper
+            // log is used only when no game-tier log of that API exists, so EA Desktop's CEF D3D11 log or
+            // its overlay's vkd3d log can't outrank the game's own wrapper log.
             File vkd3d = null, dxvk11 = null, dxvk10 = null, dxvk9 = null;
+            File hDxvk11 = null, hDxvk10 = null, hDxvk9 = null;
+            String wantedStem = shortcutExeBasename();          // "<exe>" without .exe, lowercase, or null
+            if (wantedStem != null && wantedStem.endsWith(".exe")) wantedStem = wantedStem.substring(0, wantedStem.length() - 4);
             for (File f : files) {
                 if (!f.isFile()) continue;
                 String n = f.getName().toLowerCase();
-                if (n.equals("vkd3d-proton.log")) vkd3d = f;
-                else if (n.endsWith("_d3d11.log")) dxvk11 = newerLog(dxvk11, f);
-                else if (n.endsWith("_d3d10.log")) dxvk10 = newerLog(dxvk10, f);
-                else if (n.endsWith("_d3d9.log"))  dxvk9  = newerLog(dxvk9, f);
+                if (n.equals("vkd3d-proton.log")) { vkd3d = f; continue; }
+                boolean helper = isHelperRendererExe(dxvkLogStem(f));
+                if (n.endsWith("_d3d11.log"))      { if (helper) hDxvk11 = newerLog(hDxvk11, f); else dxvk11 = newerLog(dxvk11, f); }
+                else if (n.endsWith("_d3d10.log")) { if (helper) hDxvk10 = newerLog(hDxvk10, f); else dxvk10 = newerLog(dxvk10, f); }
+                else if (n.endsWith("_d3d9.log"))  { if (helper) hDxvk9  = newerLog(hDxvk9, f);  else dxvk9  = newerLog(dxvk9, f); }
             }
+            if (dxvk11 == null) dxvk11 = hDxvk11;
+            if (dxvk10 == null) dxvk10 = hDxvk10;
+            if (dxvk9 == null)  dxvk9  = hDxvk9;
 
             final String SEP = " · ";
             // 1) D3D12 on VKD3D — highest rank, but ONLY when vkd3d actually RENDERED (a swapchain /
@@ -913,8 +968,21 @@ public class XServerDisplayActivity extends AppCompatActivity {
             //    Ex: Mankind Divided) run on D3D11 yet still create a throwaway D3D12 device to query
             //    support — that probe log has instance/device/pipeline-cache lines but no swapchain, so it
             //    must NOT win over the game's real D3D11 (its large DXVK _d3d11.log, matched below).
+            //    Identity gates on top: the log names its program — a helper process (EA Desktop, its
+            //    IGOProxy overlay, Steam's overlay …) never labels the game; and when the shortcut's own
+            //    exe has a fresh DXVK log, a vkd3d log naming a DIFFERENT program loses to it.
             if (isFreshWrapperLog(vkd3d) && vkd3dLogShowsRendering(vkd3d)) {
-                return cacheWrapperResult(vkd3d, "D3D12" + SEP + "VKD3D");
+                String prog = vkd3dLogProgramName(vkd3d);
+                boolean helperVkd3d = isHelperRendererExe(prog);
+                boolean shortcutHasDxvk = wantedStem != null && (
+                        (isFreshWrapperLog(dxvk11) && wantedStem.equals(dxvkLogStem(dxvk11))) ||
+                        (isFreshWrapperLog(dxvk10) && wantedStem.equals(dxvkLogStem(dxvk10))) ||
+                        (isFreshWrapperLog(dxvk9)  && wantedStem.equals(dxvkLogStem(dxvk9))));
+                boolean vkd3dIsShortcut = prog != null && wantedStem != null
+                        && prog.equals(wantedStem + ".exe");
+                if (!helperVkd3d && (vkd3dIsShortcut || !shortcutHasDxvk)) {
+                    return cacheWrapperResult(vkd3d, "D3D12" + SEP + "VKD3D");
+                }
             }
             // 2) DXVK per-API files (D3D11/10/9) — the file exists only when DXVK created that device.
             if (isFreshWrapperLog(dxvk11)) return cacheWrapperResult(dxvk11, "D3D11" + SEP + wrapper);
@@ -1367,6 +1435,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // A cold start straight into the game (home-screen pinned shortcut, ACTION_VIEW, adb) never ran
+        // MainActivity, so the theme/prefs singleton was uninitialised → default theme in the in-game UI.
+        try { com.winlator.star.ui.theme.AppThemeState.INSTANCE.init(this); } catch (Throwable ignored) {}
         // Stamp the launch time up front: the HUD wrapper-log resolver (P3) only trusts a DXVK/VKD3D
         // log written THIS session, so a previous game's stale log in a shared dir can never leak in.
         sessionStartMs = System.currentTimeMillis();
@@ -1590,6 +1661,26 @@ public class XServerDisplayActivity extends AppCompatActivity {
             float flow     = s.getFrameGenFlowScale().getValue();
             // Route the single in-game multiplier/flow control to whichever engine is running this
             // session (honors a per-game engine override, else the container's engine).
+            if (resolvedFrameGenEngine().equals("lsfg-native")) {
+                // Instrumented deliberately. The r3 run showed the drawer UI accepting a
+                // multiplier change while the engine kept planning at the old one, and the
+                // log could not say whether this handler ran, what it saw, or whether it
+                // reached the renderer - so it now says all three.
+                Log.i("XServerDisplayActivity", "lsfg-native toggle: fgOn=" + fgOn
+                    + " mult=" + mult + " flow=" + flow
+                    + " renderer=" + (vulkanRendererOrNull() != null ? "vulkan" : "NULL"));
+                // LSFG Native: the generator is OUR compositor, so a level change is just a call.
+                // None of the lsfg-vk workarounds apply and every one of them is deliberately
+                // skipped here - no conf.toml rewrite, no vsync clock, no MAILBOX override and no
+                // pause/teardown/Resume reset. There is no guest layer to re-sync with.
+                applyLsfgNative(mult, flow);
+                if (fgOn) container.setFrameGenMultiplier(mult);
+                container.setFrameGenFlowScale(flow);
+                container.saveData();
+                // The limiter guard still has to see the >=2 threshold crossing.
+                reapplyFpsLimit();
+                return;
+            }
             if (resolvedFrameGenEngine().equals("lsfg")) {
                 // lsfg-vk: rewrite its conf.toml — the fork layer watches the file mtime and reloads
                 // live (swapchain recreate). Passthrough = multiplier 1 (layer treats <=1 as off).
@@ -1643,6 +1734,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // perf_preset self-rebuild collides with the teardown's surface rebuild → Fold-8 freeze).
             // Flow Scale stays live (no reset). Replaces win-fg's old soft pulseFgReset.
             maybeTriggerWinFgReset(mult >= 2 ? mult : 0, fgModel, fgPreset);
+            // win-fg gets the same base->shown readout. Its case is the mirror
+            // image of LSFG Native's: its generated frames are produced INSIDE
+            // the guest and arrive as ordinary deliveries, so our per-guest-frame
+            // counter already counts them - what it cannot see is whether they
+            // survive the trip to the panel. Comparing that count against the
+            // measured present rate makes a coalesced, never-displayed frame
+            // visible as a DROP instead of it silently inflating the number.
+            if (mult >= 2) startLsfgStatsReadout(); else stopLsfgStatsReadout();
         };
         // Live Present Mode selector (Graphics tab). The user's pick is persisted (per-game shortcut
         // override if present, else the container) then applied live through the same choke point as the
@@ -1765,6 +1864,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
             isRelativeMouseMovement = !isRelativeMouseMovement;
             state.setIsRelativeMouseMovement(isRelativeMouseMovement);
             xServer.setRelativeMouseMovement(isRelativeMouseMovement);
+            // Persist per game (issue #431): titles like ETS2 need Relative Mouse every launch, and this
+            // toggle used to live only in memory so it reset to off each session while the neighbouring
+            // Cursor to Touch survived. Same owner rule as Present Mode / the FPS limiter: write to the
+            // shortcut when launched from one (that is what the launch seed reads back), else the container.
+            if (shortcut != null) {
+                shortcut.putExtra("relativeMouse", isRelativeMouseMovement ? "1" : "0");
+                shortcut.saveData();
+            } else {
+                container.putExtra("relativeMouse", isRelativeMouseMovement ? "1" : "0");
+                container.saveData();
+            }
         };
         state.onDisableMouse           = () -> {
             isMouseDisabled = !isMouseDisabled;
@@ -1970,7 +2080,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // container. The FPS limiter is independent (host pacer) and is always available regardless.
         String fgEngine = resolvedFrameGenEngine();
         boolean fgEnabled = fgEngine.equals("bionic");
-        boolean lsfgOn = fgEngine.equals("lsfg");
+        // Both LSFG engines drive the same in-game multiplier row; only WHERE the
+        // generator runs differs (in-container layer vs our own compositor).
+        boolean lsfgOn = fgEngine.equals("lsfg") || fgEngine.equals("lsfg-native");
         boolean fpsLimOn = resolvedFpsLimiterEnabled();
         boolean bionicFgActive = fgEnabled || lsfgOn;
         XServerDrawerState.INSTANCE.setBionicFgActive(bionicFgActive);
@@ -1981,7 +2093,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // multiplier so frame gen is live + the drawer/badge show ON from launch. The setupUI FPS-limiter
         // apply (applyFpsLimit) runs after this seed and re-evaluates lsfgGovernsFps(), so the cap steps
         // aside automatically for mult>=2. The persisted container multiplier is left untouched.
-        int lsfgSeedMult = (lsfgOn && container.isLsfgAutoEnable() && container.getFrameGenMultiplier() >= 2)
+        // LSFG Native never auto-arms at launch (see prepareLsfgNative); lsfg-vk keeps its opt-in.
+        int lsfgSeedMult = (fgEngine.equals("lsfg") && container.isLsfgAutoEnable() && container.getFrameGenMultiplier() >= 2)
                 ? container.getFrameGenMultiplier() : 0;
         XServerDrawerState.INSTANCE.setFrameGenMultiplier(lsfgSeedMult);
         XServerDrawerState.INSTANCE.setFrameGenFlowScale(container.getFrameGenFlowScale());
@@ -2276,6 +2389,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
         xServer.setWinHandler(winHandler);
         advertisePanelRefreshRates();
 
+        // Restore the saved Relative Mouse state for this game (issue #431). Read from the same owner
+        // the drawer toggle writes to: shortcut extra first (per-game), container extra as the fallback.
+        // The drawer state was seeded with the in-memory default before the shortcut existed, so echo
+        // the restored value back to it here; pointer capture itself is (re)requested on window focus.
+        {
+            String savedRelMouse = container.getExtra("relativeMouse", "0");
+            if (shortcut != null) savedRelMouse = shortcut.getExtra("relativeMouse", savedRelMouse);
+            if ("1".equals(savedRelMouse)) {
+                isRelativeMouseMovement = true;
+                xServer.setRelativeMouseMovement(true);
+                XServerDrawerState.INSTANCE.setIsRelativeMouseMovement(true);
+            }
+        }
+
         // Add the OnWindowModificationListener for dynamic workarounds
         xServer.windowManager.addOnWindowModificationListener(new WindowManager.OnWindowModificationListener() {
             @Override
@@ -2288,10 +2415,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     // renders behind it) so the boot steps are actually seen, then close and pop the
                     // controller-status toast (game now visible, preloader gone; runs on the main thread
                     // so getPlayerSlotAssignments is safe).
-                    new android.os.Handler(getMainLooper()).postDelayed(() -> {
-                        preloaderDialog.closeOnUiThread();
-                        showControllerStatusToast("launch", null);
-                    }, LAUNCH_OVERLAY_GRACE_MS);
+                    if (componentInstallerExe != null && !componentInstallerExe.isEmpty()) {
+                        // Installer / setup session: a window appeared, so the installer has a UI the
+                        // user may need to click (device test #3: EA's installer waited for "Install"
+                        // behind an opaque overlay). Close the overlay like a normal launch and keep the
+                        // user informed with a reminder toast instead. A SILENT installer never maps a
+                        // window, so it never reaches here and the overlay's status line stays up.
+                        installerReminderToast();
+                        new android.os.Handler(getMainLooper()).postDelayed(preloaderDialog::closeOnUiThread, 1500);
+                    } else {
+                        new android.os.Handler(getMainLooper()).postDelayed(() -> {
+                            preloaderDialog.closeOnUiThread();
+                            showControllerStatusToast("launch", null);
+                        }, LAUNCH_OVERLAY_GRACE_MS);
+                    }
                 }
                     
                 // SHM/copyArea present path — count the frame (self-heals onto the real presenting
@@ -2388,6 +2525,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     sweepStaleWineProcesses();
                     preloaderDialog.step(2, "Preparing Wine & graphics driver…");
                     setupWineSystemFiles();
+                    // Steam install-recipe robustness pass: a steamAppId-tagged game's installScript.vdf
+                    // Registry + Copy Files land in this prefix before the game boots (covers shortcuts made
+                    // before the feature or re-bound to a new container). Local stages only — the Run
+                    // Process step (EA Desktop installer) is driven from the Games tab's EA setup flow.
+                    runSteamInstallScriptPreLaunch();
                     extractGraphicsDriverFiles();
                     changeWineAudioDriver();
                     applyGameRefreshRateUnlock();
@@ -2841,6 +2983,212 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // UI thread. Choreographer frame timestamps are CLOCK_MONOTONIC — the clock the layer paces with.
     private android.os.Handler vsyncClockHandler;
     private java.util.concurrent.ExecutorService vsyncWriteExecutor;
+
+    // ===================== LSFG Native (compositor-side) =====================
+    // Runs the Lossless Scaling chain inside our own Vulkan compositor. Unlike
+    // lsfg-vk nothing is injected into the container, so there is no conf.toml,
+    // no ENABLE_LSFG, no vsync clock and no presentation reset on a multiplier
+    // change - the generator shares the compositor's command stream.
+
+    /** Renderer for this session, or null when it is not the Vulkan one. */
+    private com.winlator.star.renderer.vulkan.VulkanRenderer vulkanRendererOrNull() {
+        HostRenderer r = (xServerView != null) ? xServerView.getRenderer() : null;
+        return (r instanceof com.winlator.star.renderer.vulkan.VulkanRenderer)
+            ? (com.winlator.star.renderer.vulkan.VulkanRenderer) r : null;
+    }
+
+    /**
+     * Build the SPIR-V cache from the user's Lossless.dll if needed, then arm
+     * the renderer. Cache building is slow on a first run - the DXBC chain is
+     * translated on device - so it happens off the main thread and arms only
+     * once it has actually succeeded.
+     */
+    private void prepareLsfgNative() {
+        if (!com.winlator.star.core.LsfgNative.isDllAvailable(this)) {
+            Log.w("XServerDisplayActivity",
+                "LSFG Native selected but no Lossless.dll imported (Settings) - leaving frame gen off");
+            return;
+        }
+        // Every launch starts with frame generation OFF; the user arms it from the
+        // in-game drawer. isLsfgAutoEnable is an lsfg-vk-era setting and is not
+        // honoured for the native engine - an auto-armed launch is exactly the
+        // state that surprised the tester and cannot be reasoned about from a log.
+        final int launchMult = 0;
+        final float flow = container.getFrameGenFlowScale();
+
+        new Thread(() -> {
+            final int status = com.winlator.star.core.LsfgNative.ensureCache(
+                XServerDisplayActivity.this, /*preferFp16=*/false);
+            runOnUiThread(() -> {
+                if (status != com.winlator.star.core.LsfgNative.STATUS_OK) {
+                    Log.e("XServerDisplayActivity", "LSFG Native unavailable: "
+                        + com.winlator.star.core.LsfgNative.explain(status));
+                    return;
+                }
+                applyLsfgNative(launchMult, flow);
+            });
+        }, "lsfg-native-cache").start();
+    }
+
+    /** Point the renderer at the cache and arm it at `multiplier` (0 = off). */
+    private void applyLsfgNative(int multiplier, float flowScale) {
+        com.winlator.star.renderer.vulkan.VulkanRenderer vkr = vulkanRendererOrNull();
+        if (vkr == null) {
+            Log.w("XServerDisplayActivity",
+                "applyLsfgNative(" + multiplier + ") ignored - no Vulkan renderer");
+            return;
+        }
+        Log.i("XServerDisplayActivity", "applyLsfgNative: multiplier=" + multiplier
+            + " flow=" + flowScale + " refresh=" + currentDisplayRefreshHz());
+        vkr.setLsfgCachePath(
+            com.winlator.star.core.LsfgNative.cacheFile(this).getAbsolutePath());
+        vkr.setFrameGenTuning(flowScale, currentDisplayRefreshHz());
+        vkr.setFrameGenArmed(multiplier >= 2, multiplier);
+        // Present mode has to follow the armed state: fifo while multiplying,
+        // back to the user's choice when off.
+        applyEffectivePresentMode();
+        applyNativeFgLocks(multiplier >= 2);
+        if (multiplier >= 2) startLsfgStatsReadout(); else stopLsfgStatsReadout();
+    }
+
+    // Live readout for the FG drawer, polled while the native engine is armed.
+    private android.os.Handler lsfgStatsHandler;
+    private Runnable lsfgStatsTick;
+
+    /**
+     * Poll the renderer for what frame generation is actually achieving and
+     * push it to the drawer. Worth showing because the multiplier is a ceiling
+     * to earn, not a setting that is obeyed - the governor grants an extra
+     * generated frame only when it measurably helps, so "4x selected" and
+     * "2x running" is a normal, correct state rather than a bug.
+     */
+    private void startLsfgStatsReadout() {
+        if (lsfgStatsHandler != null) return;
+        lsfgStatsHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        lsfgStatsTick = new Runnable() {
+            @Override public void run() {
+                com.winlator.star.renderer.vulkan.VulkanRenderer vkr = vulkanRendererOrNull();
+                float[] st = (vkr != null) ? vkr.getFrameGenStats() : null;
+                if (st != null && st.length >= 5) {
+                    // st[1] is what is actually planned for this frame. st[0] is
+                    // the governor's accepted level, which is meaningless while
+                    // the governor is off.
+                    final int trusted = (int) st[1];
+                    // st[2] is the LSFG engine's own source rate and is 0 for
+                    // win-fg, which has no engine here. The HUDs do not need it
+                    // - they compare against their own counter - so only the
+                    // drawer line is suppressed in that case.
+                    final float realFps = st[2], shownFps = st[3];
+                    final boolean haveEngineRates = realFps > 0f;
+                    String text;
+                    if (shownFps <= 0f) {
+                        text = "measuring…";
+                    } else {
+                        text = String.format(java.util.Locale.US,
+                            "%.0f real → %.0f shown  (%dx", realFps, shownFps, trusted + 1);
+                        if (st[4] >= 3f) text += ", throttling";
+                        text += ")";
+                        // What each generated frame costs on the GPU. This is
+                        // the number that says whether a game has room for
+                        // frame generation before generation silently stops.
+                        if (st.length >= 6 && st[5] > 0f)
+                            text += String.format(java.util.Locale.US, "  %.1f ms/frame GPU", st[5]);
+                    }
+                    if (haveEngineRates) XServerDrawerState.INSTANCE.setFrameGenReadout(text);
+                    // Also feed the in-game HUD. Its own counter ticks once per
+                    // GUEST frame and therefore cannot see anything added after
+                    // the game - it read 30 while the panel was showing 118,
+                    // which made a working feature look like a broken one. Only
+                    // a system overlay could tell the truth until now.
+                    if (frameRating != null) frameRating.setPresentedFps(shownFps);
+                    if (frameRatingHorizontal != null)
+                        frameRatingHorizontal.setPresentedFps(shownFps);
+                    if (fusionHud != null) fusionHud.setPresentedFps(shownFps);
+                    if (perfHud != null) perfHud.setPresentedFps(shownFps);
+                    if (gameNativeHud != null) gameNativeHud.setPresentedFps(shownFps);
+                }
+                if (lsfgStatsHandler != null) lsfgStatsHandler.postDelayed(this, 1000);
+            }
+        };
+        lsfgStatsHandler.postDelayed(lsfgStatsTick, 1000);
+    }
+
+    private void stopLsfgStatsReadout() {
+        // 0 puts both HUDs back to plain guest-rate reporting.
+        if (frameRating != null) frameRating.setPresentedFps(0f);
+        if (frameRatingHorizontal != null) frameRatingHorizontal.setPresentedFps(0f);
+        if (fusionHud != null) fusionHud.setPresentedFps(0f);
+        if (perfHud != null) perfHud.setPresentedFps(0f);
+        if (gameNativeHud != null) gameNativeHud.setPresentedFps(0f);
+        if (lsfgStatsHandler != null && lsfgStatsTick != null)
+            lsfgStatsHandler.removeCallbacks(lsfgStatsTick);
+        lsfgStatsHandler = null;
+        lsfgStatsTick = null;
+        XServerDrawerState.INSTANCE.setFrameGenReadout("");
+    }
+
+    // The user's limiter/VRR choices from before native FG took them over, so
+    // they come back exactly as they were when it is turned off.
+    private boolean nativeFgSavedLimiterOn = false;
+    private int     nativeFgSavedLimit     = 0;
+    private boolean nativeFgSavedMatchRefresh = false;
+    private boolean nativeFgLocksHeld = false;
+
+    /**
+     * While LSFG Native generates: FPS limiter locked ON and Auto refresh (VRR)
+     * locked OFF. That is the configuration the engine was device-proven in and
+     * the only one that behaves - an uncapped guest times the multiplier overruns
+     * the panel and FIFO stalls the compositor, and a VRR mode switch mid-game
+     * stutters. If no cap was set, 30 is used: it is the case this was proven on.
+     */
+    private void applyNativeFgLocks(boolean lock) {
+        XServerDrawerState s = XServerDrawerState.INSTANCE;
+        if (lock && !nativeFgLocksHeld) {
+            nativeFgSavedLimiterOn    = s.getFpsLimiterEnabled().getValue();
+            nativeFgSavedLimit        = s.getFpsLimit().getValue();
+            nativeFgSavedMatchRefresh = s.getMatchRefreshRate().getValue();
+            nativeFgLocksHeld = true;
+
+            int cap = nativeFgSavedLimit > 0 ? nativeFgSavedLimit : 30;
+            s.setFpsLimiterEnabled(true);
+            s.setFpsLimit(cap);
+            s.setMatchRefreshRate(false);
+            s.setNativeFgLocks(true);
+            Log.i("XServerDisplayActivity", "lsfg-native locks ON: limiter=" + cap + " vrr=off"
+                + " (was limiter=" + (nativeFgSavedLimiterOn ? nativeFgSavedLimit : 0)
+                + " vrr=" + nativeFgSavedMatchRefresh + ")");
+            applyFpsLimit(cap);
+        } else if (!lock && nativeFgLocksHeld) {
+            nativeFgLocksHeld = false;
+            s.setNativeFgLocks(false);
+            s.setFpsLimiterEnabled(nativeFgSavedLimiterOn);
+            s.setFpsLimit(nativeFgSavedLimit);
+            s.setMatchRefreshRate(nativeFgSavedMatchRefresh);
+            Log.i("XServerDisplayActivity", "lsfg-native locks OFF: restored limiter="
+                + (nativeFgSavedLimiterOn ? nativeFgSavedLimit : 0)
+                + " vrr=" + nativeFgSavedMatchRefresh);
+            applyFpsLimit(nativeFgSavedLimiterOn && nativeFgSavedLimit > 0 ? nativeFgSavedLimit : 0);
+        }
+    }
+
+    /** The panel's real refresh rate; the pacer never generates above it. */
+    private float currentDisplayRefreshHz() {
+        try {
+            // The panel's HIGHEST mode, not getRefreshRate(). The latter reports
+            // what the platform currently grants this window, and on device it
+            // read 60 on a 144 Hz panel mid-game (a frame-rate override, not a
+            // mode switch). The engine uses this as its headroom ceiling, so a
+            // 60 there quietly caps 4x to 2x. The panel can always be driven at
+            // its top mode under FIFO; that is the number the ceiling wants.
+            float best = (float) pickHighestRefreshRate();
+            android.view.Display d = getWindowManager().getDefaultDisplay();
+            float hz = (d != null) ? d.getRefreshRate() : 0f;
+            float out = Math.max(best, hz);
+            return out > 1f ? out : 0f;
+        } catch (Throwable t) {
+            return 0f;
+        }
+    }
 
     private void startVsyncClock() {
         stopVsyncClock();
@@ -3966,6 +4314,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private volatile boolean exiting = false;
 
     private void exit() {
+        eaRefusalHandler.removeCallbacks(eaRefusalWatchRunnable);
         if (exiting) return;
         exiting = true;
         // A frozen (SIGSTOP'd) guest can't act on the SIGTERM below — resume before tearing down so
@@ -4333,6 +4682,30 @@ public class XServerDisplayActivity extends AppCompatActivity {
      * so {@code getWineStartCommand()} keeps the NORMAL launch and a non-RealSteam launch is byte-for-byte
      * unchanged. Never throws; never logs the refresh token (it lives only inside the plan's env map).
      */
+    /**
+     * Applies a Steam game's installScript.vdf local stages (Registry + Copy Files) into this
+     * container just before first launch, guarded once per (appId, container). No-op for non-Steam
+     * shortcuts. Runs on the setup worker thread (prefix already prepared by setupWineSystemFiles).
+     */
+    private void runSteamInstallScriptPreLaunch() {
+        if (shortcut == null || container == null) return;
+        int appId;
+        try {
+            appId = Integer.parseInt(shortcut.getExtra("steamAppId", "0").trim());
+        } catch (NumberFormatException e) {
+            return;
+        }
+        if (appId <= 0) return;
+        try {
+            File exe = com.winlator.star.core.WinePath.INSTANCE.resolveAndroidPath(container, shortcut.path);
+            if (exe == null) return;
+            com.winlator.star.store.steamscript.InstallScriptExecutor.applyLocalStagesForLaunch(
+                    this, container, appId, exe.getAbsolutePath());
+        } catch (Throwable t) {
+            Log.w("XServerDisplayActivity", "installScript pre-launch pass failed", t);
+        }
+    }
+
     private void maybeStageRealSteam() {
         try {
             if (shortcut == null || container == null) return;
@@ -4353,6 +4726,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
             SteamDatabase.GameRow row = SteamRepository.getInstance().getDatabase().getGame(ref.appId);
             String displayName = (row != null && row.name != null) ? row.name : shortcut.name;
+            // EA support: an EA-published title launches through EA Desktop's chain — tell the agent
+            // (WN_STEAM_LAUNCH_CHAIN) and clamp the FEX preset later (Activation64 anti-tamper needs SMC
+            // checks ON). Detection is on-disk (Link2EA/EASteamProxy/__Installer/Origin/Core/Activation*).
+            com.winlator.star.store.EaSupport.Profile eaProfile =
+                    com.winlator.star.store.EaSupport.detect(new File(ref.installDir));
+            realSteamEaChain = eaProfile != null && eaProfile.getEaChain();
+            if (realSteamEaChain) Log.i("BH_REALSTEAM", "EA launcher-chain title detected (appId=" + ref.appId + ")");
 
             // Live agent↔app channel: bind the loopback listener BEFORE the guest boots so the plan
             // env can carry its port (BL_AGENT_PORT). Best-effort — 0 = no channel, launch unchanged.
@@ -4368,12 +4748,31 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     displayName,
                     ref.installDir,
                     isControllerPassthroughLaunch(),
-                    agentPort);
+                    agentPort,
+                    // The DB's install_dir is the HOST path after download (not PICS installdir); prepare()
+                    // ignores path-like values and derives the ASCII folder name from the display name.
+                    row != null ? row.installDir : null,
+                    realSteamEaChain);
 
             if (realSteamPlan != null) {
                 Log.i("BH_REALSTEAM", "RealSteam launch armed (appId=" + realSteamPlan.appId
                         + ", steamapps\\common\\" + realSteamPlan.canonicalName
                         + (agentPort > 0 ? ", agent channel port " + agentPort : ", no agent channel") + ")");
+                // EA titles: prepare() has just linked the depot into steamapps\common\<ascii name>.
+                // The installScript Registry stage ran earlier (onCreate worker), when that link did not
+                // exist yet on a fresh container, so the EA Games "Install Dir" value still points at the
+                // raw Z:\steam_games\<name> depot — and EA Desktop launches the game from that value.
+                // A non-ASCII depot name (e.g. the ™ in "Need for Speed™ Payback") makes Frostbite quit
+                // before it ever creates a D3D device. Re-apply the stage now that the link exists; it is
+                // idempotent by design (it re-applies Registry + Copy on every launch anyway).
+                if (realSteamEaChain) runSteamInstallScriptPreLaunch();
+                // EA titles: watch EA Desktop's own log for a refused licence so the user gets a card
+                // with EA's reason instead of a black screen (see eaRefusalWatchRunnable).
+                if (realSteamEaChain) {
+                    eaLogOffset = -1; eaAbortSeenAt = 0; eaAbortReason = null; eaGameSpawned = false;
+                    eaRefusalHandler.removeCallbacks(eaRefusalWatchRunnable);
+                    eaRefusalHandler.postDelayed(eaRefusalWatchRunnable, EA_REFUSAL_POLL_MS);
+                }
                 // The app's own CM session is suspended later, in suspendAppSteamSessionForRealSteam()
                 // — AFTER the pre-launch Steam Cloud pull and achievement seed, which still ride it.
                 armAgentWatchdog();
@@ -4398,6 +4797,121 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // best-effort: an agent without the feature never connects and the launch behaves as before.
     private static final String AGENT_TAG = "BH_STEAM_AGENT";
     /** No logged_in / login_failed / game_spawned within this long of arming → "sign-in did not complete". */
+    // ── "EA said no" watch ─────────────────────────────────────────────────────────────────────────
+    // EA titles launch through EA Desktop, and when EA refuses to license the game EA Desktop aborts
+    // the launch itself: the game exe never starts, the SteamLite agent keeps holding the session for
+    // it (up to 900 s) and the user sits on a black screen. EA Desktop writes the verdict to its own
+    // log inside the prefix within seconds ("Failed to license game. Aborting game launch." plus a
+    // game.license.erro telemetry line whose OOALaunchFailure names the reason, device-seen:
+    // "Concurrency guard limit"). Watch that log during the chain hold and turn the verdict into the
+    // launch failure card with EA's reason, instead of the black screen.
+    private final android.os.Handler eaRefusalHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private volatile boolean eaRefusalShown = false;
+    private volatile boolean eaGameSpawned = false;
+    private long eaLogOffset = -1;
+    private long eaAbortSeenAt = 0;
+    private String eaAbortReason = null;
+    private static final long EA_REFUSAL_POLL_MS = 2000L;
+    private static final long EA_REFUSAL_REASON_GRACE_MS = 5000L;
+    // NOTE: winStarted is NOT a stop condition here. On an EA launch the first application window is
+    // EA Desktop's own ("Preparing game…"), which flips winStarted and dismisses the launch screen long
+    // before EA has decided anything; the refusal comes after that. Only the game actually starting
+    // (agent game_spawned), a shown card, or exit() ends the watch. Device-seen: r1 stopped at
+    // winStarted and the refusal went unreported.
+    private final Runnable eaRefusalWatchRunnable = new Runnable() {
+        @Override public void run() {
+            if (exiting || eaGameSpawned || eaRefusalShown) return;
+            try { pollEaDesktopLogForRefusal(); } catch (Throwable ignored) {}
+            if (!exiting && !eaGameSpawned && !eaRefusalShown)
+                eaRefusalHandler.postDelayed(this, EA_REFUSAL_POLL_MS);
+        }
+    };
+
+    private File eaDesktopLogFile() {
+        if (container == null) return null;
+        return new File(container.getRootDir(), ".wine/drive_c/ProgramData/EA Desktop/Logs/EADesktop.log");
+    }
+
+    /** Reads only what EA Desktop appended since the watch started; older verdicts never count. */
+    private void pollEaDesktopLogForRefusal() throws java.io.IOException {
+        File log = eaDesktopLogFile();
+        if (log == null || !log.isFile()) return;
+        long len = log.length();
+        if (eaLogOffset < 0) { eaLogOffset = len; return; }          // baseline = size at watch start
+        if (len < eaLogOffset) eaLogOffset = 0;                       // rotated / truncated
+        if (len > eaLogOffset) {
+            byte[] buf = new byte[(int) Math.min(len - eaLogOffset, 4 * 1024 * 1024)];
+            try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(log, "r")) {
+                raf.seek(eaLogOffset);
+                int n = raf.read(buf);
+                eaLogOffset += Math.max(n, 0);
+                String chunk = new String(buf, 0, Math.max(n, 0), java.nio.charset.StandardCharsets.UTF_8);
+                if (eaAbortSeenAt == 0 && (chunk.contains("Aborting game launch") || chunk.contains("Failed to request new license"))) {
+                    eaAbortSeenAt = android.os.SystemClock.uptimeMillis();
+                    Log.w("BH_REALSTEAM", "EA Desktop aborted the launch (licence refused)");
+                }
+                int i = chunk.indexOf("\"OOALaunchFailure\":\"");
+                if (i >= 0) {
+                    int start = i + "\"OOALaunchFailure\":\"".length();
+                    int end = chunk.indexOf('"', start);
+                    if (end > start) eaAbortReason = chunk.substring(start, end);
+                }
+            }
+        }
+        // Show once the abort is seen and either the reason arrived or the grace period passed.
+        if (eaAbortSeenAt != 0 && (eaAbortReason != null
+                || android.os.SystemClock.uptimeMillis() - eaAbortSeenAt > EA_REFUSAL_REASON_GRACE_MS)) {
+            showEaRefusal(eaAbortReason);
+        }
+    }
+
+    /** Plain-words version of EA's OOALaunchFailure string (EA's own wording is kept in the detail). */
+    private static String eaRefusalInPlainWords(String reason) {
+        if (reason == null) return "EA Desktop refused to license the game and did not start it.";
+        String r = reason.toLowerCase();
+        if (r.contains("concurrency") || r.contains("limit"))
+            return "EA's activation limit for this game was hit: too many activations in a short time, or too many "
+                    + "computers holding it (every Bannerlator container counts as a separate PC to EA).";
+        if (r.contains("entitle") || r.contains("not owned") || r.contains("ownership"))
+            return "EA reports this account does not own the game.";
+        if (r.contains("offline") || r.contains("network") || r.contains("connect"))
+            return "EA Desktop could not reach EA's licence servers.";
+        return "EA Desktop refused to license the game and did not start it.";
+    }
+
+    private void showEaRefusal(String reason) {
+        if (eaRefusalShown) return;
+        eaRefusalShown = true;
+        Log.w("BH_REALSTEAM", "EA refused the licence (" + reason + ") — showing the EA card");
+        eaRefusalHandler.removeCallbacks(eaRefusalWatchRunnable);
+        final String logDir = com.winlator.star.core.LogLocation.resolveLogDir(this).getAbsolutePath();
+        final boolean logging = isLaunchLoggingEnabled();
+        final Shortcut sc = shortcut;
+        final Container c = container;
+        final String game = sc != null ? sc.name : "the game";
+        final String detail = eaRefusalInPlainWords(reason)
+                + (reason != null ? " EA's reason: \"" + reason + "\"." : "")
+                + " Try again later; if it keeps happening, use \"Deauthorize computers\" in your EA account's "
+                + "security settings.";
+        // The agent is still holding the Steam session for a game that will not come — release it so
+        // the guest tears down cleanly behind the card (Close finishes the session either way).
+        try { if (steamAgentChannel != null) steamAgentChannel.requestLogoff(); } catch (Throwable ignored) {}
+        runOnUiThread(() -> {
+            if (exiting || preloaderDialog == null) return;
+            cancelLaunchTimers();
+            java.util.List<com.winlator.star.core.FailureAction> actions = new ArrayList<>();
+            if (sc != null && c != null) {
+                actions.add(new com.winlator.star.core.FailureAction("Retry", true, () -> {
+                    com.winlator.star.store.SteamSessionManager.INSTANCE.setPendingRelaunch(
+                            getApplicationContext(), sc.file.getPath(), c.id,
+                            com.winlator.star.store.SteamSessionManager.RelaunchMode.STEAMLITE);
+                    exit();
+                }));
+            }
+            preloaderDialog.fail("EA Desktop", "EA Desktop couldn't start " + game, detail, logDir, logging, actions);
+        });
+    }
+
     private static final long AGENT_LOGIN_TIMEOUT_MS = 75_000L;
     private com.winlator.star.store.SteamAgentChannel steamAgentChannel = null;
     private volatile boolean agentConnected = false;
@@ -4456,7 +4970,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     break;
                 }
                 case "launch_accepted":
-                    preloaderHint("Steam accepted the launch — starting the game…");
+                    preloaderHint(realSteamEaChain
+                            ? "Steam accepted the launch — starting EA Desktop (sign in to EA if it asks)…"
+                            : "Steam accepted the launch — starting the game…");
                     break;
                 case "launch_refused":
                     preloaderHint("Steam refused the launch (" + obj.optString("reason", "") + ") — trying a direct start…");
@@ -4498,6 +5014,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     break;
                 case "game_spawned": {
                     agentLoginResolved = true;
+                    eaGameSpawned = true;   // EA Desktop started the game — no refusal possible now
                     boolean secure = obj.optBoolean("secure", false);
                     // An insecure spawn after a vac=false fallback (agentFallbackVac, from the
                     // insecure_fallback event) is the normal outcome for a title without VAC — say
@@ -5417,6 +5934,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
         com.winlator.star.core.PreloaderState.setOnClose(null);
         com.winlator.star.core.PreloaderState.setOnOpenLog(null);
         com.winlator.star.core.PreloaderState.setOnCancel(null);
+        // A failure card that outlives this activity (Close -> finish, or a recents swipe) would keep
+        // showing on MainActivity's copy of the overlay with no owner to act on Close. Clear it.
+        com.winlator.star.core.PreloaderState.hideIfFailed();
         if (wineDebugLogCallback != null) {
             ProcessHelper.removeDebugCallback(wineDebugLogCallback);
             wineDebugLogCallback = null;
@@ -5427,6 +5947,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         // Stop publishing the lsfg-vk vsync clock on game exit.
         stopVsyncClock();
+        // ... and stop polling the native LSFG readout.
+        stopLsfgStatsReadout();
         if (vsyncWriteExecutor != null) {
             vsyncWriteExecutor.shutdownNow();
             vsyncWriteExecutor = null;
@@ -5932,7 +6454,17 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // back to Vulkan (ASR unsupported) also skips FG — safe, and the editor prevents that combo.
             boolean fgRendererVulkan = "vulkan".equalsIgnoreCase(resolvedRenderer());
             if (fgRendererVulkan) {
-            if (resolvedFrameGenEngine().equals("lsfg")) {
+            if (resolvedFrameGenEngine().equals("lsfg-native")) {
+                // LSFG Native runs the Lossless Scaling chain inside OUR compositor, on the Android
+                // side of the Wine boundary. Nothing is injected into the container: no layer, no
+                // conf.toml, no ENABLE_LSFG, and no vsync clock file for a guest layer to phase-lock
+                // to - the generator shares our command stream, so it needs none of them.
+                //
+                // All that happens at launch is building the SPIR-V cache from the user's own
+                // Lossless.dll (slow on a first run: the DXBC chain is translated on device, which
+                // is why it is off the main thread) and arming the renderer.
+                prepareLsfgNative();
+            } else if (resolvedFrameGenEngine().equals("lsfg")) {
                 // lsfg-vk engine (mutually exclusive with bionic-fg). Opt-in via ENABLE_LSFG so the
                 // staged layer stays inert elsewhere. Driven by conf.toml (NOT the LSFG_LEGACY env):
                 // the GameNative-fork layer watches the conf.toml mtime in its present hook and forces
@@ -6010,6 +6542,23 @@ public class XServerDisplayActivity extends AppCompatActivity {
 
             if (shortcut != null) envVars.putAll(shortcut.getExtra("envVars"));
 
+            // Keep the lsfg-vk Vulkan layer INERT unless lsfg-vk is actually the engine.
+            // Placed AFTER both user env merges (container above, shortcut just here) so
+            // nothing the user carries over can re-enable it. The layer's manifest honours
+            // disable_environment over enable_environment, so this wins even when a stale
+            // ENABLE_LSFG=1 is still sitting in a container that used lsfg-vk before.
+            //
+            // Device report that prompted this: r8 tester on Adreno 830, LSFG Native
+            // selected, NFS Heat asserting in winevulkan's vkCreateSwapchainKHR thunk on
+            // launch. LSFG Native writes nothing into the guest, but a leftover ENABLE_LSFG
+            // loads the lsfg-vk layer into the game with no conf.toml, no LSFG_CONFIG and no
+            // DLL path - and that layer hard-fails swapchain creation when it cannot find
+            // its config. That is precisely the assertion in the screenshot.
+            if (!"lsfg".equals(resolvedFrameGenEngine())) {
+                envVars.put("DISABLE_LSFG", "1");
+                envVars.remove("ENABLE_LSFG");
+            }
+
             // Epic per-game launch fixes (Feature #7). Runs on the background launch setup thread.
             //  • applyEnv: merge required WINEDLLOVERRIDES (Kingdom Hearts III) into the launch env,
             //    after the shortcut env so a user override still wins.
@@ -6068,11 +6617,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
                             : container.getBox64Preset()
             );
 
-            guestProgramLauncherComponent.setFEXCorePreset(
-                    shortcut != null
-                            ? shortcut.getExtra("fexcorePreset", container.getFEXCorePreset())
-                            : container.getFEXCorePreset()
-            );
+            String fexPreset = shortcut != null
+                    ? shortcut.getExtra("fexcorePreset", container.getFEXCorePreset())
+                    : container.getFEXCorePreset();
+            // EA titles: FEX_SMCCHECKS=none (Extreme presets) crashes EA's Activation64 anti-tamper
+            // (c0000005 in the game exe, device-proven) → clamp to the Performance twin for this launch.
+            if (realSteamEaChain && realSteamPlan != null) {
+                String clamped = com.winlator.star.store.EaSupport.clampPresetForEa(fexPreset);
+                if (clamped != null && !clamped.equals(fexPreset)) {
+                    Log.i("BH_REALSTEAM", "EA launch: FEX preset " + fexPreset + " -> " + clamped + " (SMC checks must stay on)");
+                    fexPreset = clamped;
+                }
+            }
+            guestProgramLauncherComponent.setFEXCorePreset(fexPreset);
         }
 
         // Merge overrideEnvVars if present
@@ -6151,6 +6708,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             // The guest process died. If it never rendered a window, this is a launch failure — show
             // the failure card and let the user read it (Close finishes). If it had already rendered,
             // this is a normal exit / in-game crash: keep the existing exit-on-termination behaviour.
+            if (eaRefusalShown) {
+                // EA Desktop refused the licence and the card already names EA's reason; the guest
+                // tearing down after the agent's logoff is expected — keep that card.
+                return;
+            }
             if (!winStarted) {
                 final String logDir = com.winlator.star.core.LogLocation.resolveLogDir(this).getAbsolutePath();
                 runOnUiThread(() -> {
@@ -6383,10 +6945,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
             XServerDialogState.INSTANCE.setHdrVkEnabled(vkHdrEnabled);
             // Phase 2 screen effects (GL parity) — drawer-only / session-live, default
             // off / neutral grade. Seed the renderer and mirror into the drawer state.
-            vkRenderer.setScreenEffects(0f, 0f, 1.0f, false, false, false, false);
+            vkRenderer.setScreenEffects(0f, 0f, 1.0f, 100f, false, false, false, false);
             XServerDialogState.INSTANCE.setVkBrightness(0f);
             XServerDialogState.INSTANCE.setVkContrast(0f);
             XServerDialogState.INSTANCE.setVkGamma(1.0f);
+            XServerDialogState.INSTANCE.setVkSaturation(100f);
             XServerDialogState.INSTANCE.setVkFxaa(false);
             XServerDialogState.INSTANCE.setVkToon(false);
             XServerDialogState.INSTANCE.setVkCrt(false);
@@ -6977,8 +7540,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         vkr.setUpscaler(0);                          ds.setUpscalerMode(0);
         vkr.setCas(false, ds.getCasSharpness().getValue()); ds.setCasEnabled(false);
         vkr.setHdr(false);                           ds.setHdrVkEnabled(false);
-        vkr.setScreenEffects(0f, 0f, 1.0f, false, false, false, false);
-        ds.setVkBrightness(0f); ds.setVkContrast(0f); ds.setVkGamma(1.0f);
+        vkr.setScreenEffects(0f, 0f, 1.0f, 100f, false, false, false, false);
+        ds.setVkBrightness(0f); ds.setVkContrast(0f); ds.setVkGamma(1.0f); ds.setVkSaturation(100f);
         ds.setVkFxaa(false); ds.setVkToon(false); ds.setVkCrt(false); ds.setVkNtsc(false);
     }
 
@@ -7003,8 +7566,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (hdr != null) comp.removeEffect(hdr);
         ds.setSgsrEnabled(false); ds.setSgsrSharpness(50); ds.setHdrEnabled(false);
         // Screen effects: color grade neutral + FXAA/CRT/Toon/NTSC off.
-        applyScreenEffects(glr, 0f, 0f, 1.0f, false, false, false, false);
-        ds.setSeBrightness(0f); ds.setSeContrast(0f); ds.setSeGamma(1.0f);
+        applyScreenEffects(glr, 0f, 0f, 1.0f, 100f, false, false, false, false);
+        ds.setSeBrightness(0f); ds.setSeContrast(0f); ds.setSeGamma(1.0f); ds.setSeSaturation(100f);
         ds.setSeFxaa(false); ds.setSeCrt(false); ds.setSeToon(false); ds.setSeNtsc(false);
         // Terminal debanding off.
         comp.setDeband(false, 100);
@@ -7096,11 +7659,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 vkr.setUpscaleSharpness(sharpness);
                 persistExtraInt("upscaleSharpness", sharpness); // remember per game (#382)
             };
-            ds.onVulkanScreenEffectsApply = (brightness, contrast, gamma, fxaa, toon, crt, ntsc) -> {
-                // color grade neutral = brightness 0 / contrast 0 / gamma 1.0
-                if (fxaa || toon || crt || ntsc || brightness != 0f || contrast != 0f || gamma != 1.0f)
+            ds.onVulkanScreenEffectsApply = (brightness, contrast, gamma, saturation, fxaa, toon, crt, ntsc) -> {
+                // color grade neutral = brightness 0 / contrast 0 / gamma 1.0 / saturation 100
+                if (fxaa || toon || crt || ntsc || brightness != 0f || contrast != 0f || gamma != 1.0f
+                        || saturation != 100f)
                     disableNativeRenderingForPreset();
-                vkr.setScreenEffects(brightness, contrast, gamma, fxaa, toon, crt, ntsc);
+                vkr.setScreenEffects(brightness, contrast, gamma, saturation, fxaa, toon, crt, ntsc);
             };
         } else {
             ds.onUpscalerApply = null;
@@ -7424,6 +7988,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         ds.setSeBrightness(ce   != null ? ce.getBrightness() * 100f : 0f);
         ds.setSeContrast  (ce   != null ? ce.getContrast()   * 100f : 0f);
         ds.setSeGamma     (ce   != null ? ce.getGamma()             : 1.0f);
+        ds.setSeSaturation(ce   != null ? ce.getSaturation() * 100f : 100f);
         ds.setSeFxaa      (fxaa != null);
         ds.setSeCrt       (crt  != null);
         ds.setSeToon      (toon != null);
@@ -7441,13 +8006,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         ds.setSeSelectedProfile(selIdx);
 
-        ds.onScreenEffectsApply = (brightness, contrast, gamma, fxaaEn, crtEn, toonEn, ntscEn, profileIndex) -> {
+        ds.onScreenEffectsApply = (brightness, contrast, gamma, saturation, fxaaEn, crtEn, toonEn, ntscEn, profileIndex) -> {
             if (glRenderer == null) return;
             // Direction A: any non-neutral screen effect runs in the EffectComposer, which GL native
             // bypasses — so engaging one turns Native Rendering off (guarded; no-op when already off).
-            if (fxaaEn || crtEn || toonEn || ntscEn || brightness != 0f || contrast != 0f || gamma != 1.0f)
+            if (fxaaEn || crtEn || toonEn || ntscEn || brightness != 0f || contrast != 0f || gamma != 1.0f
+                    || saturation != 100f)
                 disableNativeRenderingForPreset();
-            applyScreenEffects(glRenderer, brightness, contrast, gamma, fxaaEn, crtEn, toonEn, ntscEn);
+            applyScreenEffects(glRenderer, brightness, contrast, gamma, saturation, fxaaEn, crtEn, toonEn, ntscEn);
             if (profileIndex > 0 && profileIndex - 1 < seProfileNames.size()) {
                 String name = seProfileNames.get(profileIndex - 1);
                 saveScreenEffectProfile(name, brightness, contrast, gamma, fxaaEn, crtEn, toonEn, ntscEn);
@@ -9090,7 +9656,12 @@ return true;
     }
 
     private String resolvedFrameGenEngine() {
-        return shortcut != null ? shortcut.getExtra("frameGenEngine", container.getFrameGenEngine()) : container.getFrameGenEngine();
+        final String e = shortcut != null
+            ? shortcut.getExtra("frameGenEngine", container.getFrameGenEngine())
+            : container.getFrameGenEngine();
+        // lsfg-vk retired 2026-09-05 (parked on feat/lsfg-vk-plumbing): a legacy
+        // per-game override still saying "lsfg" runs LSFG Native.
+        return "lsfg".equals(e) ? "lsfg-native" : e;
     }
 
     // Any frame-gen engine (lsfg-vk OR bionic-fg) actively multiplying (mult >= 2) inserts extra
@@ -9108,6 +9679,25 @@ return true;
     // Host present mode — the user's chosen mode is always honored (mailbox lock removed:
     // frame gen no longer forces mailbox, so FIFO/etc. can be used with FG on).
     private String effectivePresentMode() {
+        // LSFG Native REQUIRES fifo while it is multiplying, and this is the
+        // opposite of what lsfg-vk wants. The native path queues the real frame
+        // and its generated frames together in one submit and relies on fifo to
+        // scan them out on consecutive vblanks. Under mailbox the presentation
+        // engine keeps only the NEWEST queued image per vblank, so the whole
+        // batch collapses to the real frame and every generated frame is
+        // discarded at the very last step - the exact failure the guest-side
+        // engines suffer, just moved. lsfg-vk needs mailbox for the opposite
+        // reason: its extra presents come from inside the guest and fifo
+        // back-pressure strangles them.
+        // Keyed on the renderer's REAL armed state, not the drawer's multiplier
+        // StateFlow. That flow defaults to 2 before the launch seed writes 0, which
+        // is how the r9 log shows FIFO being forced 0.6 s after mailbox was applied
+        // and before anything was armed - and then never released on disarm.
+        com.winlator.star.renderer.vulkan.VulkanRenderer vkrPm = vulkanRendererOrNull();
+        if ("lsfg-native".equals(resolvedFrameGenEngine())
+                && vkrPm != null && vkrPm.isFrameGenArmed()) {
+            return "fifo";
+        }
         return resolvedRendererPresentMode();
     }
 
@@ -9115,11 +9705,20 @@ return true;
     // frame gen toggles / the multiplier changes. Mailbox lock removed: the user's chosen present
     // mode is honored regardless of FG, and the drawer selector stays unlocked so it can be changed
     // live with FG on. No-op on non-Vulkan renderers / before setup.
+    // Last mode actually pushed to the renderer + drawer. Without this, applying
+    // the same mode again still writes the drawer StateFlow, the drawer
+    // recomposes, its frame-gen controls re-fire their apply callback, and that
+    // calls back into here - a feedback loop that spun applyLsfgNative four
+    // times in four milliseconds on device and took the game down with it.
+    private String lastAppliedPresentMode = null;
+
     private void applyEffectivePresentMode() {
         if (xServerView == null) return;
         HostRenderer r = xServerView.getRenderer();
         if (r instanceof com.winlator.star.renderer.vulkan.VulkanRenderer) {
             String pm = effectivePresentMode();
+            if (pm != null && pm.equals(lastAppliedPresentMode)) return;
+            lastAppliedPresentMode = pm;
             int pmInt = "immediate".equals(pm) ? 0 : "mailbox".equals(pm) ? 1 : 2; // VkPresentModeKHR
             ((com.winlator.star.renderer.vulkan.VulkanRenderer) r).setVkPresentMode(pmInt);
             // Mirror the mode into the drawer selector; never lock it (mailbox lock removed).
@@ -9687,7 +10286,28 @@ return true;
     // https://github.com/utkarshdalal/GameNative. See README Credits.
     private boolean lsfgGovernsFps() {
         XServerDrawerState s = XServerDrawerState.INSTANCE;
+        // ONLY lsfg-vk. It lives inside the guest and paces the guest itself, so
+        // our limiter has to step aside or the two fight.
+        //
+        // LSFG Native deliberately does NOT qualify. It never touches the guest;
+        // it generates frames in our compositor on top of whatever the guest
+        // produces. Letting the limiter step aside there would silently drop the
+        // user's FPS cap, run the guest uncapped, and hand the frame-gen chain a
+        // hotter, busier GPU to compete with - which is exactly what makes the
+        // governor reject its probes. The right shape for the native engine is:
+        // cap the REAL frames, and generate in between them.
         return "lsfg".equals(resolvedFrameGenEngine())
+            && s.getFrameGenEnabled().getValue()
+            && s.getFrameGenMultiplier().getValue() >= 2;
+    }
+
+    // True when what reaches the PANEL is a multiple of the guest's rate, for
+    // either LSFG engine. VRR must vote the displayed cadence, not the cap -
+    // separate question from who paces the guest.
+    private boolean frameGenMultipliesDisplay() {
+        XServerDrawerState s = XServerDrawerState.INSTANCE;
+        final String engine = resolvedFrameGenEngine();
+        return ("lsfg".equals(engine) || "lsfg-native".equals(engine))
             && s.getFrameGenEnabled().getValue()
             && s.getFrameGenMultiplier().getValue() >= 2;
     }
@@ -9738,10 +10358,23 @@ return true;
     private void applyVrr(int cap) {
         if (xServerView == null) return;
         float vrrRate = 0.0f;
-        if (container != null && resolvedMatchRefreshRate()) {
+        // LSFG Native generating: VRR stays OUT of it. The native path presents
+        // real + generated frames under FIFO against a fixed panel cadence, and
+        // that is the configuration that was device-proven (30 -> 118 with the
+        // panel pinned at 144 for the whole run). Letting VRR re-vote the panel
+        // to cap x multiplier would (a) trigger a display mode switch mid-game,
+        // which stutters or black-flashes on many panels, and (b) chase a number
+        // that is only the REQUESTED multiplier, not what is actually presented.
+        // Fixed max refresh is the predictable choice here; the user's manual
+        // lock, if any, is still honoured below.
+        final boolean nativeFgGenerating = "lsfg-native".equals(resolvedFrameGenEngine())
+            && frameGenMultipliesDisplay();
+        if (container != null && resolvedMatchRefreshRate() && nativeFgGenerating) {
+            vrrRate = 0.0f;   // no vote: panel stays at its max
+        } else if (container != null && resolvedMatchRefreshRate()) {
             // Auto (match FPS): vote the panel cadence to follow the displayed FPS while capping.
             if (cap > 0) {
-                if (lsfgGovernsFps()) {
+                if (frameGenMultipliesDisplay()) {
                     int mult = XServerDrawerState.INSTANCE.getFrameGenMultiplier().getValue();
                     vrrRate = (float) cap * (mult >= 2 ? mult : 1);
                 } else {
@@ -10623,6 +11256,7 @@ return true;
         ds.setSeBrightness(ce   != null ? ce.getBrightness() * 100f : 0f);
         ds.setSeContrast  (ce   != null ? ce.getContrast()   * 100f : 0f);
         ds.setSeGamma     (ce   != null ? ce.getGamma()             : 1.0f);
+        ds.setSeSaturation(ce   != null ? ce.getSaturation() * 100f : 100f);
         ds.setSeFxaa      (fxaa != null);
         ds.setSeCrt       (crt  != null);
         ds.setSeToon      (toon != null);
@@ -10641,9 +11275,9 @@ return true;
         }
         ds.setSeSelectedProfile(selIdx);
 
-        ds.onScreenEffectsApply = (brightness, contrast, gamma, fxaaEn, crtEn, toonEn, ntscEn, profileIndex) -> {
+        ds.onScreenEffectsApply = (brightness, contrast, gamma, saturation, fxaaEn, crtEn, toonEn, ntscEn, profileIndex) -> {
             if (r == null) return;
-            applyScreenEffects(r, brightness, contrast, gamma, fxaaEn, crtEn, toonEn, ntscEn);
+            applyScreenEffects(r, brightness, contrast, gamma, saturation, fxaaEn, crtEn, toonEn, ntscEn);
             if (profileIndex > 0 && profileIndex - 1 < profileNames.size()) {
                 String name = profileNames.get(profileIndex - 1);
                 saveScreenEffectProfile(name, brightness, contrast, gamma, fxaaEn, crtEn, toonEn, ntscEn);
@@ -10677,16 +11311,21 @@ return true;
         ds.show(XServerDialogState.ActiveDialog.SCREEN_EFFECTS);
     }
 
+    // saturation is the 0..200 percent slider (100 = neutral), matching the Vulkan path; the
+    // ColorEffect shader takes it normalised, so it is divided by 100 alongside brightness and
+    // contrast. A fully neutral grade is (0, 0, 1.0, 100) and removes the effect entirely.
     private void applyScreenEffects(GLRenderer r, float brightness, float contrast, float gamma,
+                                    float saturation,
                                     boolean fxaaEn, boolean crtEn, boolean toonEn, boolean ntscEn) {
         ColorEffect ce = (ColorEffect) r.getEffectComposer().getEffect(ColorEffect.class);
-        if (brightness == 0 && contrast == 0 && gamma == 1.0f) {
+        if (brightness == 0 && contrast == 0 && gamma == 1.0f && saturation == 100f) {
             if (ce != null) r.getEffectComposer().removeEffect(ce);
         } else {
             if (ce == null) ce = new ColorEffect();
             ce.setBrightness(brightness / 100f);
             ce.setContrast(contrast / 100f);
             ce.setGamma(gamma);
+            ce.setSaturation(saturation / 100f);
             r.getEffectComposer().addEffect(ce);
         }
         FXAAEffect fxaa = (FXAAEffect) r.getEffectComposer().getEffect(FXAAEffect.class);
@@ -10778,8 +11417,30 @@ return true;
                 || name.contains("install");
     }
 
+    private int installerTicksTotal = 0;
+
+    /** Short status for installer sessions (label from the intent, else the watched exe name). */
+    private String installerLabel() {
+        String label = getIntent().getStringExtra("component_installer_label");
+        return (label != null && !label.isEmpty()) ? label : componentInstallerExe;
+    }
+
+    private void installerReminderToast() {
+        try {
+            runOnUiThread(() -> android.widget.Toast.makeText(this,
+                    "Installing " + installerLabel() + "… follow the installer's prompts if it shows any. "
+                            + "This session closes by itself when it is done.",
+                    android.widget.Toast.LENGTH_LONG).show());
+        } catch (Throwable ignored) {}
+    }
+
     private void evaluateInstallerTick() {
         if (componentInstallerExe == null) return;
+        // Silent installer (no window ever mapped -> overlay still up): keep its status line current.
+        if (!winStarted) preloaderHint("Installing " + installerLabel()
+                + "… this can take a few minutes. Leave it running — this screen closes by itself when it is done.");
+        // Visible installer: repeat the reminder roughly every 45 s so a long install never looks stuck.
+        if (winStarted && (++installerTicksTotal % 45) == 0) installerReminderToast();
         boolean present = false;
         for (String n : installerTickNames) {
             if (looksLikeInstallerProc(n)) { present = true; break; }
@@ -10834,6 +11495,16 @@ return true;
             gameProcSeen = true;
             gameGoneTicks = 0;
         } else if (gameProcSeen) {
+            // EA launcher-chain titles hand the game exe off more than once (stub exe → EA Desktop
+            // relaunch, and again after a first-ever activation), with gaps longer than three ticks.
+            // The SteamLite agent (steam.exe) holds the Steam session through those gaps and bounds
+            // them itself (900 s for the first hand-off, 60 s for later ones), so while the agent is
+            // alive the game is not over; when the agent tears down, its exit ends the session through
+            // the guest termination callback. Closing here mid-hand-off killed the relaunch.
+            if (realSteamEaChain && gameTickNames.contains("steam.exe")) {
+                gameGoneTicks = 0;
+                return;
+            }
             gameGoneTicks++;
             // Require a few consecutive empty ticks so a brief gap (e.g. a loader that relaunches the
             // same exe) doesn't trigger an early close.

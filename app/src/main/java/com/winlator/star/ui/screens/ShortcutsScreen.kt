@@ -258,6 +258,8 @@ import com.winlator.star.store.GoldbergPatcher
 import com.winlator.star.store.SteamDatabase
 import com.winlator.star.store.SteamGameUpdater
 import com.winlator.star.store.SteamLiteComponent
+import com.winlator.star.store.EaSupport
+import com.winlator.star.store.steamscript.InstallScriptExecutor
 import com.winlator.star.store.SteamLoginActivity
 import com.winlator.star.store.SteamPrefs
 import com.winlator.star.store.SteamSessionManager
@@ -339,6 +341,12 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // chooser is open (null = closed). A Steam game routes through this before launching UNLESS it
     // already has a remembered choice (launchMode set + launchModeRemembered=="1").
     var launchChoiceFor by remember { mutableStateOf<Shortcut?>(null) }
+    // EA support (see EaSupport): an EA title either needs its one-time EA Desktop setup, is unsupported
+    // (Javelin anti-cheat), or launches straight through SteamLite with the EA chain armed.
+    var eaSetupFor by remember { mutableStateOf<Shortcut?>(null) }
+    var eaUnsupportedFor by remember { mutableStateOf<Shortcut?>(null) }
+    var eaSetupBusy by remember { mutableStateOf(false) }
+    val eaScope = rememberCoroutineScope()
     // SteamLite launch pre-flight (session → network → cloud saves → update check, BEFORE the container opens):
     // the RealSteam game whose "Getting Steam ready" dialog is up (null = none). Every RealSteam
     // launch — the popup pick and a remembered pick — routes through it; Goldberg/Raw never do.
@@ -482,6 +490,29 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // A remembered RealSteam pick still goes through the SteamLite pre-flight (it is the launch's
     // session check, not part of the method choice).
     fun requestLaunch(shortcut: Shortcut) {
+        // EA-published Steam titles have exactly one working path: the genuine client (SteamLite) via
+        // EA Desktop's launcher chain. Skip the method popup, make sure the prefix is set up (wine-mono +
+        // EA Desktop, one-time), and refuse titles that ship EA Javelin anti-cheat (kernel driver).
+        if (isSteamOriginShortcut(shortcut)) {
+            val ea = EaSupport.detectForShortcut(shortcut)
+            if (ea != null) {
+                if (ea.javelinAntiCheat) { eaUnsupportedFor = shortcut; return }
+                // Persist: the launch pipeline re-reads the .desktop file, so an unsaved extra is a
+                // plain Raw launch (device test #8 — the game started without the Steam client).
+                shortcut.putExtra("launchMode", "RealSteam")
+                shortcut.putExtra("launchModeRemembered", "1")
+                shortcut.saveData()
+                val installDir = EaSupport.installDirOf(shortcut)
+                if (installDir == null) { launchWithSteamLite(shortcut); return }
+                eaScope.launch {
+                    val ready = withContext(Dispatchers.IO) {
+                        try { EaSupport.prefixReady(context, shortcut.container, installDir) } catch (t: Throwable) { true }
+                    }
+                    if (ready) launchWithSteamLite(shortcut) else eaSetupFor = shortcut
+                }
+                return
+            }
+        }
         val remembered = shortcut.getExtra("launchMode", "").isNotEmpty() &&
             shortcut.getExtra("launchModeRemembered", "") == "1"
         when {
@@ -2831,6 +2862,76 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     }
 
     // ── Steam launch-method popup (M3): SteamLite (real Steam / VAC) vs Goldberg (offline) ──────────
+    eaUnsupportedFor?.let { s ->
+        AlertDialog(
+            onDismissRequest = { eaUnsupportedFor = null },
+            title = { Text("Not supported: EA anti-cheat") },
+            text = {
+                Text(
+                    "\"${s.name}\" ships EA Javelin anti-cheat, which needs a Windows kernel driver. " +
+                        "It cannot run under Wine on any Android emulator, so Bannerlator won't start the EA setup for it."
+                )
+            },
+            confirmButton = { TextButton(onClick = { eaUnsupportedFor = null }) { Text("OK") } },
+        )
+    }
+    eaSetupFor?.let { s ->
+        AlertDialog(
+            onDismissRequest = { if (!eaSetupBusy) eaSetupFor = null },
+            title = { Text("Set up EA Desktop") },
+            text = {
+                Text(
+                    "\"${s.name}\" is an EA title: it launches through EA Desktop, which isn't installed in this " +
+                        "container yet. Bannerlator will open one setup session (wine-mono first if the container " +
+                        "lacks it) and run EA's installer — follow its prompts when it shows them. The session closes " +
+                        "by itself when the installer finishes and the app comes back. Then launch the game again and " +
+                        "sign in to EA when it asks. This happens once per container."
+                )
+            },
+            confirmButton = {
+                TextButton(enabled = !eaSetupBusy, onClick = {
+                    eaSetupBusy = true
+                    eaScope.launch {
+                        // Resolve with the SAME derivation that decided to show this dialog
+                        // (EaSupport.installDirOf): a legacy shortcut written before steamAppId was stamped
+                        // (pre-2026-08 downloads), or a drive-letter path the strict resolver can't map, used
+                        // to dead-end here with a misleading "install folder" toast (reported on NFS Heat, 3.0.7).
+                        val installDir = withContext(Dispatchers.IO) {
+                            runCatching { EaSupport.installDirOf(s) }.getOrNull()
+                        }
+                        val exe = withContext(Dispatchers.IO) {
+                            val resolved = runCatching { WinePath.resolveAndroidPath(s.container, s.path)?.absolutePath }.getOrNull()
+                            // runForShortcut locates the depot from the exe's steam_games/ segment, so prefer a
+                            // path inside the resolved depot when the direct mapping lacks that segment.
+                            resolved?.takeIf { InstallScriptExecutor.locateInstallDir(File(it)) != null }
+                                ?: installDir?.let { File(it, s.path.replace('\\', '/').substringAfterLast('/')).absolutePath }
+                                ?: resolved
+                        }
+                        val appId = withContext(Dispatchers.IO) {
+                            runCatching { EaSupport.resolveSteamAppId(s, installDir) }.getOrDefault(0)
+                        }
+                        if (exe != null && appId > 0) {
+                            withContext(Dispatchers.IO) {
+                                try { InstallScriptExecutor.runForShortcut(context, s.container, appId, exe, true) }
+                                catch (t: Throwable) { android.util.Log.w("ShortcutsScreen", "EA setup failed", t) }
+                            }
+                        } else {
+                            android.util.Log.w("ShortcutsScreen", "EA setup: cannot start for '${s.name}' — exe=$exe appId=$appId path='${s.path}' container=${s.container.id}")
+                            Toast.makeText(
+                                context,
+                                if (exe == null) "Couldn't locate the game's install folder (${s.path})"
+                                else "Couldn't work out this game's Steam app id — re-add it from the Steam library",
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        }
+                        eaSetupBusy = false
+                        eaSetupFor = null
+                    }
+                }) { Text(if (eaSetupBusy) "Starting…" else "Set up") }
+            },
+            dismissButton = { TextButton(enabled = !eaSetupBusy, onClick = { eaSetupFor = null }) { Text("Cancel") } },
+        )
+    }
     launchChoiceFor?.let { s ->
         val appId = steamAppIdOf(s)
         LaunchMethodSheet(
@@ -5013,9 +5114,11 @@ private fun ShortcutItemLayoutL(
                 )
                 ShortcutBadgeOverlay(
                     showSteam = remember(shortcut) { isSteamOriginShortcut(shortcut) },
+                    showEa = remember(shortcut) { EaSupport.isTagged(shortcut) },
                     showEpic = remember(shortcut) { shortcut.getExtra("storeSource") == "epic" },
                     showEos = rememberEosBadge(shortcut),
                     showGog = remember(shortcut) { isGogShortcut(shortcut) },
+                    showAmazon = remember(shortcut) { isAmazonShortcut(shortcut) },
                     showCustom = remember(shortcut) { isCustomOriginShortcut(shortcut) },
                     modifier = Modifier.padding(start = 6.dp),
                 )
@@ -5272,9 +5375,11 @@ private fun ShortcutGridItem(
         // (storeSource==gog or gog_games exec path).
         ShortcutBadgeOverlay(
             showSteam = remember(shortcut) { isSteamOriginShortcut(shortcut) },
+            showEa = remember(shortcut) { EaSupport.isTagged(shortcut) },
             showEpic = remember(shortcut) { shortcut.getExtra("storeSource") == "epic" },
             showEos = rememberEosBadge(shortcut),
             showGog = remember(shortcut) { isGogShortcut(shortcut) },
+            showAmazon = remember(shortcut) { isAmazonShortcut(shortcut) },
             showCustom = remember(shortcut) { isCustomOriginShortcut(shortcut) },
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -6108,9 +6213,12 @@ internal fun ShortcutSettingsDialogScreen(
     }
 
     // Frame Generation engine (off / bionic / lsfg) — per-game override.
-    val fgEngines = remember { listOf("off", "bionic", "lsfg") }
+    // lsfg-vk retired from the list (see ContainerDetailScreen); a legacy "lsfg" override
+    // shows and saves as LSFG Native.
+    val fgEngines = remember { listOf("off", "bionic", "lsfg-native") }
     var frameGenEngine by remember {
-        mutableStateOf(shortcut.getExtra("frameGenEngine", shortcut.container.frameGenEngine))
+        mutableStateOf(shortcut.getExtra("frameGenEngine", shortcut.container.frameGenEngine)
+            .let { if (it == "lsfg") "lsfg-native" else it })
     }
     val lsfgDllAvailable = remember { File(context.filesDir, "lsfg-vk/Lossless.dll").isFile }
 
@@ -7184,7 +7292,7 @@ internal fun ShortcutSettingsDialogScreen(
                         val fgLabels = listOf(
                             stringResource(R.string.frame_generation_off),
                             stringResource(R.string.frame_generation_bionic),
-                            stringResource(R.string.frame_generation_lsfg)
+                            stringResource(R.string.frame_generation_lsfg_native)
                         )
                         val fgIdx = fgEngines.indexOf(frameGenEngine).coerceAtLeast(0)
                         // FG's mailbox/present-mode delivery only exists on the Vulkan host renderer, so
@@ -7201,7 +7309,7 @@ internal fun ShortcutSettingsDialogScreen(
                                 enabled = fgVulkan,
                                 disabledOptions = buildSet {
                                     // bionic-fg re-enabled (2.9.4+) — see ContainerDetailScreen note.
-                                    if (!lsfgDllAvailable) add(fgLabels[2])   // lsfg-vk — needs an imported Lossless.dll
+                                    if (!lsfgDllAvailable) add(fgLabels[2])   // LSFG Native — needs an imported Lossless.dll
                                 },
                                 modifier = (if (!fgVulkan) Modifier.alpha(0.5f) else Modifier).weight(1f)
                             )
@@ -8491,6 +8599,24 @@ private fun SteamBadge(modifier: Modifier = Modifier) {
  * [isCustomOriginShortcut] for the detection rule.
  */
 @Composable
+private fun AmazonBadge(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color(0xFFE47911))
+            .padding(horizontal = 5.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "AMAZON",
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
+/** Amazon-brand orange pill, sized identically to the EPIC/EOS/GOG/STEAM/CUSTOM pills. */
+@Composable
 private fun CustomBadge(modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
@@ -8529,8 +8655,22 @@ private fun isCustomOriginShortcut(shortcut: Shortcut): Boolean {
     if (src.isNotEmpty() && src != "custom") return false
     if (isSteamOriginShortcut(shortcut)) return false
     if (isGogShortcut(shortcut)) return false
+    if (isAmazonShortcut(shortcut)) return false
     return true
 }
+
+/**
+ * True when a shortcut is an Amazon Games title. New Amazon shortcuts are tagged
+ * `storeSource=amazon` (StarLaunchBridge store overload); pre-tagging ones are recognised by the exec
+ * path living under the Amazon install root (`imagefs/Amazon/<title>/…` → `Z:\Amazon\…`).
+ */
+internal fun isAmazonShortcut(shortcut: Shortcut): Boolean {
+    if (shortcut.getExtra("storeSource") == "amazon") return true
+    val p = shortcut.path ?: return false
+    return AMAZON_ROOT_RE.containsMatchIn(p)
+}
+
+private val AMAZON_ROOT_RE = Regex("""(^|[\\/])Amazon[\\/]""")
 
 /**
  * EPIC + EOS + GOG pills clustered for the top-left corner of a shortcut's cover art. Caller aligns
@@ -8943,21 +9083,46 @@ private fun ChangeExecutableCoordinator(
     }
 }
 
+/**
+ * Marks a Steam title that runs through EA Desktop (shortcut tag `eaSupport=1`, see [EaSupport]) —
+ * it launches via SteamLite and needs the one-time EA setup. EA-brand red pill, sized like the others.
+ */
+@Composable
+private fun EaBadge(modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color(0xFFC8102E))
+            .padding(horizontal = 5.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "EA",
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
 @Composable
 private fun ShortcutBadgeOverlay(
     showSteam: Boolean = false,
     showEpic: Boolean,
     showEos: Boolean,
     showGog: Boolean,
+    showAmazon: Boolean = false,
     showCustom: Boolean = false,
+    showEa: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    if (!showSteam && !showEpic && !showEos && !showGog && !showCustom) return
+    if (!showSteam && !showEpic && !showEos && !showGog && !showAmazon && !showCustom && !showEa) return
     Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         if (showSteam) SteamBadge()
+        if (showEa) EaBadge()
         if (showEpic) EpicBadge()
         if (showEos) EosBadge()
         if (showGog) GogBadge()
+        if (showAmazon) AmazonBadge()
         if (showCustom) CustomBadge()
     }
 }
