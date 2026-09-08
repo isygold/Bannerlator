@@ -109,6 +109,12 @@ import com.winlator.star.contentdialog.VegasKeyKnowledge
 import com.winlator.star.contentdialog.VegasTierPresets
 import com.winlator.star.container.VegasLiveCheck
 import com.winlator.star.core.HttpUtils
+import com.winlator.star.profiler.ProfilerSession
+import com.winlator.star.profiler.ProfilerRecommendations
+import com.winlator.star.profiler.ProfilerResultsDialog
+import com.winlator.star.widget.FpsCounter
+import com.winlator.star.widget.HudMetrics
+import com.winlator.star.XServerDisplayActivity
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandMore
@@ -4273,6 +4279,58 @@ internal fun DxvkConfigDialog(
                                 )
                             }
                         }
+                    }
+                }
+                // Profile Game button — launches game with 30s profiling session
+                if (isVegas) {
+                    Spacer(Modifier.height(8.dp))
+                    val profilerContext = LocalContext.current
+                    var showProfilerResults by remember { mutableStateOf(false) }
+                    var profilerSession by remember { mutableStateOf<ProfilerSession?>(null) }
+                    var profilerRecs by remember { mutableStateOf<List<ProfilerRecommendations.Recommendation>>(emptyList()) }
+
+                    // Check for cached results when returning to this screen
+                    LaunchedEffect(Unit) {
+                        val session = ProfilerSession(FpsCounter(), HudMetrics(profilerContext))
+                        val cached = session.getLastSummary(profilerContext, containerId)
+                        if (cached != null) {
+                            val (ts, summary) = cached
+                            profilerSession = session
+                            // We don't have the full readings for cached results, so create a synthetic one
+                            showProfilerResults = true
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            val intent = android.content.Intent(profilerContext, XServerDisplayActivity::class.java)
+                            intent.putExtra("container_id", containerId)
+                            intent.putExtra("profile_mode", true)
+                            profilerContext.startActivity(intent)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        )
+                    ) {
+                        Text("📊 Profile Game")
+                    }
+
+                    // Show cached profiler results if available
+                    if (showProfilerResults && profilerSession?.summary != null) {
+                        ProfilerResultsDialog(
+                            session = profilerSession!!,
+                            recommendations = profilerRecs,
+                            onApplySettings = { showProfilerResults = false },
+                            onReProfile = {
+                                showProfilerResults = false
+                                val intent = android.content.Intent(profilerContext, XServerDisplayActivity::class.java)
+                                intent.putExtra("container_id", containerId)
+                                intent.putExtra("profile_mode", true)
+                                profilerContext.startActivity(intent)
+                            },
+                            onDismiss = { showProfilerResults = false }
+                        )
                     }
                 }
                 if (isVegas) {
