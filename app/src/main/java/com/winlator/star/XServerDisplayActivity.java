@@ -262,6 +262,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     // Single authoritative FPS source: ticked once per present, read by every overlay so they all
     // show the identical number (there is one place per renderer to feed).
     private final FpsCounter fpsCounter = new FpsCounter();
+    // Profiler mode — set when launched with profile_mode=true intent extra
+    private boolean profilerMode = false;
+    private com.winlator.star.profiler.ProfilerSession profilerSession;
+    private com.winlator.star.profiler.ProfilerOverlay profilerOverlay;
     // Lazily built when the Task Manager first polls; snapshots CPU/GPU/RAM/battery for the header.
     private com.winlator.star.widget.HudMetrics tmHudMetrics;
     private boolean fpsHudHorizontal = false;   // active FPS-overlay orientation (tap to toggle in-game)
@@ -2071,6 +2075,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Initialize playtime tracking
         playtimePrefs = getSharedPreferences("playtime_stats", MODE_PRIVATE);
         shortcutName = getIntent().getStringExtra("shortcut_name");
+        // Profiler mode — launched from ContainerDetailScreen "Profile Game" button
+        profilerMode = getIntent().getBooleanExtra("profile_mode", false);
 
         // Ensure shortcutPath is not null before proceeding
         if (shortcutPath != null && !shortcutPath.isEmpty()) {
@@ -6172,6 +6178,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (inGameControlsEditor != null) {
             inGameControlsEditor.dispose();
             inGameControlsEditor = null;
+        }
+        // Stop profiler session if still running
+        if (profilerSession != null && profilerSession.getIsRunning()) {
+            profilerSession.stop();
+            profilerSession.saveToPrefs(this, container != null ? container.getId() : 0);
         }
         super.onDestroy();
         // Power-user perf: stop the thermal watchdog and revert any privileged sysfs writes on game
@@ -11505,6 +11516,11 @@ return true;
                 frameRatingWindowId = window.id;
                 Log.d("XServerDisplayActivity", "Showing hud for Window " + window.getName());
 
+                // Start profiler session on first window map (if profiler mode)
+                if (profilerMode && profilerSession == null) {
+                    runOnUiThread(this::startProfilerSession);
+                }
+
                 runOnUiThread(() -> {
                     // Respect the master toggle: a binding window must not reveal the HUD while "Show
                     // HUD" is off. When it's turned back on, onFpsConfigApply re-asserts visibility.
@@ -11582,6 +11598,78 @@ return true;
                 }
             }
         }
+    }
+
+    // ── Profiler mode ─────────────────────────────────────────────────────
+    /**
+     * Called when the first game window maps in profiler mode.
+     * Starts the 30-second profiling session and shows the overlay.
+     */
+    private void startProfilerSession() {
+        if (profilerSession != null && profilerSession.getIsRunning()) return;
+
+        com.winlator.star.widget.HudMetrics metrics = new com.winlator.star.widget.HudMetrics(this);
+        profilerSession = new com.winlator.star.profiler.ProfilerSession(fpsCounter, metrics);
+
+        // Create and show the overlay
+        profilerOverlay = new com.winlator.star.profiler.ProfilerOverlay(this);
+        profilerOverlay.setSession(profilerSession);
+        profilerOverlay.setStopEarlyListener(new com.winlator.star.profiler.ProfilerOverlay.onStopEarlyListener() {
+            @Override
+            public void onStopEarly() {
+                runOnUiThread(() -> stopProfilerSession());
+            }
+        });
+
+        FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            android.view.Gravity.TOP | android.view.Gravity.END
+        );
+        lp.topMargin = 80;
+        lp.rightMargin = 16;
+        profilerOverlay.setLayoutParams(lp);
+        rootView.addView(profilerOverlay);
+
+        // Start the session on a coroutine scope
+        kotlinx.coroutines.CoroutineScope scope = kotlinx.coroutines.GlobalScope.INSTANCE;
+        profilerSession.start(scope);
+
+        // Update overlay every 500ms
+        android.os.Handler uiHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        Runnable overlayUpdater = new Runnable() {
+            @Override
+            public void run() {
+                if (profilerSession == null || !profilerSession.getIsRunning()) return;
+                float fps = fpsCounter.getCurrentFPS();
+                java.lang.Integer cpu = metrics.getCpuUsagePercent();
+                profilerOverlay.updateMetrics(fps, cpu);
+                uiHandler.postDelayed(this, 500);
+            }
+        };
+        uiHandler.postDelayed(overlayUpdater, 500);
+
+        Log.d("XServerDisplayActivity", "Profiler session started");
+    }
+
+    /**
+     * Stop the profiling session, remove overlay, and save results.
+     */
+    private void stopProfilerSession() {
+        if (profilerSession == null) return;
+        profilerSession.stop();
+        profilerSession.saveToPrefs(this, container != null ? container.getId() : 0);
+
+        // Remove overlay
+        if (profilerOverlay != null) {
+            FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
+            rootView.removeView(profilerOverlay);
+            profilerOverlay = null;
+        }
+
+        Log.d("XServerDisplayActivity", "Profiler session complete — avg " +
+            String.format(java.util.Locale.US, "%.1f", profilerSession.getSummary().getAvgFps()) + " FPS");
     }
 
 
