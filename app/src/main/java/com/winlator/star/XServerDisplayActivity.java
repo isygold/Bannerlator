@@ -6406,6 +6406,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String vegasVersion = dxwrapperConfig.get("version");
             if (vegasVersion == null || vegasVersion.isEmpty())
                 vegasVersion = DefaultVersion.getVegasDefault();
+            // Save installed version for update checker (VegasUpdateChecker)
+            com.winlator.star.container.VegasUpdateChecker.INSTANCE.saveInstalledVersion(this, vegasVersion);
             String ddrawrapper = dxwrapperConfig.get("ddrawrapper");
             String vkd3dVersion = dxwrapperConfig.get("vkd3dVersion");
             String vkd3dPart = (vkd3dVersion != null && !vkd3dVersion.isEmpty() && !vkd3dVersion.equals("none") && !vkd3dVersion.equals("None"))
