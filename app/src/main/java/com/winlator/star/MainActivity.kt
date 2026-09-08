@@ -58,6 +58,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.winlator.star.core.UpdateManager
+import com.winlator.star.container.VegasUpdateChecker
+import com.winlator.star.ui.dialogs.VegasUpdateDialog
+import com.winlator.star.ui.dialogs.openVegasReleasesPage
 import androidx.compose.runtime.rememberCoroutineScope
 import com.winlator.star.ui.LocalTopBarActions
 import com.winlator.star.ui.topBarActionsState
@@ -228,6 +231,40 @@ class MainActivity : AppCompatActivity() {
                 val isInstalling by splashViewModel.isInstalling.collectAsState()
                 val installProgress by splashViewModel.progress.collectAsState()
                 val showProceed by splashViewModel.showProceed.collectAsState()
+
+                // VEGAS update notification — check on app start
+                var showVegasUpdate by remember { mutableStateOf(false) }
+                var vegasUpdateTag by remember { mutableStateOf("") }
+                var vegasUpdateBody by remember { mutableStateOf("") }
+                var vegasUpdateInstalled by remember { mutableStateOf("") }
+
+                LaunchedEffect(Unit) {
+                    val ctx = this@MainActivity
+                    VegasUpdateChecker.checkForUpdate(ctx) { release ->
+                        if (release != null) {
+                            vegasUpdateTag = release.tag
+                            vegasUpdateBody = release.body
+                            vegasUpdateInstalled = VegasUpdateChecker.getInstalledVersion(ctx) ?: "unknown"
+                            showVegasUpdate = true
+                        }
+                    }
+                }
+
+                if (showVegasUpdate) {
+                    VegasUpdateDialog(
+                        currentVersion = vegasUpdateInstalled,
+                        latestTag = vegasUpdateTag,
+                        releaseBody = vegasUpdateBody,
+                        onSkip = {
+                            VegasUpdateChecker.recordSkip(this@MainActivity, vegasUpdateTag)
+                            showVegasUpdate = false
+                        },
+                        onOpenReleases = {
+                            openVegasReleasesPage(this@MainActivity)
+                            showVegasUpdate = false
+                        }
+                    )
+                }
 
                 Box(modifier = Modifier.fillMaxSize()) {
                     AppShell(
