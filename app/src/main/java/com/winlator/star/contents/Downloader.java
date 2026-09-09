@@ -33,6 +33,9 @@ public class Downloader {
      * scratch, and a server that answers 416 (range past EOF) is treated as "already complete".
      */
     public static boolean downloadFile(String address, File file, boolean resume, ProgressListener listener) {
+        HttpURLConnection http = null;
+        InputStream input = null;
+        OutputStream output = null;
         try {
             long existing = (resume && file.exists()) ? file.length() : 0;
 
@@ -40,6 +43,7 @@ public class Downloader {
             URLConnection connection = url.openConnection();
             connection.setConnectTimeout(15000);
             connection.setReadTimeout(30000);
+            connection.setRequestProperty("User-Agent", "Bannerlator");
             if (existing > 0) connection.setRequestProperty("Range", "bytes=" + existing + "-");
 
             boolean append = false;
@@ -47,7 +51,7 @@ public class Downloader {
             long total;
 
             if (connection instanceof HttpURLConnection) {
-                HttpURLConnection http = (HttpURLConnection) connection;
+                http = (HttpURLConnection) connection;
                 int code = http.getResponseCode();
                 if (existing > 0 && code == HttpURLConnection.HTTP_PARTIAL) {
                     // 206: server honoured the range — resume by appending.
@@ -66,8 +70,8 @@ public class Downloader {
                 total = connection.getContentLengthLong();
             }
 
-            InputStream input = connection.getInputStream();
-            OutputStream output = new FileOutputStream(file.getAbsolutePath(), append);
+            input = connection.getInputStream();
+            output = new FileOutputStream(file.getAbsolutePath(), append);
 
             byte[] data = new byte[8192];
 
@@ -87,34 +91,40 @@ public class Downloader {
             }
 
             output.flush();
-            output.close();
-            input.close();
             if (listener != null) listener.onProgress(1f);
             return true;
         } catch (Exception e) {
             e.printStackTrace();
             return false;
+        } finally {
+            try { if (output != null) output.close(); } catch (Exception ignored) {}
+            try { if (input != null) input.close(); } catch (Exception ignored) {}
         }
     }
 
     public static String downloadString(String address) {
+        InputStream input = null;
+        BufferedReader reader = null;
         try {
             URL url = new URL(address);
             URLConnection connection = url.openConnection();
             connection.setConnectTimeout(15000);
             connection.setReadTimeout(30000);
-            InputStream input = connection.getInputStream();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(input));
+            connection.setRequestProperty("User-Agent", "Bannerlator");
+            input = connection.getInputStream();
+            reader = new BufferedReader(new InputStreamReader(input));
             StringBuilder sb = new StringBuilder();
-            String line = null;
+            String line;
             while ((line = reader.readLine()) != null) {
                 sb.append(line).append("\n");
             }
-            reader.close();
             return sb.toString();
         } catch (Exception e) {
             e.printStackTrace();
             return null;
+        } finally {
+            try { if (reader != null) reader.close(); } catch (Exception ignored) {}
+            try { if (input != null) input.close(); } catch (Exception ignored) {}
         }
     }
 }

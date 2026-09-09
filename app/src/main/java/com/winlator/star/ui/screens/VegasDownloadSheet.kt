@@ -228,6 +228,7 @@ Column(modifier = Modifier.weight(1f)) {
                                                 installWcp(context, cm, uri) { ok, profile ->
                                                     installing = false
                                                     if (ok) {
+                                                        cleanupWcpCache(context, release.tagName)
                                                         cm.syncContents()
                                                         // Config is shipped ALONGSIDE the wcp (same release asset),
                                                         // never inside it — fetch it on the same tap and park it at
@@ -250,6 +251,14 @@ Column(modifier = Modifier.weight(1f)) {
                                                                             confDir, confName,
                                                                             release.tagName, assetName, confUrl,
                                                                         )
+                                                                    } else {
+                                                                        android.util.Log.w("VegasDownloadSheet",
+                                                                            "Config side-fetch failed for ${release.tagName} — build installed but stock config absent")
+                                                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                                                            android.widget.Toast.makeText(context,
+                                                                                "Build installed, but config download failed — using defaults",
+                                                                                android.widget.Toast.LENGTH_LONG).show()
+                                                                        }
                                                                     }
                                                                 } else if (confName != null) {
                                                                     // Release ships NO config asset (repo reality: 2 of 5 builds
@@ -324,6 +333,9 @@ Column(modifier = Modifier.weight(1f)) {
  *  never has to guess the asset shape from the filename. */
 private fun provenanceFile(confDir: File): File = File(confDir, ".provenance.json")
 
+/** Lock for provenance read-modify-write to prevent concurrent coroutine corruption. */
+private val provenanceLock = Any()
+
 private fun recordStockProvenance(
     confDir: File,
     verName: String,
@@ -332,17 +344,19 @@ private fun recordStockProvenance(
     url: String,
 ) {
     try {
-        val f = provenanceFile(confDir)
-        val obj = if (f.exists()) JSONObject(f.readText()) else JSONObject()
-        obj.put(
-            verName,
-            JSONObject()
-                .put("tag", tag)
-                .put("assetName", assetName)
-                .put("url", url)
-                .put("parkedAt", System.currentTimeMillis()),
-        )
-        f.writeText(obj.toString())
+        synchronized(provenanceLock) {
+            val f = provenanceFile(confDir)
+            val obj = if (f.exists()) JSONObject(f.readText()) else JSONObject()
+            obj.put(
+                verName,
+                JSONObject()
+                    .put("tag", tag)
+                    .put("assetName", assetName)
+                    .put("url", url)
+                    .put("parkedAt", System.currentTimeMillis()),
+            )
+            f.writeText(obj.toString())
+        }
     } catch (e: Exception) {
         // sidecar is best-effort; the parked file itself remains valid
     }
@@ -350,11 +364,13 @@ private fun recordStockProvenance(
 
 private fun removeStockProvenance(confDir: File, verName: String) {
     try {
-        val f = provenanceFile(confDir)
-        if (!f.exists()) return
-        val obj = JSONObject(f.readText())
-        obj.remove(verName)
-        if (obj.length() == 0) f.delete() else f.writeText(obj.toString())
+        synchronized(provenanceLock) {
+            val f = provenanceFile(confDir)
+            if (!f.exists()) return
+            val obj = JSONObject(f.readText())
+            obj.remove(verName)
+            if (obj.length() == 0) f.delete() else f.writeText(obj.toString())
+        }
     } catch (e: Exception) {
         // best-effort cleanup only
     }
@@ -362,11 +378,20 @@ private fun removeStockProvenance(confDir: File, verName: String) {
 
 /** Download a .wcp file to cache dir and return a content:// URI. */
 private fun downloadWcp(context: Context, url: String, tag: String, onProgress: ((Float) -> Unit)? = null): Uri? {
-    val f = File(context.cacheDir, "vegas_${tag}.wcp")
+    // Sanitize tag for filesystem safety (strip path separators and non-safe chars)
+    val safeTag = tag.replace(Regex("[^A-Za-z0-9._-]"), "_")
+    val f = File(context.cacheDir, "vegas_${safeTag}.wcp")
     val listener = if (onProgress != null) object : Downloader.ProgressListener {
         override fun onProgress(fraction: Float) { onProgress(fraction) }
     } else null
     return if (Downloader.downloadFile(url, f, listener)) Uri.fromFile(f) else null
+}
+
+/** Clean up a cached .wcp file after successful install. */
+private fun cleanupWcpCache(context: Context, tag: String) {
+    val safeTag = tag.replace(Regex("[^A-Za-z0-9._-]"), "_")
+    val f = File(context.cacheDir, "vegas_${safeTag}.wcp")
+    if (f.exists()) f.delete()
 }
 
 /** Install a .wcp content package via ContentsManager; reports the installed profile
@@ -508,14 +533,24 @@ internal object VegasStockConfigFetcher {
                 context, ContentProfile.ContentType.CONTENT_TYPE_VEGAS), "configs")
             if (!confDir.exists()) confDir.mkdirs()
             var last: ParkResult? = null
+            // Download once to a temp file, then copy to each target (avoids redundant HTTP requests)
+            val tmpFile = java.io.File(confDir, ".tmp_conf_${rel.tag}")
+            val downloaded = Downloader.downloadFile(rel.confUrl, tmpFile, null)
+            if (!downloaded) {
+                tmpFile.delete()
+                return@runCatching ParkResult.Fail("download failed")
+            }
             for (verName in targets) {
                 val parked = java.io.File(confDir, "$verName.conf")
-                if (!Downloader.downloadFile(rel.confUrl, parked, null)) {
-                    last = ParkResult.Fail("download failed"); continue
+                try {
+                    tmpFile.copyTo(parked, overwrite = true)
+                } catch (_: Exception) {
+                    last = ParkResult.Fail("copy failed for $verName"); continue
                 }
                 recordStockProvenance(confDir, verName, rel.tag, assetName, rel.confUrl)
                 last = ParkResult.Ok(verName)
             }
+            tmpFile.delete()
             last ?: ParkResult.Fail("no target version derived")
         }.getOrElse { ParkResult.Fail(it.message ?: "unknown error") }
     }
