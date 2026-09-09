@@ -106,7 +106,7 @@ class ProfilerSession(
                         cpuPercent = cpu,
                         gpuLoadPercent = gpuLoad,
                         vramUsedBytes = vram,
-                        ramPercent = ram
+                        ramPercent = ram.toInt()
                     )
                 )
 
