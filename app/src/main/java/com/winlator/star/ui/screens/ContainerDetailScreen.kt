@@ -1,9 +1,6 @@
 @file:OptIn(ExperimentalMaterial3Api::class)
 package com.winlator.star.ui.screens
 
-import androidx.compose.runtime.mutableIntStateOf
-import com.winlator.star.core.PresetScope
-import com.winlator.star.core.PresetOverrides
 import android.app.Activity
 import android.content.Context
 import android.net.Uri
@@ -45,6 +42,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -52,6 +50,7 @@ import android.content.res.Configuration
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -119,9 +118,7 @@ import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.em
-import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -822,18 +819,12 @@ private fun TopLevelFields(
         }
 
         // Screen Size
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            LabeledDropdown(
-                label = stringResource(R.string.screen_size),
-                options = viewModel.screenSizeEntries,
-                selectedOption = viewModel.selectedScreenSize,
-                onSelect = { viewModel.selectedScreenSize = it },
-                modifier = Modifier.weight(1f)
-            )
-            IconButton(onClick = { helpRes = R.string.help_screen_size }) {
-                Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-            }
-        }
+        LabeledDropdown(
+            label = stringResource(R.string.screen_size),
+            options = viewModel.screenSizeEntries,
+            selectedOption = viewModel.selectedScreenSize,
+            onSelect = { viewModel.selectedScreenSize = it }
+        )
         if (viewModel.selectedScreenSize.equals("custom", ignoreCase = true)) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
@@ -1903,27 +1894,6 @@ private fun AdvancedTab(
     // Per-field "?" help — centered scrollable Compose dialog (same as the General tab).
     var helpRes by remember { mutableStateOf<Int?>(null) }
     helpRes?.let { HelpDialog(it) { helpRes = null } }
-
-    // Bumped whenever a preset's values or the preset list change, so the "customised" badges
-    // re-evaluate. The badge state lives on the Container object rather than in Compose state, so
-    // there is nothing for Compose to observe on its own.
-    var presetRevision by remember { mutableIntStateOf(0) }
-    val box64PresetCustomised = remember(
-        presetRevision, viewModel.selectedBox64PresetIndex, viewModel.box64PresetEntries
-    ) {
-        PresetOverrides.isCustomised(
-            context, false, viewModel.selectedBox64PresetId,
-            PresetScope.CONTAINER, viewModel.container, null
-        )
-    }
-    val fexPresetCustomised = remember(
-        presetRevision, viewModel.selectedFEXCorePresetIndex, viewModel.fexCorePresetEntries
-    ) {
-        PresetOverrides.isCustomised(
-            context, true, viewModel.selectedFEXCorePresetId,
-            PresetScope.CONTAINER, viewModel.container, null
-        )
-    }
     // Flush legacy CPUListView selections back to the ViewModel before the tab
     // leaves composition, so a tab switch doesn't drop in-progress edits.
     DisposableEffect(Unit) {
@@ -1950,25 +1920,11 @@ private fun AdvancedTab(
                 ContentInstallGear(onDownloadFile = onShowBox64DownloadSheet)
             }
             Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                LabeledDropdown(
-                    label = "$emulatorLabel Preset",
-                    options = viewModel.box64PresetEntries,
-                    selectedOption = viewModel.box64PresetEntries.getOrElse(viewModel.selectedBox64PresetIndex) { "" },
-                    onSelect = { opt -> viewModel.selectedBox64PresetIndex = viewModel.box64PresetEntries.indexOf(opt).coerceAtLeast(0) },
-                    modifier = Modifier.weight(1f)
-                )
-                if (box64PresetCustomised) PresetCustomBadge()
-            }
-            PresetEditorRow(
-                kind = PresetKind.BOX64,
-                selectedPresetId = viewModel.selectedBox64PresetId,
-                scope = PresetScope.CONTAINER,
-                container = viewModel.container,
-                shortcut = null,
-                onSelect = { viewModel.selectBox64PresetById(it) },
-                onListChanged = { viewModel.reloadPresetLists(context); presetRevision++ },
-                onValuesChanged = { presetRevision++ },
+            LabeledDropdown(
+                label = "$emulatorLabel Preset",
+                options = viewModel.box64PresetEntries,
+                selectedOption = viewModel.box64PresetEntries.getOrElse(viewModel.selectedBox64PresetIndex) { "" },
+                onSelect = { opt -> viewModel.selectedBox64PresetIndex = viewModel.box64PresetEntries.indexOf(opt).coerceAtLeast(0) }
             )
         }
 
@@ -2000,20 +1956,7 @@ private fun AdvancedTab(
                     IconButton(onClick = { helpRes = R.string.help_fexcore_preset }) {
                         Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
                     }
-                    if (fexPresetCustomised) PresetCustomBadge()
                 }
-                // Edits made here belong to THIS container: they are stored on it and its games
-                // follow them, while the shared preset and every other container stay as they were.
-                PresetEditorRow(
-                    kind = PresetKind.FEXCORE,
-                    selectedPresetId = viewModel.selectedFEXCorePresetId,
-                    scope = PresetScope.CONTAINER,
-                    container = viewModel.container,
-                    shortcut = null,
-                    onSelect = { viewModel.selectFEXCorePresetById(it) },
-                    onListChanged = { viewModel.reloadPresetLists(context); presetRevision++ },
-                    onValuesChanged = { presetRevision++ },
-                )
             }
         }
 
@@ -3606,23 +3549,6 @@ internal fun DxvkConfigDialog(
     }
     var asyncEnabled         by remember { mutableStateOf(config.get("async") == "1") }
     var asyncCacheEnabled    by remember { mutableStateOf(config.get("asyncCache") == "1") }
-    // Texture filtering: labels index-aligned with DXVKConfigDialog.ANISOTROPY_VALUES / LOD_BIAS_VALUES.
-    val anisotropyLabels = remember { listOf("Game default", "2x", "4x", "8x", "16x") }
-    val lodBiasLabels = remember {
-        listOf("Game default", "Auto (match scaling mode)", "Sharper (-0.25)", "Sharper (-0.5)",
-               "Sharper (-0.75)", "Sharpest (-1.0)")
-    }
-    var selectedAnisotropy by remember {
-        val i = DXVKConfigDialog.ANISOTROPY_VALUES.indexOf(config.get("anisotropy"))
-        mutableStateOf(anisotropyLabels[if (i >= 0) i else 0])
-    }
-    var selectedLodBias by remember {
-        val i = DXVKConfigDialog.LOD_BIAS_VALUES.indexOf(config.get("lodBias"))
-        mutableStateOf(lodBiasLabels[if (i >= 0) i else 0])
-    }
-    // "?" help for the two texture-filtering rows (opens above this sheet).
-    var textureHelpRes by remember { mutableStateOf<Int?>(null) }
-    textureHelpRes?.let { HelpDialog(it) { textureHelpRes = null } }
 
     // VEGAS knowledge layer: bundled asset or null (null -> unclassified fallback).
     val vegasKnowledge = remember {
@@ -4217,29 +4143,6 @@ internal fun DxvkConfigDialog(
                     Spacer(Modifier.height(8.dp))
                 }
                 LabeledDropdown(stringResource(R.string.frame_rate), framerateEntries, selectedFramerate, { selectedFramerate = it })
-                Spacer(Modifier.height(8.dp))
-                SectionLabel("TEXTURE FILTERING")
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    LabeledDropdown("Anisotropic filtering", anisotropyLabels, selectedAnisotropy, { selectedAnisotropy = it },
-                        modifier = Modifier.weight(1f))
-                    IconButton(onClick = { textureHelpRes = R.string.help_anisotropic_filtering }) {
-                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    LabeledDropdown("Texture sharpness", lodBiasLabels, selectedLodBias, { selectedLodBias = it },
-                        modifier = Modifier.weight(1f))
-                    IconButton(onClick = { textureHelpRes = R.string.help_texture_sharpness }) {
-                        Icon(Icons.Default.Help, contentDescription = "What is this?", modifier = Modifier.size(18.dp))
-                    }
-                }
-                Text(
-                    "DirectX 9-11 games only. Applies the next time the game starts.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
                 Spacer(Modifier.height(8.dp))
                 SectionLabel("API FEATURE LEVEL")
                 LabeledDropdown("", featureLevelEntries, selectedFeatureLevel, { selectedFeatureLevel = it })
@@ -5131,8 +5034,6 @@ internal fun DxvkConfigDialog(
                 cfg.put("framerate", StringUtils.parseNumber(selectedFramerate))
                 cfg.put("async", if (asyncEnabled && dxvkType != DXVKConfigDialog.DXVK_TYPE_NONE) "1" else "0")
                 cfg.put("asyncCache", if (asyncCacheEnabled && dxvkType == DXVKConfigDialog.DXVK_TYPE_GPLASYNC) "1" else "0")
-                cfg.put("anisotropy", DXVKConfigDialog.ANISOTROPY_VALUES[anisotropyLabels.indexOf(selectedAnisotropy).coerceAtLeast(0)])
-                cfg.put("lodBias", DXVKConfigDialog.LOD_BIAS_VALUES[lodBiasLabels.indexOf(selectedLodBias).coerceAtLeast(0)])
                 cfg.put("vkd3dVersion", selectedVkd3d)
                 cfg.put("vkd3dLevel", selectedFeatureLevel)
                 cfg.put("ddrawrapper", StringUtils.parseIdentifier(selectedDdra))
