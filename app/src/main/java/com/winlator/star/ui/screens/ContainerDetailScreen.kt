@@ -42,6 +42,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -50,8 +51,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -119,9 +118,7 @@ import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.ui.graphics.lerp
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.em
-import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
