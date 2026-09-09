@@ -84,7 +84,14 @@ object VegasUpdateChecker {
                     return@download
                 }
 
-                if (cleanLatest.compareTo(cleanInstalled) <= 0) {
+                // Use integer-segment comparison (handles "2.10.0" > "2.9.0" correctly)
+                val cmp = try {
+                    com.winlator.star.contentdialog.DXVKConfigDialog.compareVersion(cleanLatest, cleanInstalled)
+                } catch (_: NumberFormatException) {
+                    // Fallback to string comparison if version has non-numeric segments
+                    cleanLatest.compareTo(cleanInstalled)
+                }
+                if (cmp <= 0) {
                     // Installed is same or newer — nothing to notify
                     onResult.call(null)
                     return@download
@@ -119,14 +126,17 @@ object VegasUpdateChecker {
     }
 
     /**
-     * Normalize a tag for comparison: strip leading 'v', strip "vegas-" prefix.
-     * "v2.7.3-vegas" → "2.7.3"
-     * "2.4.1-3137660" → "2.4.1-3137660"
+     * Normalize a tag for comparison: strip leading 'v', strip "vegas-" prefix,
+     * strip build-number suffix after hyphen (e.g. "2.4.1-3137660" → "2.4.1").
+     * Returns the semver portion suitable for DXVKConfigDialog.compareVersion().
      */
     private fun normalizeTag(tag: String): String {
         var t = tag.trim()
         if (t.startsWith("v")) t = t.substring(1)
         if (t.startsWith("vegas-")) t = t.substring("vegas-".length)
+        // Strip build-number suffix: "2.4.1-3137660" → "2.4.1"
+        val hyphen = t.indexOf('-')
+        if (hyphen > 0) t = t.substring(0, hyphen)
         return t
     }
 

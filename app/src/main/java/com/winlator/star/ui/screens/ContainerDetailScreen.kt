@@ -467,6 +467,11 @@ fun ContainerDetailScreen(
             onContentChanged = { dxvkRefreshKey++ }
         )
     }
+    if (showStockConfigSheet) {
+        StockConfigDownloadSheet(
+            onDismiss = { showStockConfigSheet = false; showDxvkConfig = true }
+        )
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
