@@ -227,7 +227,6 @@ fun ContainerDetailScreen(
         // The single scrolling content region — identical in portrait and landscape, so both layouts
         // reuse it. A bottom buffer (FAB + nav-bar inset + margin) is the ONLY reserved space, so
         // content reaches near the bottom instead of stopping in a dead zone.
-        val isVegasWrapper = StringUtils.parseIdentifier(viewModel.selectedDXWrapper ?: "").contains("vegas")
         val mainContent: @Composable () -> Unit = {
             val bottomBuffer = 72.dp +
                 WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
@@ -254,7 +253,7 @@ fun ContainerDetailScreen(
                             )
                             WineConfigTab(viewModel, colorPickerViewRef)
                             // Profile Game button — launches game with 30s profiling session
-                            if (isVegasWrapper) {
+                            if (StringUtils.parseIdentifier(viewModel.selectedDXWrapper ?: "").contains("vegas")) {
                                 Spacer(Modifier.height(8.dp))
                                 val profilerContext = LocalContext.current
                                 var showProfilerResults by remember { mutableStateOf(false) }
@@ -390,6 +389,7 @@ fun ContainerDetailScreen(
             onDismiss = { showGraphicsDriverConfig = false }
         )
     }
+    val isVegasWrapper = StringUtils.parseIdentifier(viewModel.selectedDXWrapper ?: "").contains("vegas")
     // Mali compat/bcn testers need DXVK 1.x reachable even with VKD3D selected, to try the
     // 1.10.3 adapter-accept workaround (#137). Relax the #113 DXVK-2.x-only filter ONLY for the
     // "Wrapper + compat + bcn" driver; every other driver keeps the guard unchanged.
