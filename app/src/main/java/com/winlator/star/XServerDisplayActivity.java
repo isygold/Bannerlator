@@ -6180,9 +6180,9 @@ public class XServerDisplayActivity extends AppCompatActivity {
             inGameControlsEditor = null;
         }
         // Stop profiler session if still running
-        if (profilerSession != null && profilerSession.getIsRunning()) {
+        if (profilerSession != null && profilerSession.isRunning()) {
             profilerSession.stop();
-            profilerSession.saveToPrefs(this, container != null ? container.getId() : 0);
+            profilerSession.saveToPrefs(this, container != null ? container.id : 0);
         }
         super.onDestroy();
         // Power-user perf: stop the thermal watchdog and revert any privileged sysfs writes on game
@@ -11606,7 +11606,7 @@ return true;
      * Starts the 30-second profiling session and shows the overlay.
      */
     private void startProfilerSession() {
-        if (profilerSession != null && profilerSession.getIsRunning()) return;
+        if (profilerSession != null && profilerSession.isRunning()) return;
 
         com.winlator.star.widget.HudMetrics metrics = new com.winlator.star.widget.HudMetrics(this);
         profilerSession = new com.winlator.star.profiler.ProfilerSession(fpsCounter, metrics);
@@ -11641,7 +11641,7 @@ return true;
         Runnable overlayUpdater = new Runnable() {
             @Override
             public void run() {
-                if (profilerSession == null || !profilerSession.getIsRunning()) return;
+                if (profilerSession == null || !profilerSession.isRunning()) return;
                 float fps = fpsCounter.getCurrentFPS();
                 java.lang.Integer cpu = metrics.getCpuUsagePercent();
                 profilerOverlay.updateMetrics(fps, cpu);
@@ -11659,7 +11659,7 @@ return true;
     private void stopProfilerSession() {
         if (profilerSession == null) return;
         profilerSession.stop();
-        profilerSession.saveToPrefs(this, container != null ? container.getId() : 0);
+        profilerSession.saveToPrefs(this, container != null ? container.id : 0);
 
         // Remove overlay
         if (profilerOverlay != null) {
