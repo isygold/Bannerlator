@@ -12636,13 +12636,15 @@ return true;
         });
 
         FrameLayout rootView = findViewById(R.id.FLXServerDisplay);
+        int overlayMaxWidthPx = (int) (320 * getResources().getDisplayMetrics().density);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
+            overlayMaxWidthPx,
             ViewGroup.LayoutParams.WRAP_CONTENT,
             android.view.Gravity.TOP | android.view.Gravity.END
         );
         lp.topMargin = 80;
         lp.rightMargin = 16;
+        lp.leftMargin = 16;
         profilerOverlay.setLayoutParams(lp);
         rootView.addView(profilerOverlay);
 
@@ -12655,7 +12657,11 @@ return true;
         Runnable overlayUpdater = new Runnable() {
             @Override
             public void run() {
-                if (profilerSession == null || !profilerSession.isRunning()) return;
+                if (profilerSession == null || !profilerSession.isRunning()) {
+                    // Session ended (timer expired) — auto-dismiss overlay and show results
+                    runOnUiThread(() -> stopProfilerSession());
+                    return;
+                }
                 float fps = fpsCounter.getCurrentFPS();
                 java.lang.Integer cpu = metrics.getCpuUsagePercent();
                 profilerOverlay.updateMetrics(fps, cpu);
