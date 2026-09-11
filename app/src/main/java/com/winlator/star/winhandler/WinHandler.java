@@ -1139,23 +1139,37 @@ public class WinHandler {
 
     public void sendGamepadState() {
         final InputControlsView inputControlsView = activity.getInputControlsView();
-        if (inputControlsView == null) return;
+        if (inputControlsView == null) {
+            Log.w("OSC-Debug", "sendGamepadState: inputControlsView is null");
+            return;
+        }
         final ControlsProfile profile = inputControlsView.getProfile();
         if (profile == null) {
+            Log.w("OSC-Debug", "sendGamepadState: profile is null → releasing OSC slot");
             releaseSlot(OSC_DEVICE_ID);
             return;
         }
 
         final GamepadState gamepadState = profile.getGamepadState();
-        final boolean useVirtualGamepad = profile.isVirtualGamepad()
-                && inputControlsView.isShowTouchscreenControls();
+        final boolean isVirtual = profile.isVirtualGamepad();
+        final boolean showTouch = inputControlsView.isShowTouchscreenControls();
+        final boolean useVirtualGamepad = isVirtual && showTouch;
+
+        if (!useVirtualGamepad) {
+            Log.w("OSC-Debug", "sendGamepadState: useVirtualGamepad=false"
+                    + " isVirtualGamepad=" + isVirtual
+                    + " showTouchscreenControls=" + showTouch
+                    + " → releasing OSC slot");
+            releaseSlot(OSC_DEVICE_ID);
+            return;
+        }
 
         // Handle virtual gamepad (on-screen controls)
-        if (useVirtualGamepad) {
-            int slot = assignSlot(OSC_DEVICE_ID);
-            writeSlotState(slot, OSC_DEVICE_ID, getOutputGamepadState(gamepadState));
+        int slot = assignSlot(OSC_DEVICE_ID);
+        if (slot < 0) {
+            Log.e("OSC-Debug", "sendGamepadState: assignSlot returned " + slot + " → gamepad state DROPPED");
         } else {
-            releaseSlot(OSC_DEVICE_ID);
+            writeSlotState(slot, OSC_DEVICE_ID, getOutputGamepadState(gamepadState));
         }
 
     }
@@ -1259,8 +1273,14 @@ public class WinHandler {
      * another contributor's held input.
      */
     private void writeSlotState(int slot, int deviceId, GamepadState state) {
-        if (slot < 0 || slot >= MAX_CONTROLLERS || writers[slot] == null || state == null)
+        if (slot < 0 || slot >= MAX_CONTROLLERS || writers[slot] == null || state == null) {
+            Log.w("OSC-Debug", "writeSlotState: BLOCKED slot=" + slot
+                    + " writers[" + slot + "]=" + (slot >= 0 && slot < MAX_CONTROLLERS ? (writers[slot] == null ? "NULL" : "OK") : "OOB")
+                    + " state=" + (state == null ? "NULL" : "OK")
+                    + " fakeInputBasePath=" + (fakeInputBasePath == null ? "NULL" : "OK")
+                    + " deviceId=" + deviceId);
             return;
+        }
 
         if (!slotShared[slot]) {
             writers[slot].writeGamepadState(state);
@@ -1990,8 +2010,10 @@ public class WinHandler {
         if (deviceId == OSC_DEVICE_ID) {
             Integer oscOverride = manualSlotOverrides.get(OSC_DESCRIPTOR);
             if (oscOverride != null) {
-                if (oscOverride == SLOT_IGNORE)
+                if (oscOverride == SLOT_IGNORE) {
+                    Log.w("OSC-Debug", "assignSlot: OSC pinned to IGNORE → returning -1");
                     return -1;
+                }
                 if (oscOverride >= 0 && oscOverride < MAX_CONTROLLERS) {
                     if (!usedSlots.contains(oscOverride))
                         return assignSpecificSlot(deviceId, null, oscOverride);
@@ -2002,8 +2024,10 @@ public class WinHandler {
             }
             // Session-only YIELD preference: a pad promotion moved OSC up to this slot. Honor it before
             // FCFS so OSC doesn't fall straight back onto the slot 0 we just handed the physical pad.
-            if (oscYieldSlot >= 0 && oscYieldSlot < MAX_CONTROLLERS && !usedSlots.contains(oscYieldSlot))
+            if (oscYieldSlot >= 0 && oscYieldSlot < MAX_CONTROLLERS && !usedSlots.contains(oscYieldSlot)) {
+                Log.d("OSC-Debug", "assignSlot: OSC using yield slot " + oscYieldSlot);
                 return assignSpecificSlot(deviceId, null, oscYieldSlot);
+            }
             return assignFreeSlot(deviceId, null);
         }
 

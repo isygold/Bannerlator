@@ -10520,14 +10520,18 @@ return true;
                 timeoutHandler.removeCallbacks(hideControlsRunnable);
                 inputControlsView.setShowTouchscreenControls(false);
                 inputControlsView.setVisibility(View.GONE);
-                Log.d("XServerDisplayActivity", "#333 auto-hide: controller took the on-screen slot -> hiding touch controls");
+                Log.w("OSC-Debug", "#333 auto-hide: controller took OSC slot " + oscHomeSlot
+                        + " → HIDING touch controls (showTouchscreenControls=false)");
+                for (WinHandler.PlayerSlotInfo s : slots) {
+                    if (s.isGameController) Log.d("OSC-Debug", "  controller: slot=" + s.currentSlot + " override=" + s.override);
+                }
             }
         } else if (userWantsControlsShown && !inputControlsView.isShowTouchscreenControls()) {
             // No controller owns the on-screen slot: restore to the user's baseline (never force on).
             inputControlsView.setShowTouchscreenControls(true);
             inputControlsView.setVisibility(View.VISIBLE);
             if (preferences.getBoolean("touchscreen_timeout_enabled", false)) startTouchscreenTimeout();
-            Log.d("XServerDisplayActivity", "#333 auto-hide: no controller on the on-screen slot -> restoring touch controls");
+            Log.d("OSC-Debug", "#333 auto-hide: no controller on OSC slot → RESTORING touch controls");
         }
     }
 

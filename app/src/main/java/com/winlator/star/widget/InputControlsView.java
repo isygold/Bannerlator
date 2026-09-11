@@ -1088,6 +1088,11 @@ public class InputControlsView extends View {
             updateTouchscreenMouseButtons();
         }
         if (!editMode && (!showTouchscreenControls || profile == null)) {
+            if (!showTouchscreenControls) {
+                Log.w("OSC-Debug", "onTouchEvent: ROUTED TO TOUCHPAD — showTouchscreenControls=false");
+            } else {
+                Log.w("OSC-Debug", "onTouchEvent: ROUTED TO TOUCHPAD — profile=null");
+            }
             routeDirectlyToTouchpad(event);
             return true;
         }
@@ -1780,6 +1785,8 @@ public class InputControlsView extends View {
         WinHandler winHandler = xServer != null ? xServer.getWinHandler() : null;
         if (winHandler != null) {
             winHandler.sendGamepadState();
+        } else {
+            Log.e("OSC-Debug", "sendGamepadUpdate: winHandler is NULL — combo gamepad state NOT sent");
         }
     }
 
@@ -1840,6 +1847,9 @@ public class InputControlsView extends View {
                     winHandler.sendGamepadState(controller);
                 else
                     winHandler.sendGamepadState();
+            } else if (winHandler == null) {
+                Log.e("OSC-Debug", "handleInputEvent: winHandler is NULL — gamepad state NOT sent to Wine!"
+                        + " binding=" + binding + " isActionDown=" + isActionDown);
             }
         }
         else {
