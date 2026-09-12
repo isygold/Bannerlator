@@ -519,6 +519,10 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
 
         envVars.put("FAKE_EVDEV_DIR", devInputDir.getAbsolutePath());
         envVars.put("FAKE_EVDEV_VIBRATION", "1");
+        // Enable C++ diagnostic logging in libfakeinput.so (stderr → logcat / wine debug log).
+        // Temporary diagnostic — remove after diagnosing why on-screen gamepad ring data
+        // doesn't reach the game despite correct Java-side writes.
+        envVars.put("FAKE_EVDEV_LOG", "1");
 
         // Fake-input transport is a fixed-size mmap ring per slot (see FakeInputWriter).
         // Prepare all 4 slot rings and hand the native reader their canonical paths so
@@ -527,6 +531,10 @@ public class GuestProgramLauncherComponent extends EnvironmentComponent {
         String ringPaths = FakeInputWriter.getRingEnv(devInputDir);
         if (ringPaths != null && !ringPaths.isEmpty()) {
             envVars.put("FAKE_EVDEV_MEMFD_PATHS", ringPaths);
+            Log.i("GuestLauncher", "FAKE_EVDEV_MEMFD_PATHS=" + ringPaths);
+            Log.i("GuestLauncher", "FAKE_EVDEV_DIR=" + devInputDir.getAbsolutePath());
+        } else {
+            Log.e("GuestLauncher", "FAKE_EVDEV_MEMFD_PATHS is EMPTY — ring files not created!");
         }
 
         Log.d("GuestLauncher", "Final LD_PRELOAD: " + ld_preload);

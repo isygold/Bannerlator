@@ -324,8 +324,12 @@ __attribute__((visibility("hidden"))) static void load_ring_paths() {
 
   ring_paths_loaded = true;
   const char *spec = getenv("FAKE_EVDEV_MEMFD_PATHS");
-  if (!spec || !*spec)
+  if (!spec || !*spec) {
+    Logger::log("[DIAG] FAKE_EVDEV_MEMFD_PATHS is empty or unset — no ring paths available\n");
     return;
+  }
+
+  Logger::log("[DIAG] FAKE_EVDEV_MEMFD_PATHS=%s\n", spec);
 
   char *copy = strdup(spec);
   if (!copy)
@@ -340,8 +344,10 @@ __attribute__((visibility("hidden"))) static void load_ring_paths() {
     *equals = '\0';
     int slot = atoi(token);
     const char *path = equals + 1;
-    if (slot >= 0 && *path)
+    if (slot >= 0 && *path) {
       ring_paths[slot] = path;
+      Logger::log("[DIAG] ring_paths[%d] = %s\n", slot, path);
+    }
   }
 
   free(copy);
@@ -451,21 +457,33 @@ open_fake_input_ring(const char *event, int flags) {
   int slot = get_event_number(event);
   const char *ring_path = get_ring_path_for_slot(slot);
   if (!ring_path) {
+    Logger::log("[DIAG] open_fake_input_ring: slot %d has NO ring path in ring_paths map — "
+                "FAKE_EVDEV_MEMFD_PATHS may be missing this slot\n", slot);
     errno = ENODEV;
     return -1;
   }
+
+  Logger::log("[DIAG] open_fake_input_ring: event=%s slot=%d ring_path=%s flags=0x%x\n",
+              event, slot, ring_path, flags);
 
   if (!my_open)
     *(void **)&my_open = dlsym(RTLD_NEXT, "open");
 
   int fd = my_open(ring_path, O_RDWR | (flags & O_NONBLOCK));
-  if (fd < 0)
+  if (fd < 0) {
+    Logger::log("[DIAG] open_fake_input_ring: my_open(%s) FAILED errno=%d (%s)\n",
+                ring_path, errno, strerror(errno));
     return -1;
+  }
+
+  Logger::log("[DIAG] open_fake_input_ring: my_open(%s) returned fd=%d\n", ring_path, fd);
 
   void *mapping =
       mmap(nullptr, FAKE_INPUT_RING_SIZE, PROT_READ, MAP_SHARED, fd, 0);
   if (mapping == MAP_FAILED) {
     int saved_errno = errno;
+    Logger::log("[DIAG] open_fake_input_ring: mmap FAILED errno=%d (%s)\n",
+                saved_errno, strerror(saved_errno));
     syscall(SYS_close, fd);
     errno = saved_errno;
     return -1;
@@ -474,6 +492,12 @@ open_fake_input_ring(const char *event, int flags) {
   FakeInputRingHeader *ring =
       reinterpret_cast<FakeInputRingHeader *>(mapping);
   if (!ring_header_is_valid(ring)) {
+    Logger::log("[DIAG] open_fake_input_ring: ring header INVALID magic=0x%x version=%u "
+                "event_size=%u capacity=%u (expected magic=0x%x version=%u "
+                "event_size=%zu capacity=%u)\n",
+                ring->magic, ring->version, ring->event_size, ring->capacity,
+                FAKE_INPUT_RING_MAGIC, FAKE_INPUT_RING_VERSION,
+                FAKE_INPUT_EVENT_SIZE, FAKE_INPUT_RING_CAPACITY);
     munmap(mapping, FAKE_INPUT_RING_SIZE);
     syscall(SYS_close, fd);
     errno = ENODEV;
@@ -492,8 +516,13 @@ open_fake_input_ring(const char *event, int flags) {
   capture_keyframe(controller, "open", fd);
   controller_map[fd] = controller;
 
-  Logger::log("Adding ring-backed controller, fd %d event %s slot %d\n", fd,
-              event, slot);
+  Logger::log("[DIAG] open_fake_input_ring: SUCCESS fd=%d event=%s slot=%d "
+              "read_seq=%llu generation=%llu write_seq=%llu\n",
+              fd, event, slot,
+              static_cast<unsigned long long>(controller.read_seq),
+              static_cast<unsigned long long>(controller.generation),
+              static_cast<unsigned long long>(ring_write_seq(ring)));
+
   return fd;
 }
 
@@ -596,11 +625,16 @@ EXPORT int open(const char *pathname, int flags, ...) {
           free(fake_path);
           return fd;
         }
+        Logger::log("[DIAG] open(%s): open_fake_input_ring FAILED (errno=%d %s), "
+                    "falling through to stub %s — winebus will get an EMPTY fd\n",
+                    pathname, errno, strerror(errno), fake_path);
         int saved_errno = errno;
         free(fake_path);
         errno = saved_errno;
         return -1;
       }
+      Logger::log("[DIAG] open(%s): hook_dir stub %s does NOT exist — "
+                  "falling through to real open\n", pathname, fake_path);
       pathname = fake_path;
     } else if (is_fake_udev_data_path(pathname)) {
       fake_path = from_real_to_fake_udev_data_path(pathname);
@@ -660,11 +694,16 @@ EXPORT int openat(int dirfd, const char *pathname, int flags, ...) {
           free(fake_path);
           return fd;
         }
+        Logger::log("[DIAG] openat(%s): open_fake_input_ring FAILED (errno=%d %s), "
+                    "falling through to stub %s — winebus will get an EMPTY fd\n",
+                    pathname, errno, strerror(errno), fake_path);
         int saved_errno = errno;
         free(fake_path);
         errno = saved_errno;
         return -1;
       }
+      Logger::log("[DIAG] openat(%s): hook_dir stub %s does NOT exist — "
+                  "falling through to real openat\n", pathname, fake_path);
       pathname = fake_path;
     } else if (is_fake_udev_data_path(pathname)) {
       fake_path = from_real_to_fake_udev_data_path(pathname);
@@ -1054,6 +1093,7 @@ EXPORT ssize_t read(int fd, void *buf, size_t count) {
     long backoff_ns = 1000 * 1000; // 1ms initial
     while (!fake_fd_has_unread_data(fd)) {
       if (fake_fd_is_stale(fd)) {
+        Logger::log("[DIAG] read(fd=%d): fd is STALE (generation mismatch) → ENODEV\n", fd);
         errno = ENODEV;
         return -1;
       }
@@ -1071,6 +1111,12 @@ EXPORT ssize_t read(int fd, void *buf, size_t count) {
       if (backoff_ns < 16 * 1000 * 1000)
         backoff_ns *= 2;
     }
+    // Woke up — data is available. Log on every call so we can see the cadence.
+    Logger::log("[DIAG] read(fd=%d): woke up, write_seq=%llu read_seq=%llu keyframe=%zu\n",
+                fd,
+                static_cast<unsigned long long>(ring_write_seq(fake.ring)),
+                static_cast<unsigned long long>(fake.read_seq),
+                fake.keyframe_remaining);
 
     uint64_t write_seq = ring_write_seq(fake.ring);
     if (write_seq - fake.read_seq > FAKE_INPUT_RING_CAPACITY) {
@@ -1133,8 +1179,11 @@ EXPORT ssize_t read(int fd, void *buf, size_t count) {
     }
 
     fake.read_seq += events_to_read;
-    return static_cast<ssize_t>((out_events + events_to_read) *
-                                FAKE_INPUT_EVENT_SIZE);
+    ssize_t total = (out_events + events_to_read) * FAKE_INPUT_EVENT_SIZE;
+    Logger::log("[DIAG] read(fd=%d): returned %zd bytes (%zu events), new read_seq=%llu\n",
+                fd, total, out_events + events_to_read,
+                static_cast<unsigned long long>(fake.read_seq));
+    return total;
   }
   return syscall(SYS_read, fd, buf, count);
 }
