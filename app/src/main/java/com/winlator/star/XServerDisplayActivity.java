@@ -8773,6 +8773,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         touchpadView.setSensitivity(profile.getCursorSpeed() * globalCursorSpeed);
 
         inputControlsView.invalidate();
+        Log.d("OSC-Debug", "showInputControls: name='" + profile.getName()
+                + "' elementsLoaded=" + profile.isElementsLoaded()
+                + " isVirtualGamepad=" + profile.isVirtualGamepad()
+                + " elementCount=" + profile.getElements().size());
         winHandler.sendGamepadState();
     }
 

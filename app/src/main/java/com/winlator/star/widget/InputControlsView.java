@@ -525,7 +525,19 @@ public class InputControlsView extends View {
         stopMouseMoveTimer();
         if (profile != null) {
             this.profile = profile;
-            if (!profile.isElementsLoaded() && getWidth() > 0 && getHeight() > 0 && snappingSize > 0) profile.loadElements(this);
+            if (!profile.isElementsLoaded() && getWidth() > 0 && getHeight() > 0 && snappingSize > 0) {
+                profile.loadElements(this);
+                Log.d("OSC-Debug", "setProfile: loaded elements for '" + profile.getName()
+                        + "' isVirtualGamepad=" + profile.isVirtualGamepad()
+                        + " elementCount=" + profile.getElements().size());
+            } else if (!profile.isElementsLoaded()) {
+                Log.w("OSC-Debug", "setProfile: DEFERRED load for '" + profile.getName()
+                        + "' — view not measured yet (w=" + getWidth() + " h=" + getHeight()
+                        + " snap=" + snappingSize + ")");
+            } else {
+                Log.d("OSC-Debug", "setProfile: already loaded '" + profile.getName()
+                        + "' isVirtualGamepad=" + profile.isVirtualGamepad());
+            }
             deselectAllElements();
         }
         else this.profile = null;
