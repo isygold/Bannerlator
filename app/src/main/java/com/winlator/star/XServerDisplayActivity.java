@@ -8072,6 +8072,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             inputControlsView.setShowTouchscreenControls(showTouchscreen);
             userWantsControlsShown = showTouchscreen;   // #333: remember the user's manual choice
             SharedPreferences.Editor editor = preferences.edit();
+            editor.putBoolean("show_touchscreen_controls_enabled", showTouchscreen);
             editor.putBoolean("touchscreen_timeout_enabled", timeout);
             editor.putBoolean("touchscreen_haptics_enabled", haptics);
             // #338: remember an explicit "-- Disabled --" choice (profileIndex 0) so the #333 smart
@@ -8519,6 +8520,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             inputControlsView.setShowTouchscreenControls(showTouchscreen);
             userWantsControlsShown = showTouchscreen;   // #333: remember the user's manual choice
             SharedPreferences.Editor editor = preferences.edit();
+            editor.putBoolean("show_touchscreen_controls_enabled", showTouchscreen);
             editor.putBoolean("touchscreen_timeout_enabled", timeout);
             editor.putBoolean("touchscreen_haptics_enabled", haptics);
             // #338: remember an explicit "-- Disabled --" choice (profileIndex 0) so the #333 smart
@@ -8766,6 +8768,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     private void showInputControls(ControlsProfile profile) {
+        // Ensure the touch gate and sendGamepadState gate are open: without this, any caller
+        // that forgets to set the flag leaves the overlay VISIBLE but touch-processing disabled,
+        // and sendGamepadState() silently releases the OSC slot.
+        inputControlsView.setShowTouchscreenControls(true);
         inputControlsView.setVisibility(View.VISIBLE);
         inputControlsView.requestFocus();
         inputControlsView.setProfile(profile);
@@ -8776,6 +8782,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         Log.d("OSC-Debug", "showInputControls: name='" + profile.getName()
                 + "' elementsLoaded=" + profile.isElementsLoaded()
                 + " isVirtualGamepad=" + profile.isVirtualGamepad()
+                + " showTouchscreenControls=" + inputControlsView.isShowTouchscreenControls()
                 + " elementCount=" + profile.getElements().size());
         winHandler.sendGamepadState();
     }

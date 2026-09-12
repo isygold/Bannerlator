@@ -1170,6 +1170,10 @@ public class WinHandler {
             Log.e("OSC-Debug", "sendGamepadState: assignSlot returned " + slot + " → gamepad state DROPPED");
         } else {
             writeSlotState(slot, OSC_DEVICE_ID, getOutputGamepadState(gamepadState));
+            Log.d("OSC-Debug", "sendGamepadState: slot=" + slot
+                    + " buttons=0x" + Integer.toHexString(gamepadState.buttons)
+                    + " LX=" + gamepadState.thumbLX + " LY=" + gamepadState.thumbLY
+                    + " RX=" + gamepadState.thumbRX + " RY=" + gamepadState.thumbRY);
         }
 
     }
@@ -1284,6 +1288,8 @@ public class WinHandler {
 
         if (!slotShared[slot]) {
             writers[slot].writeGamepadState(state);
+            Log.d("OSC-Debug", "writeSlotState: slot=" + slot + " deviceId=" + deviceId
+                    + " shared=false OK");
             return;
         }
 

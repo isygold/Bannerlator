@@ -1098,6 +1098,16 @@ public class InputControlsView extends View {
         int actionMasked = event.getActionMasked();
         if (actionMasked == MotionEvent.ACTION_DOWN || actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
             updateTouchscreenMouseButtons();
+            float tx = event.getX(event.getActionIndex());
+            float ty = event.getY(event.getActionIndex());
+            boolean passed = !editMode && profile != null && showTouchscreenControls;
+            Log.d("OSC-Debug", "onTouchEvent DOWN x=" + tx + " y=" + ty
+                    + " editMode=" + editMode
+                    + " profile=" + (profile != null ? profile.getName() : "null")
+                    + " showTouchscreenControls=" + showTouchscreenControls
+                    + " passedGate=" + passed
+                    + " viewSize=" + getWidth() + "x" + getHeight()
+                    + " visible=" + (getVisibility() == VISIBLE));
         }
         if (!editMode && (!showTouchscreenControls || profile == null)) {
             if (!showTouchscreenControls) {
@@ -1253,8 +1263,11 @@ public class InputControlsView extends View {
                     if (!handled && dismissedExpandable) {
                         swallowedExpandablePointers.put(pointerId, true);
                     } else if (!handled && touchpadView != null) {
+                        Log.d("OSC-Debug", "touch NOT handled by any element → routing to touchpad at (" + x + "," + y + ")");
                         touchpadPointers.put(pointerId, true);
                         forwardToTouchpad(event);
+                    } else if (handled) {
+                        Log.d("OSC-Debug", "touch HANDLED by element at (" + x + "," + y + ")");
                     }
                     break;
                 }
