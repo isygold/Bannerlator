@@ -13,6 +13,7 @@ import android.graphics.RadialGradient;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.util.Log;
 
 import com.winlator.star.core.CubicBezierInterpolator;
 import com.winlator.star.math.Mathf;
@@ -97,6 +98,8 @@ public class ControlElement {
     private boolean toggleSwitch = false;
     private boolean swipeable = true;
     private int currentPointerId = -1;
+    private long lastTouchDownTime = 0;  // RC-5: staleness guard — force-release if >2s stale
+    private static final long STALE_POINTER_TIMEOUT_MS = 2000L;
     private final Rect boundingBox = new Rect();
     private boolean[] states = new boolean[4];
     private boolean[] activeBindingSlots = new boolean[4];
@@ -2519,8 +2522,19 @@ public class ControlElement {
         if (type == Type.BUTTON_GRID && gridMultitouchEnabled) {
             return handleGridMultitouchDown(pointerId, x, y);
         }
+        // RC-5: if a previous touch was never released (e.g. view went GONE mid-touch),
+        // force-release the stale state so this new touch can be accepted.
+        if (currentPointerId != -1 && containsPoint(x, y)) {
+            long now = System.currentTimeMillis();
+            if (now - lastTouchDownTime > STALE_POINTER_TIMEOUT_MS) {
+                Log.w("OSC-Debug", "handleTouchDown: force-releasing stale pointerId="
+                        + currentPointerId + " (stale " + (now - lastTouchDownTime) + "ms)");
+                releaseActiveInputs();
+            }
+        }
         if (currentPointerId == -1 && containsPoint(x, y)) {
             currentPointerId = pointerId;
+            lastTouchDownTime = System.currentTimeMillis();
             if (type == Type.BUTTON) {
                 states[0] = true;
                 inputControlsView.invalidate();

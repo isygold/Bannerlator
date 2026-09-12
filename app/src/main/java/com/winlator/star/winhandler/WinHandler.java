@@ -1294,6 +1294,8 @@ public class WinHandler {
 
         if (!slotShared[slot]) {
             writers[slot].writeGamepadState(state);
+            Log.d("OSC-Debug", "writeSlotState: slot=" + slot + " deviceId=" + deviceId
+                    + " shared=false OK");
             return;
         }
 
