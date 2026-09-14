@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.winlator.star.ui.screens
 
 import android.content.Intent
@@ -207,9 +209,9 @@ fun BenchmarkScreen(vm: BenchmarkViewModel = viewModel()) {
         if (showResults && profilerSession != null) {
             ProfilerResultsDialog(
                 session = profilerSession!!,
-                recommendations = profilerRecs,
-                onDismiss = { showResults = false },
                 onApplySettings = { /* save to prefs — open VEGAS config to apply */ },
+                onReProfile = { showResults = false },
+                onDismiss = { showResults = false },
             )
         }
     }

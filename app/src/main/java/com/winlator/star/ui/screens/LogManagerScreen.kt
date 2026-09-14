@@ -439,10 +439,10 @@ fun LogManagerScreen(onClose: () -> Unit) {
             // ── Benchmark Logs ──────────────────────────────────────────
             SectionLabel("Benchmark Logs")
             val benchmarkLogDir = remember { java.io.File(context.filesDir, "benchmark_logs") }
-            val benchmarkLogs = remember(refreshTick) {
+            val benchmarkLogs: List<java.io.File> = remember(refreshTick) {
                 if (benchmarkLogDir.exists()) {
-                    benchmarkLogDir.listFiles()?.sortedByDescending { it.name } ?: emptyArray()
-                } else emptyArray()
+                    benchmarkLogDir.listFiles()?.sortedByDescending { it.name } ?: emptyList()
+                } else emptyList()
             }
             if (benchmarkLogs.isEmpty()) {
                 LogCard {
@@ -571,13 +571,13 @@ fun LogManagerScreen(onClose: () -> Unit) {
                         text = content,
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color(0xFF1E1E1E))
+                            .background(androidx.compose.ui.graphics.Color(0xFF1E1E1E))
                             .padding(8.dp)
                             .verticalScroll(rememberScrollState()),
                         style = androidx.compose.ui.text.TextStyle(
                             fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                             fontSize = 11.sp,
-                            color = Color(0xFFC8BDB8),
+                            color = androidx.compose.ui.graphics.Color(0xFFC8BDB8),
                         ),
                     )
                 }
@@ -1271,15 +1271,15 @@ private fun shareBenchmarkLog(context: Context, file: java.io.File) {
         val uri = androidx.core.content.FileProvider.getUriForFile(
             context, context.packageName + ".tileprovider", copy
         )
-        val send = Intent(Intent.ACTION_SEND).apply {
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
             type = "text/plain"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            putExtra(Intent.EXTRA_SUBJECT, "Benchmark log: ${file.nameWithoutExtension}")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            putExtra(android.content.Intent.EXTRA_SUBJECT, "Benchmark log: ${file.nameWithoutExtension}")
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(send, "Share benchmark log"))
+        context.startActivity(android.content.Intent.createChooser(send, "Share benchmark log"))
     } catch (e: Exception) {
-        Toast.makeText(context, "Couldn't share benchmark log.", Toast.LENGTH_SHORT).show()
+        android.widget.Toast.makeText(context, "Couldn't share benchmark log.", android.widget.Toast.LENGTH_SHORT).show()
     }
 }
 
