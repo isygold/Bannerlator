@@ -24,6 +24,7 @@ import com.winlator.star.ui.screens.InputControlsScreen
 import com.winlator.star.ui.screens.GamesWallScreen
 import com.winlator.star.ui.screens.SettingsScreen
 import com.winlator.star.ui.screens.WrapperManagerScreen
+import com.winlator.star.ui.screens.BenchmarkScreen
 import com.winlator.star.store.SaveManagerScreen
 
 @Composable
@@ -120,6 +121,10 @@ fun AppNavGraph(
 
         composable(Screen.SaveManager.route) {
             SaveManagerScreen()
+        }
+
+        composable(Screen.Benchmark.route) {
+            BenchmarkScreen()
         }
     }
 }

@@ -54,11 +54,52 @@ class ProfilerSession(
         val avgVramUsedBytes: Long?,
         val durationSec: Float,
         val readingCount: Int
-    )
+    ) {
+        /** Serialize to JSON using [org.json.JSONObject] (available on Android). */
+        fun toJson(): String {
+            val obj = org.json.JSONObject()
+            obj.put("avgFps", avgFps.toDouble())
+            obj.put("minFps", minFps)
+            obj.put("maxFps", maxFps)
+            obj.put("low1Fps", low1Fps.toDouble())
+            obj.put("low01Fps", low01Fps.toDouble())
+            obj.put("avgFrameTimeMs", avgFrameTimeMs.toDouble())
+            obj.put("avgCpuPercent", avgCpuPercent ?: org.json.JSONObject.NULL)
+            obj.put("avgGpuLoadPercent", avgGpuLoadPercent ?: org.json.JSONObject.NULL)
+            obj.put("avgVramUsedBytes", avgVramUsedBytes ?: org.json.JSONObject.NULL)
+            obj.put("durationSec", durationSec.toDouble())
+            obj.put("readingCount", readingCount)
+            return obj.toString()
+        }
+
+        companion object {
+            /** Deserialize from JSON, returning null on any parse failure. */
+            fun fromJson(json: String): Summary? {
+                return try {
+                    val obj = org.json.JSONObject(json)
+                    Summary(
+                        avgFps = obj.getDouble("avgFps").toFloat(),
+                        minFps = obj.getInt("minFps"),
+                        maxFps = obj.getInt("maxFps"),
+                        low1Fps = obj.getDouble("low1Fps").toFloat(),
+                        low01Fps = obj.getDouble("low01Fps").toFloat(),
+                        avgFrameTimeMs = obj.getDouble("avgFrameTimeMs").toFloat(),
+                        avgCpuPercent = if (obj.isNull("avgCpuPercent")) null else obj.getInt("avgCpuPercent"),
+                        avgGpuLoadPercent = if (obj.isNull("avgGpuLoadPercent")) null else obj.getInt("avgGpuLoadPercent"),
+                        avgVramUsedBytes = if (obj.isNull("avgVramUsedBytes")) null else obj.getLong("avgVramUsedBytes"),
+                        durationSec = obj.getDouble("durationSec").toFloat(),
+                        readingCount = obj.getInt("readingCount")
+                    )
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+    }
 
     val readings = CopyOnWriteArrayList<Reading>()
     var summary: Summary? = null
-        private set
+        internal set
 
     private var job: Job? = null
     private var startTimeMs: Long = 0L
@@ -163,26 +204,61 @@ class ProfilerSession(
     fun saveToPrefs(context: Context, containerId: Int) {
         val s = summary ?: return
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val json = buildString {
-            append("{")
-            append("\"avgFps\":${s.avgFps},")
-            append("\"minFps\":${s.minFps},")
-            append("\"maxFps\":${s.maxFps},")
-            append("\"low1Fps\":${s.low1Fps},")
-            append("\"low01Fps\":${s.low01Fps},")
-            append("\"avgFrameTimeMs\":${s.avgFrameTimeMs},")
-            append("\"avgCpuPercent\":${s.avgCpuPercent},")
-            append("\"avgGpuLoadPercent\":${s.avgGpuLoadPercent},")
-            append("\"avgVramUsedBytes\":${s.avgVramUsedBytes},")
-            append("\"durationSec\":${s.durationSec},")
-            append("\"readingCount\":${s.readingCount}")
-            append("}")
-        }
         prefs.edit()
             .putLong(KEY_LAST_TIMESTAMP, System.currentTimeMillis())
             .putInt(KEY_LAST_CONTAINER, containerId)
-            .putString(KEY_LAST_SUMMARY, json)
+            .putString(KEY_LAST_SUMMARY, s.toJson())
             .apply()
+    }
+
+    /**
+     * Write a structured JSON log file for this profiling session.
+     * Stored in <app-files>/benchmark_logs/<timestamp>.json
+     * Returns the file path on success, null on failure.
+     */
+    fun saveSessionLog(context: Context, containerId: Int, exePath: String?): String? {
+        val s = summary ?: return null
+        try {
+            val logDir = java.io.File(context.filesDir, "benchmark_logs")
+            if (!logDir.exists()) logDir.mkdirs()
+
+            val timestamp = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", java.util.Locale.US)
+                .format(System.currentTimeMillis())
+
+            val readingsArray = org.json.JSONArray()
+            for (r in readings) {
+                readingsArray.put(org.json.JSONObject().apply {
+                    put("timestampMs", r.timestampMs)
+                    put("fps", r.fps)
+                    put("cpuPercent", r.cpuPercent ?: org.json.JSONObject.NULL)
+                    put("gpuLoadPercent", r.gpuLoadPercent ?: org.json.JSONObject.NULL)
+                    put("vramUsedBytes", r.vramUsedBytes ?: org.json.JSONObject.NULL)
+                })
+            }
+
+            val logObj = org.json.JSONObject().apply {
+                put("timestamp", System.currentTimeMillis())
+                put("containerId", containerId)
+                put("exePath", exePath ?: org.json.JSONObject.NULL)
+                put("durationSeconds", s.durationSec)
+                put("totalReadings", s.readingCount)
+                put("summary", org.json.JSONObject().apply {
+                    put("avgFps", s.avgFps)
+                    put("percentile1LowFps", s.low1Fps)
+                    put("percentile01LowFps", s.low01Fps)
+                    put("avgCpu", s.avgCpuPercent)
+                    put("avgGpuLoad", s.avgGpuLoadPercent)
+                })
+                put("readings", readingsArray)
+            }
+
+            val file = java.io.File(logDir, "$timestamp.json")
+            file.writeText(logObj.toString(2))
+            return file.absolutePath
+        } catch (e: Exception) {
+            android.util.Log.e("ProfilerSession", "Failed to save session log", e)
+            return null
+        }
     }
 
     fun getLastSummary(context: Context, containerId: Int): Pair<Long, Summary>? {
@@ -192,28 +268,7 @@ class ProfilerSession(
         if (storedContainer != containerId || ts == 0L) return null
 
         val raw = prefs.getString(KEY_LAST_SUMMARY, null) ?: return null
-        return try {
-            // Lightweight JSON parse (no dependency)
-            val s = raw.removePrefix("{").removeSuffix("}")
-            val map = s.split(",").associate {
-                val (k, v) = it.split(":")
-                k.trim().removeSurrounding("\"") to v.trim()
-            }
-            ts to Summary(
-                avgFps = map["avgFps"]?.toFloatOrNull() ?: 0f,
-                minFps = map["minFps"]?.toIntOrNull() ?: 0,
-                maxFps = map["maxFps"]?.toIntOrNull() ?: 0,
-                low1Fps = map["low1Fps"]?.toFloatOrNull() ?: 0f,
-                low01Fps = map["low01Fps"]?.toFloatOrNull() ?: 0f,
-                avgFrameTimeMs = map["avgFrameTimeMs"]?.toFloatOrNull() ?: 0f,
-                avgCpuPercent = map["avgCpuPercent"]?.toIntOrNull(),
-                avgGpuLoadPercent = map["avgGpuLoadPercent"]?.toIntOrNull(),
-                avgVramUsedBytes = map["avgVramUsedBytes"]?.toLongOrNull(),
-                durationSec = map["durationSec"]?.toFloatOrNull() ?: 0f,
-                readingCount = map["readingCount"]?.toIntOrNull() ?: 0
-            )
-        } catch (_: Exception) {
-            null
-        }
+        val summary = Summary.fromJson(raw) ?: return null
+        return ts to summary
     }
 }

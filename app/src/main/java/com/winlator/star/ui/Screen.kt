@@ -9,6 +9,7 @@ sealed class Screen(val route: String, val label: String, val iconName: String) 
     object Wrappers      : Screen("wrapper_manager","Manage Wrappers",        "layers")
     object Saves         : Screen("saves",          "Saves",                  "save")
     object SaveManager   : Screen("save_manager",   "Save Manager",           "save")
+    object Benchmark    : Screen("benchmark",       "Benchmark Tool",         "speed")
     object FileManager   : Screen("file_manager",   "File Manager",           "folder_open")
     object Settings      : Screen("settings",       "Settings",               "settings")
     object Appearance    : Screen("appearance",     "Appearance",             "palette")
@@ -28,7 +29,7 @@ sealed class Screen(val route: String, val label: String, val iconName: String) 
         val drawerItems by lazy {
             // Screen.Wrappers stays registered as a route (the wrapper manager is now reached via the
             // ☁ cloud button in container/game settings) but is intentionally NOT listed in the drawer.
-            listOf(Games, Containers, FileManager, Settings, Appearance, InputControls, Contents, Saves)
+            listOf(Games, Containers, Benchmark, FileManager, Settings, Appearance, InputControls, Contents, Saves)
         }
         val storeItems by lazy {
             listOf(Gog, Epic, Amazon, Steam)

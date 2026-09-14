@@ -266,6 +266,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private boolean profilerMode = false;
     private com.winlator.star.profiler.ProfilerSession profilerSession;
     private com.winlator.star.profiler.ProfilerOverlay profilerOverlay;
+    private kotlinx.coroutines.CoroutineScope profilerScope;
+    private android.os.Handler profilerHandler;
+    private Runnable profilerOverlayUpdater;
+    // Direct EXE path from Benchmark Tool — bypasses .desktop file resolution
+    private String benchmarkExePath;
+    // Session logging enabled from Benchmark Tool
+    private boolean loggingEnabled;
     // Lazily built when the Task Manager first polls; snapshots CPU/GPU/RAM/battery for the header.
     private com.winlator.star.widget.HudMetrics tmHudMetrics;
     private boolean fpsHudHorizontal = false;   // active FPS-overlay orientation (tap to toggle in-game)
@@ -2130,6 +2137,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         shortcutName = getIntent().getStringExtra("shortcut_name");
         // Profiler mode — launched from ContainerDetailScreen "Profile Game" button
         profilerMode = getIntent().getBooleanExtra("profile_mode", false);
+        // Direct EXE path from Benchmark Tool — bypasses .desktop file resolution
+        benchmarkExePath = getIntent().getStringExtra("benchmark_exe");
+        // Session logging enabled from Benchmark Tool
+        loggingEnabled = getIntent().getBooleanExtra("logging_enabled", false);
 
         // Ensure shortcutPath is not null before proceeding
         if (shortcutPath != null && !shortcutPath.isEmpty()) {
@@ -6383,6 +6394,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
             profilerSession.stop();
             profilerSession.saveToPrefs(this, container != null ? container.id : 0);
         }
+        // Cancel profiler coroutine scope and overlay updater handler
+        if (profilerScope != null) {
+            kotlinx.coroutines.Job job = profilerScope.getCoroutineContext().get(kotlinx.coroutines.Job.Key);
+            if (job != null) job.cancel((kotlinx.cancellation.CancellationException) null);
+            profilerScope = null;
+        }
+        if (profilerHandler != null && profilerOverlayUpdater != null) { profilerHandler.removeCallbacks(profilerOverlayUpdater); profilerHandler = null; profilerOverlayUpdater = null; }
         super.onDestroy();
         // Power-user perf: stop the thermal watchdog and revert any privileged sysfs writes on game
         // exit (no-op unless a root toggle wrote something this session).
@@ -10842,6 +10860,21 @@ return true;
 
                 args += "/dir " + StringUtils.escapeDOSPath(exeDir) + " \"" + filename + "\"" + execArgs;
             }
+        } else if (benchmarkExePath != null && !benchmarkExePath.isEmpty()) {
+            // Benchmark Tool: launch a raw .exe path directly without a .desktop file
+            String normPath = benchmarkExePath.replace('\\', '/');
+            String exeDir = "";
+            String filename = normPath;
+            int lastSlash = normPath.lastIndexOf('/');
+            if (lastSlash > 0) {
+                exeDir = normPath.substring(0, lastSlash);
+                filename = normPath.substring(lastSlash + 1);
+            }
+            if (!exeDir.isEmpty()) {
+                args += "/dir " + StringUtils.escapeDOSPath(exeDir) + " \"" + filename + "\"";
+            } else {
+                args += "\"" + filename + "\"";
+            }
         } else {
             // Append EXTRA_EXEC_ARGS from overrideEnvVars if it exists
             if (envVars.has("EXTRA_EXEC_ARGS")) {
@@ -12654,13 +12687,13 @@ return true;
         profilerOverlay.setLayoutParams(lp);
         rootView.addView(profilerOverlay);
 
-        // Start the session on a coroutine scope
-        kotlinx.coroutines.CoroutineScope scope = kotlinx.coroutines.GlobalScope.INSTANCE;
-        profilerSession.start(scope);
+        // Start the session on a scoped coroutine (cancelled in onDestroy)
+        profilerScope = new kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO);
+        profilerSession.start(profilerScope);
 
         // Update overlay every 500ms
-        android.os.Handler uiHandler = new android.os.Handler(android.os.Looper.getMainLooper());
-        Runnable overlayUpdater = new Runnable() {
+        profilerHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        profilerOverlayUpdater = new Runnable() {
             @Override
             public void run() {
                 if (profilerSession == null || !profilerSession.isRunning()) {
@@ -12671,21 +12704,37 @@ return true;
                 float fps = fpsCounter.getCurrentFPS();
                 java.lang.Integer cpu = metrics.getCpuUsagePercent();
                 profilerOverlay.updateMetrics(fps, cpu);
-                uiHandler.postDelayed(this, 500);
+                profilerHandler.postDelayed(this, 500);
             }
         };
-        uiHandler.postDelayed(overlayUpdater, 500);
+        profilerHandler.postDelayed(profilerOverlayUpdater, 500);
 
         Log.d("XServerDisplayActivity", "Profiler session started");
     }
 
     /**
-     * Stop the profiling session, remove overlay, and save results.
+     * Stop the profiling session, remove overlay, save results, and auto-quit
+     * back to the calling screen so results dialog appears immediately.
      */
     private void stopProfilerSession() {
         if (profilerSession == null) return;
         profilerSession.stop();
         profilerSession.saveToPrefs(this, container != null ? container.id : 0);
+
+        // Write structured JSON log if logging is enabled
+        if (loggingEnabled) {
+            String logPath = profilerSession.saveSessionLog(this,
+                container != null ? container.id : 0, benchmarkExePath);
+            if (logPath != null) {
+                Log.d("XServerDisplayActivity", "Benchmark log saved: " + logPath);
+            }
+        }
+
+        // Signal fresh results so ContainerDetailScreen / BenchmarkScreen shows dialog on resume
+        getSharedPreferences("profiler_results", MODE_PRIVATE)
+            .edit()
+            .putBoolean("fresh_results", true)
+            .apply();
 
         // Remove overlay
         if (profilerOverlay != null) {
@@ -12696,6 +12745,16 @@ return true;
 
         Log.d("XServerDisplayActivity", "Profiler session complete — avg " +
             String.format(java.util.Locale.US, "%.1f", profilerSession.getSummary().getAvgFps()) + " FPS");
+
+        // Auto-quit: terminate Wine processes, then finish the activity so
+        // the user lands back on the calling screen with results ready.
+        if (profilerMode) {
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                if (isFinishing()) return;
+                try { ProcessHelper.terminateAllWineProcesses(); } catch (Throwable ignored) {}
+                finish();
+            }, 2000);
+        }
     }
 
 

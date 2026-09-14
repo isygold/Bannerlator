@@ -69,6 +69,7 @@ private fun iconFor(screen: Screen): Int = when (screen) {
     Screen.AdrenoTools   -> R.drawable.icon_menu_gpu
     Screen.Saves         -> R.drawable.icon_save
     Screen.SaveManager   -> R.drawable.icon_save
+    Screen.Benchmark     -> R.drawable.icon_speed
     Screen.FileManager   -> R.drawable.icon_menu_file_manager
     Screen.Settings      -> R.drawable.icon_settings
     Screen.Appearance    -> R.drawable.icon_palette
@@ -112,6 +113,7 @@ fun AppDrawerContent(
         DrawerSectionHeader("Library")
         DrawerItem(Screen.Games,         currentRoute, onNavigate)
         DrawerItem(Screen.Containers,    currentRoute, onNavigate)
+        DrawerItem(Screen.Benchmark,     currentRoute, onNavigate)
         DrawerItem(Screen.FileManager,   currentRoute, onNavigate)
         DrawerItem(Screen.SaveManager,   currentRoute, onNavigate)
 

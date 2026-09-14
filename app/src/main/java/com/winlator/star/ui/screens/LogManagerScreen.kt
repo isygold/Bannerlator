@@ -174,6 +174,7 @@ fun LogManagerScreen(onClose: () -> Unit) {
     var viewing by remember { mutableStateOf<LogInventory.Entry?>(null) }
     var confirmDelete by remember { mutableStateOf<LogInventory.Entry?>(null) }
     var confirmClearAll by remember { mutableStateOf(false) }
+    var viewingBenchmark by remember { mutableStateOf<java.io.File?>(null) }
     val entries = remember(refreshTick, perGame) { LogInventory.scan(context) }
 
     fun putBool(key: String, v: Boolean) = prefs.edit().putBoolean(key, v).apply()
@@ -435,6 +436,49 @@ fun LogManagerScreen(onClose: () -> Unit) {
                 }
             }
 
+            // ── Benchmark Logs ──────────────────────────────────────────
+            SectionLabel("Benchmark Logs")
+            val benchmarkLogDir = remember { java.io.File(context.filesDir, "benchmark_logs") }
+            val benchmarkLogs = remember(refreshTick) {
+                if (benchmarkLogDir.exists()) {
+                    benchmarkLogDir.listFiles()?.sortedByDescending { it.name } ?: emptyArray()
+                } else emptyArray()
+            }
+            if (benchmarkLogs.isEmpty()) {
+                LogCard {
+                    Text("No benchmark logs yet.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                }
+            } else {
+                benchmarkLogs.forEach { file ->
+                    LogCard {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(file.nameWithoutExtension, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                Text(
+                                    "${String.format("%.1f", file.length() / 1024.0)} KB",
+                                    fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(onClick = { viewingBenchmark = file }) {
+                                    Text("View", fontSize = 12.sp)
+                                }
+                                TextButton(onClick = { shareBenchmarkLog(context, file) }) {
+                                    Text("Share", fontSize = 12.sp)
+                                }
+                                TextButton(onClick = { file.delete(); refreshTick++ }) {
+                                    Text("Delete", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // ── Logs by game ─────────────────────────────────────────────
             SectionLabel("Logs by game")
             if (entries.isEmpty()) {
@@ -500,6 +544,43 @@ fun LogManagerScreen(onClose: () -> Unit) {
         ) {
             Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                 LogViewerScreen(entry = entry, onClose = { viewing = null })
+            }
+        }
+    }
+
+    viewingBenchmark?.let { file ->
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { viewingBenchmark = null },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(file.nameWithoutExtension, style = MaterialTheme.typography.titleMedium)
+                        TextButton(onClick = { viewingBenchmark = null }) { Text("Close") }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    val content = remember(file) {
+                        try { file.readText().takeLast(131072) } catch (_: Exception) { "(unable to read)" }
+                    }
+                    androidx.compose.foundation.text.BasicText(
+                        text = content,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFF1E1E1E))
+                            .padding(8.dp)
+                            .verticalScroll(rememberScrollState()),
+                        style = androidx.compose.ui.text.TextStyle(
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            color = Color(0xFFC8BDB8),
+                        ),
+                    )
+                }
             }
         }
     }
@@ -1182,6 +1263,26 @@ private fun InfoDot(onClick: () -> Unit) {
  * Help copy. Every entry leads with the performance cost, because that is the thing a user needs to
  * decide with — two of these are genuinely expensive to leave on.
  */
+private fun shareBenchmarkLog(context: Context, file: java.io.File) {
+    try {
+        val dir = java.io.File(context.cacheDir, "logs/share").apply { mkdirs() }
+        val copy = java.io.File(dir, file.name)
+        file.copyTo(copy, overwrite = true)
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context, context.packageName + ".tileprovider", copy
+        )
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "Benchmark log: ${file.nameWithoutExtension}")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(send, "Share benchmark log"))
+    } catch (e: Exception) {
+        Toast.makeText(context, "Couldn't share benchmark log.", Toast.LENGTH_SHORT).show()
+    }
+}
+
 private object LogCopy {
     const val PER_GAME =
         "No performance cost.\n\n" +
