@@ -195,7 +195,7 @@ fun BenchmarkScreen(vm: BenchmarkViewModel = viewModel()) {
                         Text("Recommendations", style = MaterialTheme.typography.labelLarge)
                         profilerRecs.forEach { rec ->
                             Text(
-                                text = "• ${rec.title}: ${rec.description}",
+                                text = "• ${rec.key}: ${rec.value}",
                                 style = MaterialTheme.typography.bodySmall,
                                 modifier = Modifier.padding(start = 4.dp, top = 2.dp),
                             )
@@ -209,6 +209,7 @@ fun BenchmarkScreen(vm: BenchmarkViewModel = viewModel()) {
         if (showResults && profilerSession != null) {
             ProfilerResultsDialog(
                 session = profilerSession!!,
+                recommendations = profilerRecs,
                 onApplySettings = { /* save to prefs — open VEGAS config to apply */ },
                 onReProfile = { showResults = false },
                 onDismiss = { showResults = false },
