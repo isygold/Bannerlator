@@ -6396,8 +6396,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
         // Cancel profiler coroutine scope and overlay updater handler
         if (profilerScope != null) {
-            kotlinx.coroutines.Job job = profilerScope.getCoroutineContext().get(kotlinx.coroutines.Job.Key);
-            if (job != null) job.cancel((kotlinx.cancellation.CancellationException) null);
+            com.winlator.star.profiler.ProfilerScopeHelper.cancel(profilerScope);
             profilerScope = null;
         }
         if (profilerHandler != null && profilerOverlayUpdater != null) { profilerHandler.removeCallbacks(profilerOverlayUpdater); profilerHandler = null; profilerOverlayUpdater = null; }
@@ -12688,7 +12687,7 @@ return true;
         rootView.addView(profilerOverlay);
 
         // Start the session on a scoped coroutine (cancelled in onDestroy)
-        profilerScope = new kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO);
+        profilerScope = com.winlator.star.profiler.ProfilerScopeHelper.create();
         profilerSession.start(profilerScope);
 
         // Update overlay every 500ms
